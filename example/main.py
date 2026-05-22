@@ -1,4 +1,7 @@
-from cf import module, on_init, on_start, on_end, ModuleContext, Canary
+import asyncio
+import logging
+
+from cf import module, on_init, on_start, on_end, Context
 from cf.web.fastapi import web, get, WebCanary
 
 from service.db.db_service       import DBService
@@ -6,7 +9,6 @@ from service.user.user_service   import UserService
 from service.dataset.dataset_service        import DataSetService
 from service.dataset.dataset_admin_service  import DataSetAdminService
 
-import logging
 logger = logging.getLogger(__name__)
 
 
@@ -19,12 +21,11 @@ logger = logging.getLogger(__name__)
         DataSetService,
         DataSetAdminService,
     ],
-    config_file_path=".env"
 )
 class AppModule:
 
     @on_init
-    def init(self, ctx: ModuleContext):
+    def init(self, ctx: Context):
         pass
 
     @on_start
@@ -41,4 +42,9 @@ class AppModule:
 
 
 if __name__ == "__main__":
-    WebCanary(AppModule, log_level="debug").start()
+    async def main():
+        app = WebCanary(AppModule)
+        await app.init()
+        await app.start()
+
+    asyncio.run(main())
