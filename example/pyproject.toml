@@ -1,0 +1,11 @@
+[project]
+name = "example"
+version = "0.1.0"
+description = "Canary-Framework-example"
+requires-python = ">=3.12"
+dependencies = [
+    "cf[web]>=0.1.0",
+]
+
+[tool.uv.sources]
+cf = { path = "../lib/canary_framework", editable = true }
