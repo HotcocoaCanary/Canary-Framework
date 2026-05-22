@@ -1,6 +1,6 @@
 import logging
 
-from cf import service, on_init, on_start, on_end, ServiceContext
+from cf import service, on_init, on_start, on_end, Context
 
 from service.db.db_service import DBService
 from service.user.user_service import UserService
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class DataSetAdminService:
 
     @on_init
-    def init(self, ctx: ServiceContext):
+    def init(self, ctx: Context):
         pass
 
     @on_start

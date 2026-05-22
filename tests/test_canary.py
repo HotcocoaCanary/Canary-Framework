@@ -1,3 +1,5 @@
+import asyncio
+
 from cf.core import service, on_init, on_start, on_end, Canary, module
 
 _log: list[str] = []
@@ -28,13 +30,24 @@ import pytest
 @pytest.fixture(autouse=True)
 def _r(): _log.clear()
 
-def test_startup_order():
-    Canary(M).start()
+
+async def test_startup_order():
+    app = Canary(M)
+    await app.init()
+    await app.start()
     assert _log.index("a:init") < _log.index("b:init")
 
-def test_dep_injection():
-    c = Canary(M); c.start()
-    assert c._registry.get_by_name("b").instance._ok == "a"
 
-def test_shutdown():
-    c = Canary(M); c.start(); _log.clear(); c.stop(); Canary(M).start()
+async def test_dep_injection():
+    app = Canary(M)
+    await app.init()
+    await app.start()
+    assert app._registry.get_by_name("b").instance._ok == "a"
+
+
+async def test_shutdown():
+    app = Canary(M)
+    await app.init()
+    await app.start()
+    _log.clear()
+    await app.stop()

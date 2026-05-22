@@ -1,6 +1,6 @@
 import logging
 
-from cf import service, on_init, on_start, on_end, ServiceContext
+from cf import service, on_init, on_start, on_end, Context
 from cf.web.fastapi import web
 
 from service.db.db_service import DBService
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class DataSetService:
 
     @on_init
-    def init(self, ctx: ServiceContext):
+    def init(self, ctx: Context):
         pass
 
     @on_start

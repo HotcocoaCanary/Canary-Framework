@@ -1,6 +1,6 @@
 import logging
 
-from cf import service, on_init, on_start, on_end, ServiceContext
+from cf import service, on_init, on_start, on_end, Context
 
 from service.db.db_config import DBConfig
 
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 class DBService:
 
     @on_init
-    def init(self, ctx: ServiceContext):
+    def init(self, ctx: Context):
         logger.info(f"DBService init with url={ctx.config.url}")
 
     @on_start
