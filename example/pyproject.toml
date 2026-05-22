@@ -8,4 +8,4 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-cf = { path = "../lib/canary_framework", editable = true }
+cf = { git = "git+ssh://git@github.com/HotcocoaCanary/Canary-Framework.git", branch = "main" }
