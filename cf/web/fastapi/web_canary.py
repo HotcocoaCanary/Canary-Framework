@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import inspect
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI
 
@@ -17,24 +16,23 @@ from cf.web.fastapi.decorators.web import is_web, get_web_routers
 
 
 class WebCanary(Canary):
-    # Web 层启动引擎：继承 Canary，仅重写 start() 以接入 FastAPI + Uvicorn
-    # init() 和 stop() 直接复用父类，无需重写
-
-    def __init__(
-        self,
-        target: type,
-        *,
-        fastapi_kwargs: dict[str, Any] | None = None,
-    ) -> None:
-        super().__init__(target)                   # 复用 Canary 全部初始化逻辑
-        self._fastapi_kwargs = fastapi_kwargs or {}  # FastAPI 构造参数
+    # Web 层启动引擎：继承 Canary，仅重写 start() 接入 FastAPI + Uvicorn
+    # 所有参数（host、port、title、version 等）均从根模块的 @config 类读取
 
     async def start(self) -> None:
-        # 从根模块的配置读 host / port，无配置用默认值
+        # 从根模块配置读取所有参数
         root_entry = self.registry.get_by_class(self._target)
         root_config = root_entry.config_instance
-        host = getattr(root_config, "host", "0.0.0.0") if root_config else "0.0.0.0"
-        port = getattr(root_config, "port", 8000) if root_config else 8000
+
+        # host / port 固定给 uvicorn，其余全透传给 FastAPI()
+        if root_config is not None:
+            cfg = {k: v for k, v in vars(root_config).items()
+                   if not k.startswith("_")}
+            host = cfg.pop("host", "0.0.0.0")
+            port = cfg.pop("port", 8000)
+            fastapi_kwargs = cfg
+        else:
+            host, port, fastapi_kwargs = "0.0.0.0", 8000, {}
 
         # lifespan：将 Canary 生命周期与 HTTP 服务器绑定
         @asynccontextmanager
@@ -45,7 +43,7 @@ class WebCanary(Canary):
             yield
             await self.stop()                  # 父类 stop：触发 on_end 钩子
 
-        fastapi_app = FastAPI(lifespan=lifespan, **self._fastapi_kwargs)
+        fastapi_app = FastAPI(lifespan=lifespan, **fastapi_kwargs)
 
         import uvicorn
         config = uvicorn.Config(fastapi_app, host=host, port=port)
