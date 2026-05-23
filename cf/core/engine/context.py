@@ -1,71 +1,87 @@
-# 启用 PEP 563 延迟类型注解求值
+"""统一运行时上下文 —— 服务、模块、路由类的运行时句柄。
+
+通过 parent 链实现向上委托: 配置和依赖解析沿模块树逐级查找。
+Context 公开三项能力: config（配置）、service（服务实例）、resolve（依赖解析）。
+
+Context 层次:
+    EngineContext (未来扩展) → 根模块 Context → 子模块 Context → 服务 Context
+"""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # 仅在类型检查时导入，避免运行时的循环引用
     from cf.core.registry.registry import Registry, ServiceEntry
 
 
 class Context:
-    # 统一运行时上下文，服务和模块共用。
-    # 通过 parent 链实现向上查找：config 找不到 → 找父模块的 config；resolve 找不到 → 找父模块注册的子服务。
+    """统一运行时上下文，通过 parent 链提供配置查找和服务解析。
+
+    服务和模块的 on_init 钩子以及路由类的 __init__ 均接收此 Context 对象。
+
+    Attributes:
+        config:  沿 parent 链向上查找第一个有 config_instance 的节点。
+        service: 当前 Context 绑定的服务/模块实例。
+        resolve: 沿 parent 链在父模块的 sub_services 中查找已注册的服务实例。
+    """
 
     def __init__(
         self,
-        entry: ServiceEntry,         # 当前上下文绑定的注册项（服务或模块）
-        parent: Context | None,      # 父上下文，根模块为 None。形成树链：根模块 → 子模块 → 服务
-        registry: Registry,          # 全局注册表，供 resolve() 根据类型获取实例
+        entry: ServiceEntry,         # 绑定的注册项
+        parent: Context | None,      # 父模块的 Context，根模块为 None
+        registry: Registry,          # 全局注册表，供 resolve() 使用
     ) -> None:
-        self._entry = entry            # 绑定到的 ServiceEntry
-        self._parent = parent          # 父模块上下文（沿此链向上查找 config 和服务）
-        self._registry = registry      # 全局注册表
-
-    # ── config：沿父链向上查找配置实例 ─────────────────────
+        self._entry = entry
+        self._parent = parent
+        self._registry = registry
 
     @property
     def config(self) -> object:
-        # 从当前节点开始，沿 parent 链向上遍历
+        """沿 parent 链向上查找第一个已加载的配置实例。
+
+        查找策略: 当前节点有 config_instance → 返回；否则沿 parent 链上溯。
+        整条链路都没有配置时抛出 RuntimeError。
+
+        Raises:
+            RuntimeError: 整条 parent 链都未找到配置实例。
+        """
         cur = self
         while cur is not None:
-            # 如果当前 Context 绑定的 entry 有配置实例，直接返回
             if cur._entry is not None and cur._entry.config_instance is not None:
                 return cur._entry.config_instance
-            # 当前没有，上溯到父模块上下文继续查找
             cur = cur._parent
-        # 整条链路都没有配置，抛出异常
         raise RuntimeError("No config bound to this context chain.")
-
-    # ── service：当前上下文绑定的服务/模块实例 ─────────────
 
     @property
     def service(self) -> object:
-        # 直接暴露 entry 中的实例对象（服务或模块的运行时实例）
+        """当前上下文绑定的服务/模块的运行时实例。"""
         return self._entry.instance
 
-    # ── resolve：沿父链向上查找已注册的子服务 ──────────────
-
     def resolve(self, svc_cls: type) -> object:
-        # 获取目标服务的名称（@service 或 @module 声明的 name）
-        name = getattr(svc_cls, '__cf_name__', svc_cls.__name__)
+        """沿 parent 链在父模块的 sub_services 中查找并返回指定类型的服务实例。
 
-        # 沿 parent 链从当前节点向上逐级查找
+        查找策略: 从当前节点开始，沿 parent 链向上，检查每个模块的 sub_services
+        列表，按 __cf_name__ 匹配类名。找到后通过 Registry 返回运行时实例。
+
+        Args:
+            svc_cls: 要查找的 @service 或 @module 装饰的类。
+
+        Returns:
+            该类的运行时实例。
+
+        Raises:
+            KeyError: 整个 parent 链中均未找到该服务。
+        """
+        name = getattr(svc_cls, '__cf_name__', svc_cls.__name__)
         cur = self
         while cur is not None:
             entry = cur._entry
-            # 只有模块才有 sub_services，服务节点的 sub_services 为空
             if entry is not None and entry.is_module:
-                # 遍历当前模块注册的所有子服务
                 for sub_cls in entry.sub_services:
-                    # 按 __cf_name__ 比对（与注册表中的名称一致）
                     if getattr(sub_cls, '__cf_name__', '') == name:
-                        # 找到后通过全局注册表获取其运行时实例
                         return self._registry.get_instance(sub_cls)
-            # 当前模块未找到，上溯父模块
             cur = cur._parent
 
-        # 整个父链都没找到该服务
         raise KeyError(
             f"Service '{name}' not found in this module or any parent module. "
             f"Ensure it is registered as a sub-service of a parent @module."

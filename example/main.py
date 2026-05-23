@@ -13,11 +13,14 @@ from service.dataset.dataset_admin_service  import DataSetAdminService
 logger = logging.getLogger(__name__)
 
 
-# 可选：为根模块声明配置（host、port 等服务器参数）
+# 可选：为根模块声明配置（按前缀区分用途）
 @config
 class AppConfig:
-    host: str = "0.0.0.0"
-    port: int = 8000
+    uvicorn_host: str = "0.0.0.0"     # uvicorn_server: host
+    uvicorn_port: int = 8000           # uvicorn_server: port
+    fastapi_title: str = "My App"     # FastAPI: title
+    fastapi_version: str = "1.0.0"   # FastAPI: version
+    # 无前缀 = 业务配置
 
 
 @web()

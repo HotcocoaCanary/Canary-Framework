@@ -1,46 +1,46 @@
-# 启用 PEP 563 延迟类型注解求值（Python 3.10+ 默认行为）
-# 允许在类型注解中使用尚未定义的前向引用，避免循环导入问题
+"""@config 装饰器 —— 将普通类转换为 pydantic-settings BaseSettings 子类。
+
+转换后的类自动读取环境变量和 .env 文件（内置 env_file=".env"）。
+配置字段优先级: 环境变量 > .env 文件 > 默认值。
+
+Usage:
+    @config
+    class AppConfig:
+        host: str = "0.0.0.0"
+        port: int = 8000
+"""
 from __future__ import annotations
 
-# BaseSettings：pydantic-settings 的基类，自动从环境变量和 .env 文件加载配置
-# SettingsConfigDict：用于配置 BaseSettings 的行为（env_file、编码、extra 策略等）
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def config(cls: type) -> type:
-    # 1. 提取原始类中用户声明的类型注解（例如 host: str, port: int）
-    #    这些注解会被 BaseSettings 用来确定环境变量名映射和类型转换
+    """将普通类转为 BaseSettings 子类，使其具备自动配置加载能力。
+
+    动态创建逻辑:
+        1. 提取原始类的 __annotations__ 作为 pydantic 的字段声明
+        2. 提取原始类的类变量作为字段默认值
+        3. SettingsConfigDict(env_file=".env") 让 pydantic-settings 自动读取 .env
+        4. 用 type() 动态构造新类，保持原始类的 __name__ / __qualname__ / __module__
+
+    参数可以是无括号装饰器 @config 或有括号 @config()，效果相同。
+    """
+    # 提取用户定义的类型注解（pydantic 按此推断字段类型和环境变量映射）
     annotations = getattr(cls, "__annotations__", {})
 
-    # 2. 声明父类元组，只包含 BaseSettings，使动态创建的类继承其自动配置加载能力
-    bases = (BaseSettings,)
-
-    # 3. 使用 type() 动态构造一个新的 BaseSettings 子类
-    #    新类的名称与原类相同，但类的实际来源换为 BaseSettings
     settings_cls = type(
-        cls.__name__,    # 新类的名称（与原类保持一致）
-        bases,           # 新类的父类（只有 BaseSettings）
+        cls.__name__,
+        (BaseSettings,),
         {
-            # 将原始类的类型注解原样复制到新类中
-            # BaseSettings 会读取 __annotations__ 来识别哪些字段应从环境变量加载
             "__annotations__": annotations,
-
-            # model_config 控制 BaseSettings 的行为
+            # BaseSettings 的行为配置
             "model_config": SettingsConfigDict(
-                # env_file=".env"：pydantic-settings 自动从当前目录的 .env 文件加载
-                env_file=".env",
-                # .env 文件使用 UTF-8 编码
+                env_file=".env",            # 自动从当前目录 .env 读取
                 env_file_encoding="utf-8",
-                # extra="ignore"：如果在 .env 或环境变量中出现了未声明的键，直接忽略而不报错
-                extra="ignore",
-                # env_prefix=""：无前缀匹配，配置字段名直接对应环境变量名
-                env_prefix="",
+                extra="ignore",             # 忽略未声明的环境变量
+                env_prefix="",              # 无前缀，字段名直接对应环境变量键
             ),
-
-            # 将原始类中用户定义的类变量复制到新类中，作为字段默认值
-            # 例如 host: str = "0.0.0.0" → 新类中 host 字段默认值为 "0.0.0.0"
-            # 排除名称为双下划线开头的 Python 内置属性（__module__, __qualname__ 等）
-            # 以及 __annotations__ 本身（已在上面单独处理）
+            # 将原始类的类变量（默认值）复制到新类
             **{
                 k: v
                 for k, v in vars(cls).items()
@@ -49,11 +49,9 @@ def config(cls: type) -> type:
         },
     )
 
-    # 4. 覆盖 type() 自动设置的元信息，保持与原类一致，方便调试和日志输出
-    settings_cls.__name__ = cls.__name__          # 类名
-    settings_cls.__qualname__ = cls.__qualname__  # 完整限定名（含外覆类/函数）
-    settings_cls.__module__ = cls.__module__      # 所属模块路径
+    # 保持元信息一致，方便调试和日志
+    settings_cls.__name__ = cls.__name__
+    settings_cls.__qualname__ = cls.__qualname__
+    settings_cls.__module__ = cls.__module__
 
-    # 5. 返回动态创建的 BaseSettings 子类
-    #    此后用户用此类做类型标注、构造实例时，会自动读取环境变量和 .env 文件
     return settings_cls
