@@ -65,8 +65,9 @@ from cf.web.fastapi import web, get, router, WebCanary
 # 配置
 @config
 class AppConfig:
-    host: str = "0.0.0.0"
-    port: int = 8000
+    uvicorn_host: str = "0.0.0.0"
+    uvicorn_port: int = 8000
+    fastapi_title: str = "My API"
 
 # 路由
 @router(prefix="/api")
@@ -260,20 +261,25 @@ def init(self, ctx: Context):
 
 ### 服务器、FastAPI 参数也走配置
 
-根模块的 `@config` 类承载所有引擎级参数。`host` / `port` 给 uvicorn，其余字段自动透传给 `FastAPI()` 构造函数：
+根模块的 `@config` 类通过**前缀**区分参数归属：
+
+- `uvicorn_*` → uvicorn.Config / uvicorn.Server
+- `fastapi_*` → FastAPI() 构造函数
+- 无前缀 → 业务配置（框架不触碰）
 
 ```python
 @config
 class AppConfig:
-    host: str = "0.0.0.0"       # uvicorn
-    port: int = 8000             # uvicorn
-    title: str = "My API"        # → FastAPI(title="My API")
-    version: str = "1.0.0"       # → FastAPI(version="1.0.0")
-    docs_url: str | None = None  # → 可关闭文档
-    db_url: str = "..."          # 业务配置
+    uvicorn_host: str = "0.0.0.0"      # → uvicorn(host="0.0.0.0")
+    uvicorn_port: int = 8000            # → uvicorn(port=8000)
+    uvicorn_workers: int = 1            # → uvicorn(workers=1)
+    fastapi_title: str = "My API"       # → FastAPI(title="My API")
+    fastapi_version: str = "1.0.0"     # → FastAPI(version="1.0.0")
+    fastapi_docs_url: str | None = None # → 关闭文档
+    db_url: str = "..."                 # 业务配置（无前缀）
 ```
 
-WebCanary 自动从配置中提取：`host`/`port` 自用，其余字段原样传入 `FastAPI(**)`。
+WebCanary 自动按前缀拆分、去前缀后分发给对应消费者。
 
 ---
 
@@ -489,19 +495,19 @@ await app.stop()    # 逆序调用 on_end
 
 #### `WebCanary(target: type)`
 
-继承自 Canary，仅重写 `start()` 接入 FastAPI + Uvicorn。所有参数（host、port、title、version 等）均从根模块的 @config 类读取。
+继承自 Canary，仅重写 `start()` 接入 FastAPI + Uvicorn。按前缀从根模块 @config 分发参数：`uvicorn_*` → uvicorn，`fastapi_*` → FastAPI()。
 
 ```python
 @config
 class AppConfig:
-    host: str = "0.0.0.0"          # 供 uvicorn 使用
-    port: int = 8000                # 供 uvicorn 使用
-    title: str = "My API"           # 以下自动透传给 FastAPI()
-    version: str = "1.0.0"
+    uvicorn_host: str = "0.0.0.0"
+    uvicorn_port: int = 8000
+    fastapi_title: str = "My API"
+    fastapi_version: str = "1.0.0"
 
 app = WebCanary(MyModule)
-await app.init()    # 继承自 Canary.init
-await app.start()   # 启动 FastAPI 服务器（阻塞直到停止）
+await app.init()
+await app.start()
 ```
 
 #### `Context(entry, parent, registry)`

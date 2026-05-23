@@ -1,3 +1,7 @@
-# 从 cf.core 包中导入所有公开 API（config, service, module, on_init, on_start, on_end, Canary, Context）
-# 这样用户只需 `from cf import Canary, service, ...` 即可使用框架的全部核心功能
+"""CF 框架 —— 轻量级 Python 服务框架。
+
+核心导出:
+    - 装饰器: config, service, module, on_init, on_start, on_end
+    - 引擎:   Canary, Context
+"""
 from cf.core import *

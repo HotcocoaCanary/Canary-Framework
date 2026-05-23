@@ -1,50 +1,53 @@
-# 启用 PEP 563 延迟类型注解求值
+"""服务装饰器 —— 将类声明为 CF 框架的服务（最小运行单元）。
+
+服务通过 name 标识自身，通过 deps 声明依赖关系。
+依赖的服务实例由框架自动注入为 snake_case 属性名。
+"""
 from __future__ import annotations
 
 from typing import Any
 
-# --- 服务装饰器的标记属性名 ---
-# __cf_service__ 标记类是否为 @service 装饰的服务
-_CF_SERVICE_ATTR = "__cf_service__"
-# __cf_service_meta__ 存储服务的元数据（名称、依赖列表、配置类）
-_CF_SERVICE_META = "__cf_service_meta__"
+_CF_SERVICE_ATTR = "__cf_service__"       # 标记: 属于 CF 服务
+_CF_SERVICE_META = "__cf_service_meta__"  # 存储: 元数据字典
 
 
 def service(
-    name: str,                      # 服务名称，全局唯一，用于依赖声明和注册表索引
-    *,                              # * 之后为仅关键字参数
-    config: type | None = None,     # 服务自身的配置类（@config 装饰的），None 表示无配置或继承父级
-    deps: list[type] | None = None,  # 依赖的其他服务类列表，框架会自动注入这些依赖的实例
+    name: str,                      # 服务名称，全局唯一
+    *,
+    config: type | None = None,     # @config 装饰的配置类（可选）
+    deps: list[type] | None = None,  # 依赖的服务类列表（可选）
 ):
-    # 保存参数防止闭包引用后续变化
+    """将类声明为 CF 框架的服务。
+
+    在类上设置 __cf_service__ = True 标记和 __cf_service_meta__ 元数据字典。
+    框架在 _collect 阶段识别这些标记并注册该服务。
+
+    Args:
+        name: 服务名称，全局唯一，用于依赖声明和名称索引。
+        config: @config 装饰的配置类，None 时从父模块继承。
+        deps: 依赖的服务类列表，框架自动将其实例注入为 snake_case 属性。
+
+    Returns:
+        内层装饰器函数。
+    """
     _config = config
     _deps = deps or []
 
     def decorator(cls: type) -> type:
-        # 构建服务元数据字典，供后续的依赖注入、注册、排序等阶段使用
-        meta = {
-            "name": name,       # 服务名称
-            "deps": _deps,      # 依赖的服务类列表（用于依赖注入和拓扑排序）
-            "config_cls": _config,  # 配置类
-        }
-
-        # 在原始类上设置三个标记属性
-        setattr(cls, _CF_SERVICE_ATTR, True)  # 标记：这是一个服务类
-        setattr(cls, _CF_SERVICE_META, meta)   # 标记：存储服务的完整元数据
-        cls.__cf_name__ = name                # 将名称也存储在 __cf_name__ 属性上，方便快速访问
-
+        meta = {"name": name, "deps": _deps, "config_cls": _config}
+        setattr(cls, _CF_SERVICE_ATTR, True)
+        setattr(cls, _CF_SERVICE_META, meta)
+        cls.__cf_name__ = name
         return cls
 
     return decorator
 
 
 def is_cf_service(cls: type) -> bool:
-    # 检查类对象上是否存在 __cf_service__ = True 标记
-    # bool() 确保返回 True/False 而非 None
+    """判断类是否被 @service 装饰过。"""
     return bool(getattr(cls, _CF_SERVICE_ATTR, False))
 
 
 def get_service_meta(cls: type) -> dict[str, Any]:
-    # 获取服务的元数据字典（包含 name, deps, config_cls）
-    # 如果不是服务，getattr 返回空字典 {}
+    """获取 @service 装饰器设置的元数据字典。"""
     return getattr(cls, _CF_SERVICE_META, {})
