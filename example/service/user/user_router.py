@@ -1,10 +1,11 @@
-from cf.web.fastapi import router, get, post, RouterContext
+from cf import Context
+from cf.web.fastapi import router, get, post
 
 
 @router(prefix="/users")
 class UserRouter:
 
-    def __init__(self, ctx: RouterContext):
+    def __init__(self, ctx: Context):
         self.svc = ctx.service
         self.db  = ctx.service.db_service        # UserService 的 deps 已自动注入
 

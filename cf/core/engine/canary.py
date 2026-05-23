@@ -1,16 +1,8 @@
-"""
-Canary 核心引擎 —— 负责整个框架的启动生命周期编排。
-
-设计原则：
-    - _collect: 只做 class 级别的收集和 config_cls 继承（子服务未声明 config → 继承父模块的）
-    - _init:   只做实例级别的事：依赖注入 → 用根 config_file_path 实例化配置 → on_init 钩子
-    - 所有服务/模块统一从 Canary.init(config_file_path=".env") 传入的路径加载配置，不存在任何配置路径传播
-"""
+# 启用 PEP 563 延迟类型注解求值
 from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 
 from cf.core.decorators.lifecycle import find_hooks
 from cf.core.decorators.module import is_cf_module, get_module_meta
@@ -23,74 +15,77 @@ from cf.core.registry.registry import Registry, ServiceEntry
 logger = logging.getLogger("cf")
 
 
-def _instantiate_config(config_cls: type | None, env_file: str) -> object | None:
-    """实例化 @config 类，通过 _env_file 加载指定的 .env 文件。"""
-    if config_cls is None:
-        return None
-    resolved = str(Path(env_file).resolve())
-
-    return config_cls(_env_file=resolved)  # type: ignore[call-arg]
-
-
 class Canary:
-    """Canary 引擎 —— 服务/模块的启动与停止编排器。"""
 
     def __init__(self, target: type) -> None:
-        self._target = target
-        self._registry = Registry()
-        self._startup_order: list[str] = []
+        self._target = target               # 根模块/服务类
+        self._registry = Registry()         # 注册中心
+        self._startup_order: list[str] = [] # 拓扑排序后的名称列表
 
-    async def init(self, config_file_path: str = ".env") -> None:
-        """
-        初始化阶段。
+    @property
+    def registry(self) -> Registry:
+        # 公开 Registry，供子类（WebCanary）和外部访问
+        return self._registry
 
-        参数：
-            config_file_path: 全局唯一的配置文件路径，所有服务/模块统一从此加载配置
+    # ── 公开生命周期方法 ─────────────────────────────────
 
-        流程：
-            1. _collect:  递归发现所有 class → 注册到 Registry → 完成 config_cls 继承
-            2. _validate: 校验依赖完整性
-            3. 拓扑排序:  计算启动顺序
-            4. _init:     按拓扑序逐一初始化实例
-        """
-        self._root_config_path = config_file_path
+    async def init(self) -> None:
+        # 阶段0：递归收集 → 注册 → 父子关系 → config_cls 继承
         self._collect(self._target)
+
+        # 阶段1：校验依赖
         self._validate()
+
+        # 阶段2：拓扑排序
         self._startup_order = topological_sort(self._registry)
 
+        # 阶段3：构建 Context 链
+        self._build_context_tree(self._target, parent_ctx=None)
+
+        # 阶段4：按拓扑序注入依赖 → 加载配置 → 调 on_init
         for name in self._startup_order:
             entry = self._registry.get_by_name(name)
-            await self._init(entry)
+            inject_deps(entry.instance, entry, self._registry)
+
+            # 配置由 pydantic-settings 自动加载：
+            #   @config 装饰器已在 model_config 中设置 env_file=".env"
+            #   用户只需在 @config 类中声明字段和默认值，pydantic-settings 自动读取环境变量和 .env 文件
+            if entry.config_cls is not None:
+                entry.config_instance = entry.config_cls()
+
+            await self._call_hook(entry, "on_init", entry.context)
 
     async def start(self) -> None:
-        """启动阶段 —— 按拓扑序调用 @on_start 钩子。"""
+        # 按拓扑序调 on_start
         for name in self._startup_order:
-            entry = self._registry.get_by_name(name)
-            await self._start(entry)
+            await self._call_hook(self._registry.get_by_name(name), "on_start")
 
     async def stop(self) -> None:
-        """停止阶段 —— 按拓扑序逆序调用 @on_end 钩子。"""
+        # 按逆序调 on_end
         for name in reversed(self._startup_order):
-            entry = self._registry.get_by_name(name)
-            await self._stop(entry)
+            await self._call_hook(self._registry.get_by_name(name), "on_end")
 
-    # ── _collect ──────────────────────────────────────────────
+    # ── 统一钩子调用 ────────────────────────────────────
+
+    @staticmethod
+    async def _call_hook(entry: ServiceEntry, hook_name: str, *args: object) -> None:
+        # 钩子只查找一次，缓存在 entry._hooks 上
+        if entry._hooks is None:
+            entry._hooks = find_hooks(entry.instance)
+        fn = entry._hooks.get(hook_name)
+        if fn is None:
+            return
+        result = fn(*args)
+        if asyncio.iscoroutine(result):
+            await result
+
+    # ── _collect ─────────────────────────────────────────
 
     def _collect(
-            self,
-            cls: type,
-            parent_module: ServiceEntry | None = None,
+        self,
+        cls: type,
+        parent_entry: ServiceEntry | None = None,
     ) -> None:
-        """
-        递归收集服务/模块 class，注册到 Registry。
-
-        模块和服务共用同一套注册 + config_cls 继承逻辑，
-        唯一区别：模块会递归收集其 services 列表中的子节点。
-
-        参数：
-            cls:           当前要注册的类
-            parent_module: 父模块的 ServiceEntry，用于 config_cls 继承
-        """
         if self._registry.has(cls):
             return
 
@@ -98,17 +93,18 @@ class Canary:
             meta = get_module_meta(cls)
             self._registry.register(cls, is_module=True, meta=meta)
             entry = self._registry.get_by_class(cls)
-            self._inherit_config(entry, parent_module)
-
+            entry.parent_entry = parent_entry
+            self._inherit_config(entry, parent_entry)
             for sub_cls in meta.get("services", []):
-                self._collect(sub_cls, parent_module=entry)
+                self._collect(sub_cls, parent_entry=entry)
             return
 
         if is_cf_service(cls):
             meta = get_service_meta(cls)
             self._registry.register(cls, is_module=False, meta=meta)
             entry = self._registry.get_by_class(cls)
-            self._inherit_config(entry, parent_module)
+            entry.parent_entry = parent_entry
+            self._inherit_config(entry, parent_entry)
             return
 
         raise TypeError(
@@ -116,16 +112,29 @@ class Canary:
         )
 
     def _inherit_config(
-            self, entry: ServiceEntry, parent_module: ServiceEntry | None
+        self, entry: ServiceEntry, parent_entry: ServiceEntry | None
     ) -> None:
-        """子服务未声明 config_cls 时，继承父模块的 config_cls。"""
-        if entry.config_cls is None and parent_module is not None:
-            entry.config_cls = parent_module.config_cls
+        if entry.config_cls is None and parent_entry is not None:
+            entry.config_cls = parent_entry.config_cls
 
-    # ── _validate ─────────────────────────────────────────────
+    # ── _build_context_tree ──────────────────────────────
+
+    def _build_context_tree(
+        self,
+        cls: type,
+        parent_ctx: Context | None,
+    ) -> None:
+        entry = self._registry.get_by_class(cls)
+        ctx = Context(entry=entry, parent=parent_ctx, registry=self._registry)
+        entry.context = ctx
+
+        if entry.is_module:
+            for sub_cls in entry.sub_services:
+                self._build_context_tree(sub_cls, parent_ctx=ctx)
+
+    # ── _validate ────────────────────────────────────────
 
     def _validate(self) -> None:
-        """校验 @service(deps=[...]) 中所有依赖是否都已注册。"""
         all_names = set(self._registry.names())
         for entry in self._registry.all_entries():
             for dep_name in entry.dep_names:
@@ -135,46 +144,3 @@ class Canary:
                         f"but '{dep_name}' is not registered. "
                         f"Registered: {sorted(all_names)}"
                     )
-
-    # ── _init ──────────────────────────────────────────────────
-
-    async def _init(self, entry: ServiceEntry) -> None:
-        """
-        单个服务/模块的实例初始化。
-
-        三件事：
-        1. 依赖注入
-        2. 用全局 config_file_path 实例化配置
-        3. 构建上下文 + 调用 @on_init 钩子
-        """
-        inject_deps(entry.instance, entry, self._registry)
-
-        config_instance = _instantiate_config(entry.config_cls, self._root_config_path)
-        entry.config_instance = config_instance
-
-        ctx = Context(config_instance)
-
-        hooks = find_hooks(entry.instance)
-        on_init = hooks.get("on_init")
-        if on_init:
-            result = on_init(ctx)
-            if asyncio.iscoroutine(result):
-                await result
-
-    # ── _start / _stop ─────────────────────────────────────────
-
-    async def _start(self, entry: ServiceEntry) -> None:
-        hooks = find_hooks(entry.instance)
-        on_start = hooks.get("on_start")
-        if on_start:
-            result = on_start()
-            if asyncio.iscoroutine(result):
-                await result
-
-    async def _stop(self, entry: ServiceEntry) -> None:
-        hooks = find_hooks(entry.instance)
-        on_end = hooks.get("on_end")
-        if on_end:
-            result = on_end()
-            if asyncio.iscoroutine(result):
-                await result
