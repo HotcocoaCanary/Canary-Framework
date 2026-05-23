@@ -258,17 +258,22 @@ def init(self, ctx: Context):
     ctx.config.pool_size  # → 20
 ```
 
-### 服务器参数也走配置
+### 服务器、FastAPI 参数也走配置
+
+根模块的 `@config` 类承载所有引擎级参数。`host` / `port` 给 uvicorn，其余字段自动透传给 `FastAPI()` 构造函数：
 
 ```python
 @config
 class AppConfig:
-    host: str = "0.0.0.0"    # HOST 环境变量或 .env 覆盖
-    port: int = 8000          # PORT 环境变量或 .env 覆盖
-    db_url: str = "..."       # 业务配置同理
+    host: str = "0.0.0.0"       # uvicorn
+    port: int = 8000             # uvicorn
+    title: str = "My API"        # → FastAPI(title="My API")
+    version: str = "1.0.0"       # → FastAPI(version="1.0.0")
+    docs_url: str | None = None  # → 可关闭文档
+    db_url: str = "..."          # 业务配置
 ```
 
-WebCanary 直接读 `config.host` / `config.port`，框架不再单独传参。
+WebCanary 自动从配置中提取：`host`/`port` 自用，其余字段原样传入 `FastAPI(**)`。
 
 ---
 
@@ -482,12 +487,19 @@ await app.start()   # 拓扑序调用 on_start
 await app.stop()    # 逆序调用 on_end
 ```
 
-#### `WebCanary(target: type, *, fastapi_kwargs=None)`
+#### `WebCanary(target: type)`
 
-继承自 Canary，仅重写 `start()` 接入 FastAPI + Uvicorn。
+继承自 Canary，仅重写 `start()` 接入 FastAPI + Uvicorn。所有参数（host、port、title、version 等）均从根模块的 @config 类读取。
 
 ```python
-app = WebCanary(MyModule, fastapi_kwargs={"title": "My App"})
+@config
+class AppConfig:
+    host: str = "0.0.0.0"          # 供 uvicorn 使用
+    port: int = 8000                # 供 uvicorn 使用
+    title: str = "My API"           # 以下自动透传给 FastAPI()
+    version: str = "1.0.0"
+
+app = WebCanary(MyModule)
 await app.init()    # 继承自 Canary.init
 await app.start()   # 启动 FastAPI 服务器（阻塞直到停止）
 ```
