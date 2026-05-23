@@ -42,7 +42,7 @@ async def test_dep_injection():
     app = Canary(M)
     await app.init()
     await app.start()
-    assert app._registry.get_by_name("b").instance._ok == "a"
+    assert app.registry.get_by_name("b").instance._ok == "a"
 
 
 async def test_shutdown():

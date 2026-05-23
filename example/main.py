@@ -1,7 +1,8 @@
+# 完整示例：配置 + 依赖注入 + 生命周期 + Web 路由
 import asyncio
 import logging
 
-from cf import module, on_init, on_start, on_end, Context
+from cf import module, on_init, on_start, on_end, Context, config
 from cf.web.fastapi import web, get, WebCanary
 
 from service.db.db_service       import DBService
@@ -12,9 +13,17 @@ from service.dataset.dataset_admin_service  import DataSetAdminService
 logger = logging.getLogger(__name__)
 
 
-@web(routers=[])
+# 可选：为根模块声明配置（host、port 等服务器参数）
+@config
+class AppConfig:
+    host: str = "0.0.0.0"
+    port: int = 8000
+
+
+@web()
 @module(
     name="AppModule",
+    config=AppConfig,            # 可选：声明配置后，WebCanary 从此读取 host/port
     services=[
         DBService,
         UserService,
@@ -24,6 +33,7 @@ logger = logging.getLogger(__name__)
 )
 class AppModule:
 
+    # 可选：生命周期钩子 —— 全部可选
     @on_init
     def init(self, ctx: Context):
         pass
@@ -36,6 +46,7 @@ class AppModule:
     def end(self):
         logger.info("AppModule stopped")
 
+    # 可选：直接在模块上定义 HTTP 端点
     @get("/health")
     async def health(self):
         return {"status": "ok"}
