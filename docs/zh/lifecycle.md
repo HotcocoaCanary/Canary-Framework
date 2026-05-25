@@ -52,7 +52,7 @@ from canary_framework import LifecycleHook
 如果钩子方法抛出异常，框架会包装为 `LifecycleHookError`：
 
 ```python
-from canary_framework.exceptions import LifecycleHookError
+from canary_framework import LifecycleHookError
 
 try:
     await app.init()

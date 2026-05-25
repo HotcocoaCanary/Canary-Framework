@@ -45,7 +45,7 @@ class UserService:
 钩子必须使用装饰器显式标记，框架不会按方法名自动识别：
 
 ```python
-from canary_framework.core.decorators.lifecycle import LifecycleHook
+from canary_framework import LifecycleHook
 
 # LifecycleHook.INIT   → @on_init    (拓扑序，接收 Context)
 # LifecycleHook.START  → @on_start   (拓扑序，无参数)

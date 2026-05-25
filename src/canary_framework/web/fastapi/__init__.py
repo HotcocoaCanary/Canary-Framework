@@ -8,6 +8,7 @@ Public API:
 Requires ``pip install canary-framework[web]``.
 """
 
+from canary_framework.web.fastapi.conductor.web_canary import WebCanary
 from canary_framework.web.fastapi.decorators.router import (
     delete,
     get,
@@ -17,7 +18,6 @@ from canary_framework.web.fastapi.decorators.router import (
     router,
 )
 from canary_framework.web.fastapi.decorators.web import web
-from canary_framework.web.fastapi.web_canary import WebCanary
 
 __all__ = [
     "WebCanary",

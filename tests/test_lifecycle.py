@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from canary_framework.common.enums import LifecycleHook
 from canary_framework.core.decorators.lifecycle import (
-    LifecycleHook,
     find_hooks,
     on_end,
     on_init,

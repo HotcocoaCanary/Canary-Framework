@@ -52,7 +52,7 @@ from canary_framework import LifecycleHook
 If a hook method raises an exception, the framework wraps it in a `LifecycleHookError`:
 
 ```python
-from canary_framework.exceptions import LifecycleHookError
+from canary_framework import LifecycleHookError
 
 try:
     await app.init()

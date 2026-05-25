@@ -1,13 +1,13 @@
-"""Tests for :mod:`canary_framework.core.engine.sorter`."""
+"""Tests for :mod:`canary_framework.core.conductor.sorter`."""
 
 from __future__ import annotations
 
 import pytest
 
+from canary_framework.common.exceptions import CircularDependencyError
+from canary_framework.core.algorithms.sorter import topological_sort
+from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.service import service
-from canary_framework.core.engine.sorter import topological_sort
-from canary_framework.core.registry.registry import Registry
-from canary_framework.exceptions import CircularDependencyError
 
 
 class TestTopologicalSort:

@@ -107,7 +107,7 @@ Unified runtime context. Delegates config lookup and dependency resolution upwar
 All framework exceptions inherit from `CanaryFrameworkError`, allowing unified catching:
 
 ```python
-from canary_framework.exceptions import (
+from canary_framework import (
     CanaryFrameworkError,      # base class
     ConfigurationError,         # config loading/lookup failure
     ServiceNotFoundError,       # service/module not registered
@@ -132,28 +132,41 @@ from canary_framework.exceptions import (
 ```
 src/canary_framework/
 ├── __init__.py
-├── exceptions.py            # framework exception hierarchy
+├── common/
+│   ├── __init__.py
+│   ├── _types.py            # ServiceEntry, ServiceMeta, ModuleMeta
+│   ├── enums.py             # LifecycleHook
+│   └── exceptions.py        # CanaryFrameworkError & subclasses
 ├── core/
+│   ├── __init__.py
 │   ├── decorators/
+│   │   ├── __init__.py
 │   │   ├── config.py        # @config (built-in env_file=".env")
-│   │   ├── service.py       # @service + ServiceMeta TypedDict
-│   │   ├── module.py        # @module + ModuleMeta TypedDict
-│   │   └── lifecycle.py     # @on_init/start/end + LifecycleHook StrEnum
-│   ├── engine/
-│   │   ├── canary.py        # Canary engine (startup orchestration + log sanitization)
-│   │   ├── context.py       # Context (type-safe config/service access)
-│   │   ├── injector.py      # Dependency injection (DependencyInjectionError)
-│   │   └── sorter.py        # Topological sort (CircularDependencyError)
-│   ├── registry/
-│   │   └── registry.py      # Registry (dataclass(slots=True) ServiceEntry)
-│   └── utils/
-│       └── naming.py        # Naming utility (CamelCase → snake_case)
+│   │   ├── lifecycle.py     # @on_init, @on_start, @on_end
+│   │   ├── module.py        # @module
+│   │   └── service.py       # @service
+│   ├── conductor/
+│   │   ├── __init__.py
+│   │   ├── canary.py        # Canary engine
+│   │   └── context.py       # Context
+│   ├── algorithms/
+│   │   ├── __init__.py
+│   │   ├── injector.py      # dependency injection
+│   │   ├── sorter.py        # topological sort
+│   │   └── naming.py        # naming utilities
+│   └── container/
+│       ├── __init__.py
+│       └── registry.py      # service registry
 └── web/
     └── fastapi/
-        ├── web_canary.py    # WebCanary engine (default 127.0.0.1)
+        ├── __init__.py
+        ├── conductor/
+        │   ├── __init__.py
+        │   └── web_canary.py # WebCanary engine
         └── decorators/
-            ├── web.py       # @web
-            └── router.py    # @router, @get, @post, ...
+            ├── __init__.py
+            ├── router.py    # @router, @get, @post, ...
+            └── web.py       # @web
 ```
 
 ## Initialization Flow

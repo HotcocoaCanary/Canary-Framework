@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from canary_framework.exceptions import (
+from canary_framework.common.exceptions import (
     CanaryFrameworkError,
     CircularDependencyError,
     ConfigurationError,

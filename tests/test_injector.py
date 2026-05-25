@@ -1,13 +1,13 @@
-"""Tests for :mod:`canary_framework.core.engine.injector`."""
+"""Tests for :mod:`canary_framework.core.conductor.injector`."""
 
 from __future__ import annotations
 
 import pytest
 
+from canary_framework.common.exceptions import DependencyInjectionError
+from canary_framework.core.algorithms.injector import inject_deps
+from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.service import service
-from canary_framework.core.engine.injector import inject_deps
-from canary_framework.core.registry.registry import Registry
-from canary_framework.exceptions import DependencyInjectionError
 
 
 class TestInjectDeps:

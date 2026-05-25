@@ -1,8 +1,0 @@
-[project]
-name = "example"
-version = "0.1.0"
-description = "Canary-Framework-example"
-requires-python = ">=3.12"
-dependencies = [
-    "canary-framework[web]>=0.1.2",
-]

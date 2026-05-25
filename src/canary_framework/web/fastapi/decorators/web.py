@@ -1,16 +1,27 @@
 """``@web`` decorator — marks a service/module as a Web endpoint.
 
-Declares which ``@router`` classes handle HTTP routing for this
-service or module.  The relationship between ``@web`` and ``@router``:
+声明哪些 ``@router`` 类为此服务或模块处理 HTTP 路由。
 
-    ``@web(routers=[UserRouter])``  — declares the routers used
-    ``@router(prefix="/api")``     — groups route methods under a prefix
+设计思路 (Design rationale):
+    为什么需要 ``@web`` 而不仅靠 ``@router`` 自动发现？
+    （Why ``@web`` instead of auto-discovering ``@router``?）
 
-Routing rules (applied by :func:`_register_routes`):
-    1. Has ``routers=[]`` → registers the methods of each ``@router`` class.
-    2. No routers + ``@module`` / ``@service`` → registers any ``@get`` /
-       ``@post`` methods defined directly on the class.
-    3. Has ``routers=[]`` + ``@module`` → registers both.
+    1. **显式优于隐式**：服务可能导入 Router 类但不想暴露为 HTTP 端点
+       Explicit is better than implicit: a service may import a Router
+       class without wanting to expose it as an HTTP endpoint.
+    2. **性能**：自动扫描所有类的属性来找 @router 装饰类是 O(n) 操作
+       Performance: scanning all registered classes for @router would be O(n).
+    3. **Router 列表在类定义时已知**，无需运行时反射
+       The router list is known at class definition time.
+
+关系 (Relationship):
+    ``@web(routers=[UserRouter])``  — 声明使用哪些路由类
+    ``@router(prefix="/api")``    — 路由类声明，定义 URL 前缀和 HTTP 方法
+
+路由注册规则 (Register rules):
+    1. 有 ``routers=[]`` → 注册每个 Router 的方法
+    2. 无 routers + ``@module`` / ``@service`` → 注册类自身定义的 HTTP 方法
+    3. 有 routers + ``@module`` → 同时注册
 """
 
 from __future__ import annotations
@@ -21,18 +32,22 @@ _WEB_ATTR = "__cf_web__"
 """Set to ``True`` on classes decorated with ``@web``."""
 
 _WEB_ROUTERS = "__cf_web_routers__"
-"""Stores the list of ``@router``-decorated classes."""
+"""Stores the list of ``@router``-decorated classes declared via ``routers=[]``."""
 
 
 def web(routers: list[type] | None = None) -> Callable[[type], type]:
     """Mark a service or module as a Web endpoint.
 
+    标记服务/模块为 Web 端点。
+
     Args:
-        routers: A list of ``@router``-decorated classes whose HTTP
-            methods should be registered with FastAPI.
+        routers: ``@router`` 装饰的路由类列表，这些类的 HTTP 方法将
+                 自动注册到 FastAPI。
+                 A list of ``@router``-decorated classes whose HTTP
+                 methods will be registered with FastAPI.
 
     Returns:
-        A class decorator.
+        一个类装饰器。A class decorator.
 
     Example::
 
@@ -54,10 +69,14 @@ def web(routers: list[type] | None = None) -> Callable[[type], type]:
 
 
 def is_web(cls: type) -> bool:
-    """Return ``True`` if *cls* is decorated with ``@web``."""
+    """Return ``True`` if *cls* is decorated with ``@web``.
+
+    判断类是否被 ``@web`` 装饰过。"""
     return bool(getattr(cls, _WEB_ATTR, False))
 
 
 def get_web_routers(cls: type) -> list[type]:
-    """Return the list of ``@router`` classes declared via ``@web(routers=[...])``."""
+    """Return the list of ``@router`` classes declared via ``@web(routers=[...])``.
+
+    获取 ``@web(routers=[...])`` 中声明的路由类列表。"""
     return getattr(cls, _WEB_ROUTERS, [])
