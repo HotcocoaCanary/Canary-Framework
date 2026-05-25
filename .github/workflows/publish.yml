@@ -30,11 +30,14 @@ jobs:
       - name: Lint
         run: uv run ruff check src/ tests/
 
+      - name: Format check
+        run: uv run ruff format --check src/ tests/
+
       - name: Type check
-        run: uv run mypy src/
+        run: uv run mypy src/ tests/
 
       - name: Test
-        run: uv run pytest --cov=src/canary_framework
+        run: uv run pytest --cov=src/canary_framework --cov-fail-under=70
 
   release:
     needs: test
@@ -64,10 +67,20 @@ jobs:
           fi
           echo "Version $EXPECTED verified"
 
+      - name: Verify version matches __init__.py
+        run: |
+          EXPECTED="${{ steps.version.outputs.version }}"
+          ACTUAL=$(uv run python -c "from canary_framework import __version__; print(__version__)")
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "ERROR: Branch version '$EXPECTED' != __init__.py __version__ '$ACTUAL'"
+            exit 1
+          fi
+          echo "Version $EXPECTED confirmed in __init__.py"
+
       - name: Build
         run: uv build
 
-      - name: Check package
+      - name: Check package (twine)
         run: uv run --with twine twine check dist/*
 
       - name: Create tag

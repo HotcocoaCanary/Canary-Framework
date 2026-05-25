@@ -1,68 +1,174 @@
-"""生命周期钩子装饰器 —— @on_init / @on_start / @on_end。
+"""Lifecycle hook decorators and typed hook registry.
 
-用于标记服务/模块类中的方法为生命周期钩子，框架在对应阶段自动查找并调用。
-钩子方法可以是 sync 或 async，框架通过 asyncio.iscoroutine 自动适配。
+Canary Framework provides three lifecycle hooks, each represented by a
+:class:`LifecycleHook` enum member:
 
-三个阶段:
-    on_init(ctx)  — 初始化: 依赖已注入、配置已加载，接收 Context。
-    on_start()    — 启动: 无参数。
-    on_end()      — 停止: 无参数，按启动逆序调用。
+    =========  ===================  ===================  ===================
+    Hook       Decorator            Signature            Execution order
+    =========  ===================  ===================  ===================
+    ``INIT``   :func:`@on_init`     ``(ctx: Context)``   topological order
+    ``START``  :func:`@on_start`    ``()``               topological order
+    ``END``     :func:`@on_end`      ``()``               reverse topological
+    =========  ===================  ===================  ===================
 
-find_hooks 查找策略:
-    1. 优先查找被装饰器标记的方法（检查 __cf_on_init__ 等属性）
-    2. 回退: 按方法名 on_init / on_start / on_end 直接匹配
-    3. 以上均未找到 → 该阶段钩子为 None
+Hooks are **explicit opt-in**: the decorator MUST be applied for the
+framework to discover the hook.  There is no fallback that matches
+methods by name — this prevents accidental hook registration.
+
+Each hook method may be ``sync`` (regular ``def``) or ``async`` (``async
+def``).  The framework detects the return type at call time and adapts
+accordingly.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from enum import StrEnum
+from typing import TypeVar
 
-_CF_ON_INIT = "__cf_on_init__"  # 标记: 初始化钩子
-_CF_ON_START = "__cf_on_start__"  # 标记: 启动钩子
-_CF_ON_END = "__cf_on_end__"  # 标记: 停止钩子
+_Fn = TypeVar("_Fn", bound=Callable[..., object])
 
 
-def on_init(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """标记方法为 on_init 钩子。框架在其 init 阶段调用，传入 Context。"""
-    setattr(fn, _CF_ON_INIT, True)
+class LifecycleHook(StrEnum):
+    """Enumeration of valid lifecycle hook names.
+
+    Used internally by the engine to look up hooks on service/module
+    instances without string literals.
+    """
+
+    INIT = "on_init"
+    """Called after DI and config loading.  Receives the service's
+    :class:`~canary_framework.core.engine.context.Context` as argument."""
+
+    START = "on_start"
+    """Called in topological order during application start.  No arguments."""
+
+    END = "on_end"
+    """Called in reverse topological order during application stop.
+    No arguments."""
+
+
+# ---------------------------------------------------------------------------
+# Private marker attributes set on decorated methods
+# ---------------------------------------------------------------------------
+
+_MARKER_MAP: dict[LifecycleHook, str] = {
+    LifecycleHook.INIT: "__cf_on_init__",
+    LifecycleHook.START: "__cf_on_start__",
+    LifecycleHook.END: "__cf_on_end__",
+}
+
+# Inverse lookup: marker name → LifecycleHook
+_MARKER_TO_HOOK: dict[str, LifecycleHook] = {v: k for k, v in _MARKER_MAP.items()}
+
+
+# ---------------------------------------------------------------------------
+# Decorators
+# ---------------------------------------------------------------------------
+
+
+def on_init(fn: _Fn) -> _Fn:  # noqa: UP047
+    """Mark a method as the ``on_init`` lifecycle hook.
+
+    The decorated method receives one argument: the service's
+    :class:`~canary_framework.core.engine.context.Context` instance.
+
+    Example::
+
+        @service(name="my-service")
+        class MyService:
+            @on_init
+            def init(self, ctx: Context) -> None:
+                db = ctx.resolve(DBService)
+                self._pool = db.create_pool()
+
+    The hook may also be ``async``::
+
+        @on_init
+        async def init(self, ctx: Context) -> None:
+            self._pool = await ctx.resolve(DBService).create_pool()
+    """
+    setattr(fn, _MARKER_MAP[LifecycleHook.INIT], True)
     return fn
 
 
-def on_start(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """标记方法为 on_start 钩子。框架在其 start 阶段调用，无参数。"""
-    setattr(fn, _CF_ON_START, True)
+def on_start(fn: _Fn) -> _Fn:  # noqa: UP047
+    """Mark a method as the ``on_start`` lifecycle hook.
+
+    Called in topological order after all services have been initialised.
+    The decorated method takes no arguments (beyond ``self``).
+
+    Example::
+
+        @on_start
+        def start(self) -> None:
+            self._server.listen()
+    """
+    setattr(fn, _MARKER_MAP[LifecycleHook.START], True)
     return fn
 
 
-def on_end(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """标记方法为 on_end 钩子。框架在其 stop 阶段按逆序调用，无参数。"""
-    setattr(fn, _CF_ON_END, True)
+def on_end(fn: _Fn) -> _Fn:  # noqa: UP047
+    """Mark a method as the ``on_end`` lifecycle hook.
+
+    Called in **reverse** topological order during application shutdown.
+    The decorated method takes no arguments (beyond ``self``).
+
+    This is the right place to close connections, flush buffers, or
+    release external resources.
+
+    Example::
+
+        @on_end
+        def stop(self) -> None:
+            self._pool.close()
+    """
+    setattr(fn, _MARKER_MAP[LifecycleHook.END], True)
     return fn
 
 
-def find_hooks(instance: object) -> dict[str, Callable[..., Any] | None]:
-    """在服务/模块实例上查找所有生命周期钩子方法。
+# ---------------------------------------------------------------------------
+# Hook discovery
+# ---------------------------------------------------------------------------
 
-    两步查找:
-        1. 遍历 dir(instance)，通过 __cf_on_init__ 等标记属性匹配装饰的方法。
-        2. 回退: 未被装饰但方法名为 on_init/on_start/on_end 的也视作钩子。
+HookDict = dict[LifecycleHook, Callable[..., object] | None]
+"""Return type of :func:`find_hooks` — a mapping from each lifecycle hook
+to the bound method (or ``None`` if not defined)."""
+
+
+def find_hooks(instance: object) -> HookDict:
+    """Discover lifecycle hooks on a service or module instance.
+
+    Walks the instance's MRO (via :func:`dir`) and inspects every callable
+    attribute for the ``__cf_on_init__`` / ``__cf_on_start__`` /
+    ``__cf_on_end__`` marker set by the decorators.
+
+    .. important::
+
+        Unlike earlier versions, methods are **not** matched by name.
+        Only methods decorated with ``@on_init``, ``@on_start``, or
+        ``@on_end`` are recognised.  This eliminates ambiguity and
+        prevents accidental hook registration when a class happens
+        to define a method with the same name.
 
     Args:
-        instance: 服务或模块的类实例。
+        instance: A constructed service or module instance.
 
     Returns:
-        {"on_init": method | None, "on_start": method | None, "on_end": method | None}
-        未找到的钩子对应值为 None。
+        A :class:`HookDict` mapping each :class:`LifecycleHook` to the
+        bound method, or ``None`` when the hook is not defined.
+
+    Performance:
+        Performs one ``dir()`` traversal per instance.  The result is
+        cached on the ``ServiceEntry._hooks`` attribute so each instance
+        is scanned at most once.
     """
-    hooks: dict[str, Callable[..., Any] | None] = {
-        "on_init": None,
-        "on_start": None,
-        "on_end": None,
+    hooks: HookDict = {
+        LifecycleHook.INIT: None,
+        LifecycleHook.START: None,
+        LifecycleHook.END: None,
     }
 
-    # 第一步: 检查装饰器标记
     for attr_name in dir(instance):
         try:
             attr = getattr(instance, attr_name)
@@ -71,16 +177,12 @@ def find_hooks(instance: object) -> dict[str, Callable[..., Any] | None]:
         if not callable(attr):
             continue
 
-        if getattr(attr, _CF_ON_INIT, False):
-            hooks["on_init"] = attr
-        elif getattr(attr, _CF_ON_START, False):
-            hooks["on_start"] = attr
-        elif getattr(attr, _CF_ON_END, False):
-            hooks["on_end"] = attr
-
-    # 第二步: 回退 —— 未标记但恰好名称为钩子名的方法
-    for key in ("on_init", "on_start", "on_end"):
-        if hooks[key] is None:
-            hooks[key] = getattr(instance, key, None)
+        for marker, hook in _MARKER_TO_HOOK.items():
+            if getattr(attr, marker, False) and hooks[hook] is None:
+                hooks[hook] = attr
+                break
+        # Short-circuit: all hooks found
+        if all(v is not None for v in hooks.values()):
+            break
 
     return hooks

@@ -1,9 +1,13 @@
-"""依赖注入引擎 —— 将声明的依赖服务实例注入到目标服务实例的属性上。
+"""Dependency injection engine.
 
-依赖类名（PascalCase）通过 to_snake() 转换为属性名:
-    DBService     → db_service
-    UserService   → user_service
-    HTTPSConn     → https_conn
+Reads the ``deps`` list from a :class:`ServiceEntry`, looks up each
+dependency's runtime instance in the :class:`Registry`, and injects
+it onto the target instance as a snake_case attribute.
+
+Attribute name derivation:
+    ``DBService``     → ``self.db_service``
+    ``UserService``   → ``self.user_service``
+    ``HTTPSConn``     → ``self.https_conn``
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import logging
 
 from canary_framework.core.registry.registry import Registry, ServiceEntry
 from canary_framework.core.utils.naming import to_snake
+from canary_framework.exceptions import DependencyInjectionError
 
 _log = logging.getLogger("cf.di")
 
@@ -21,17 +26,33 @@ def inject_deps(
     entry: ServiceEntry,
     registry: Registry,
 ) -> None:
-    """将 deps 中声明的依赖服务实例，按类名 snake_case 注入到 instance 的属性上。
+    """Inject declared dependencies onto *instance*.
 
-    遍历 entry.deps 中的每个依赖类:
-        1. 从 Registry 按类对象查找依赖的 ServiceEntry
-        2. to_snake(dep_cls.__name__) 生成属性名
-        3. setattr(instance, attr_name, dep_instance)
+    For each class in *entry.deps*:
+        1. Look up its :class:`ServiceEntry` via the registry.
+        2. Convert its class name to snake_case.
+        3. ``setattr(instance, attr_name, dependency_instance)``.
 
-    注入发生在 on_init 之前，因此 on_init 中已可访问注入的属性。
+    Injection runs before ``on_init`` so the attributes are available
+    inside the init hook.
+
+    Args:
+        instance: The target service/module instance.
+        entry: The :class:`ServiceEntry` describing *instance*.
+        registry: The global :class:`Registry`.
+
+    Raises:
+        DependencyInjectionError: If a declared dependency has no
+            matching entry in the registry.
     """
     for dep_cls in entry.deps:
         dep_entry = registry.get_by_class(dep_cls)
+        if dep_entry.instance is None:
+            raise DependencyInjectionError(
+                f"Cannot inject '{dep_cls.__name__}' into '{entry.name}': "
+                f"the dependency instance is None. "
+                f"The dependency may not have been initialised yet."
+            )
         attr_name = to_snake(dep_cls.__name__)
         setattr(instance, attr_name, dep_entry.instance)
         _log.debug("  %s  →  self.%s", dep_cls.__name__, attr_name)
