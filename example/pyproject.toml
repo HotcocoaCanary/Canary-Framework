@@ -4,8 +4,5 @@ version = "0.1.0"
 description = "Canary-Framework-example"
 requires-python = ">=3.12"
 dependencies = [
-    "cf[web]>=0.1.0",
+    "canary-framework[web]>=0.1.2",
 ]
-
-[tool.uv.sources]
-cf = { git = "git+ssh://git@github.com/HotcocoaCanary/Canary-Framework.git", branch = "main" }
