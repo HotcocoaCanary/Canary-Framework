@@ -1,15 +1,19 @@
-name: Publish
+name: Release & Publish
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - "releases/**"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: write
+  id-token: write
+
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,29 +21,68 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra web
+
+      - name: Lint
+        run: uv run ruff check src/ tests/
+
+      - name: Type check
+        run: uv run mypy src/
+
+      - name: Test
+        run: uv run pytest --cov=src/canary_framework
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Extract version from branch
+        id: version
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          VERSION="${BRANCH#releases/}"
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Verify version matches pyproject.toml
+        run: |
+          EXPECTED="${{ steps.version.outputs.version }}"
+          ACTUAL=$(uv run python -c "import tomllib; f=open('pyproject.toml','rb'); d=tomllib.load(f); print(d['project']['version'])")
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "ERROR: Branch version '$EXPECTED' != pyproject.toml version '$ACTUAL'"
+            exit 1
+          fi
+          echo "Version $EXPECTED verified"
+
       - name: Build
         run: uv build
 
       - name: Check package
         run: uv run --with twine twine check dist/*
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
+      - name: Create tag
+        run: |
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
 
-  publish:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-    environment: publish
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes \
+            dist/*
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
