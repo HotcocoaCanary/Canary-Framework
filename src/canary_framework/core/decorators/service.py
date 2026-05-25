@@ -1,43 +1,90 @@
-"""服务装饰器 —— 将类声明为 CF 框架的服务（最小运行单元）。
+"""Service decorator — marks a class as a Canary Framework service.
 
-服务通过 name 标识自身，通过 deps 声明依赖关系。
-依赖的服务实例由框架自动注入为 snake_case 属性名。
+A **service** is the smallest runnable unit in the framework.  Services
+declare a globally unique name, a list of dependency classes, and an
+optional configuration class.  The framework discovers services via the
+``@service`` decorator and manages their life-cycle (instantiation,
+dependency injection, configuration loading, hook dispatch).
+
+Type-safe metadata retrieval is provided by :func:`get_service_meta`,
+which returns a :class:`ServiceMeta` :class:`~typing.TypedDict`.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import TypedDict
 
-_CF_SERVICE_ATTR = "__cf_service__"  # 标记: 属于 CF 服务
-_CF_SERVICE_META = "__cf_service_meta__"  # 存储: 元数据字典
+_SERVICE_ATTR = "__cf_service__"
+"""Set to ``True`` on classes decorated with ``@service``."""
+
+_SERVICE_META = "__cf_service_meta__"
+"""Stores a :class:`ServiceMeta` dict on decorated classes."""
+
+
+class ServiceMeta(TypedDict, total=False):
+    """Strongly-typed metadata stored on a ``@service``-decorated class.
+
+    All keys are optional at the TypedDict level because the dict is
+    constructed once when the decorator runs.  In practice ``name`` and
+    ``deps`` are always present.
+    """
+
+    name: str
+    """Globally unique service name used for dependency resolution."""
+
+    deps: list[type]
+    """List of ``@service`` / ``@module`` classes this service depends on."""
+
+    config_cls: type | None
+    """Optional ``@config``-decorated class.  ``None`` means the service
+    inherits its parent module's configuration."""
 
 
 def service(
-    name: str,  # 服务名称，全局唯一
+    name: str,
     *,
-    config: type | None = None,  # @config 装饰的配置类（可选）
-    deps: list[type] | None = None,  # 依赖的服务类列表（可选）
-):
-    """将类声明为 CF 框架的服务。
-
-    在类上设置 __cf_service__ = True 标记和 __cf_service_meta__ 元数据字典。
-    框架在 _collect 阶段识别这些标记并注册该服务。
+    config: type | None = None,
+    deps: list[type] | None = None,
+) -> Callable[[type], type]:
+    """Declare a class as a Canary Framework service.
 
     Args:
-        name: 服务名称，全局唯一，用于依赖声明和名称索引。
-        config: @config 装饰的配置类，None 时从父模块继承。
-        deps: 依赖的服务类列表，框架自动将其实例注入为 snake_case 属性。
+        name: Globally unique service name.  Used in ``deps=[]`` lists
+            and for registry lookups.
+        config: Optional ``@config``-decorated class providing typed
+            settings for this service.
+        deps: List of ``@service`` or ``@module`` classes that must be
+            started before this service.  Each dependency instance is
+            injected as ``self.<snake_case_name>`` in topological order.
+
+    Raises:
+        TypeError: (At decoration time, from ``@module``) if one of the
+            ``deps`` entries is not a valid ``@service`` or ``@module``.
 
     Returns:
-        内层装饰器函数。
+        A decorator that marks the class and attaches metadata.
+
+    Example::
+
+        @service(name="database", config=DBConfig)
+        class DBService:
+            @on_init
+            def init(self, ctx: Context) -> None:
+                cfg = ctx.config_as(DBConfig)
+                self._pool = create_pool(cfg.dsn)
     """
     _config = config
-    _deps = deps or []
+    _deps = list(deps or ())
 
     def decorator(cls: type) -> type:
-        meta = {"name": name, "deps": _deps, "config_cls": _config}
-        setattr(cls, _CF_SERVICE_ATTR, True)
-        setattr(cls, _CF_SERVICE_META, meta)
+        meta: ServiceMeta = {
+            "name": name,
+            "deps": _deps,
+            "config_cls": _config,
+        }
+        setattr(cls, _SERVICE_ATTR, True)
+        setattr(cls, _SERVICE_META, meta)
         cls.__cf_name__ = name  # type: ignore[attr-defined]
         return cls
 
@@ -45,10 +92,17 @@ def service(
 
 
 def is_cf_service(cls: type) -> bool:
-    """判断类是否被 @service 装饰过。"""
-    return bool(getattr(cls, _CF_SERVICE_ATTR, False))
+    """Return ``True`` if *cls* was decorated with ``@service``."""
+    return bool(getattr(cls, _SERVICE_ATTR, False))
 
 
-def get_service_meta(cls: type) -> dict[str, Any]:
-    """获取 @service 装饰器设置的元数据字典。"""
-    return getattr(cls, _CF_SERVICE_META, {})
+def get_service_meta(cls: type) -> ServiceMeta:
+    """Return the :class:`ServiceMeta` dictionary attached by ``@service``.
+
+    Returns an empty :class:`ServiceMeta` if the class was never decorated
+    (all values default to their falsy equivalents).
+    """
+    raw: object = getattr(cls, _SERVICE_META, {})
+    if isinstance(raw, dict):
+        return raw  # type: ignore[return-value]
+    return {}

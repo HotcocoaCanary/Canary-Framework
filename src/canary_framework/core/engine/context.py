@@ -1,89 +1,177 @@
-"""统一运行时上下文 —— 服务、模块、路由类的运行时句柄。
+"""Unified runtime context — the service/module's connection to the framework.
 
-通过 parent 链实现向上委托: 配置和依赖解析沿模块树逐级查找。
-Context 公开三项能力: config（配置）、service（服务实例）、resolve（依赖解析）。
+Each ``@service`` or ``@module`` instance receives a :class:`Context` during
+initialisation.  The context provides three capabilities:
 
-Context 层次:
-    EngineContext (未来扩展) → 根模块 Context → 子模块 Context → 服务 Context
+1. **Configuration** — :meth:`config_as` returns the typed config instance.
+2. **Service access** — :meth:`service_as` returns a typed sibling service.
+3. **Dependency resolution** — :meth:`resolve` traverses the module tree
+   upward to find a service by class.
+
+Context parent chain:
+    Root module context → child module context → service context → …
+    Each context delegates lookups upward via its ``_parent`` reference.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
+
+from canary_framework.exceptions import ConfigurationError, ServiceNotFoundError
 
 if TYPE_CHECKING:
     from canary_framework.core.registry.registry import Registry, ServiceEntry
 
+_C = TypeVar("_C")
+"""Config type for :meth:`config_as`."""
+
+_S = TypeVar("_S")
+"""Service type for :meth:`service_as` and :meth:`resolve`."""
+
 
 class Context:
-    """统一运行时上下文，通过 parent 链提供配置查找和服务解析。
+    """Unified runtime context for a service or module instance.
 
-    服务和模块的 on_init 钩子以及路由类的 __init__ 均接收此 Context 对象。
+    Provided to ``@on_init`` hooks and ``@router`` constructors.
 
-    Attributes:
-        config:  沿 parent 链向上查找第一个有 config_instance 的节点。
-        service: 当前 Context 绑定的服务/模块实例。
-        resolve: 沿 parent 链在父模块的 sub_services 中查找已注册的服务实例。
+    The parent chain enables upward delegation: if the current node does
+    not hold a config instance, the lookup continues to the parent
+    module's context, and so on until the root.
     """
+
+    __slots__ = ("_entry", "_parent", "_registry")
 
     def __init__(
         self,
-        entry: ServiceEntry,  # 绑定的注册项
-        parent: Context | None,  # 父模块的 Context，根模块为 None
-        registry: Registry,  # 全局注册表，供 resolve() 使用
+        entry: ServiceEntry,
+        parent: Context | None,
+        registry: Registry,
     ) -> None:
         self._entry = entry
         self._parent = parent
         self._registry = registry
 
-    @property
-    def config(self) -> object:
-        """沿 parent 链向上查找第一个已加载的配置实例。
+    # ------------------------------------------------------------------
+    # Typed accessors
+    # ------------------------------------------------------------------
 
-        查找策略: 当前节点有 config_instance → 返回；否则沿 parent 链上溯。
-        整条链路都没有配置时抛出 RuntimeError。
+    def config_as(self, _cls: type[_C]) -> _C:
+        """Return the config instance with full type safety.
+
+        Traverses the parent chain upward to find the first node whose
+        :attr:`ServiceEntry.config_instance` is not ``None``.
+
+        Args:
+            _cls: The ``@config``-decorated class expected at this point
+                in the module tree.  Used only for static type inference;
+                the actual runtime instance must be compatible.
+
+        Returns:
+            The config instance, typed as *_cls*.
 
         Raises:
-            RuntimeError: 整条 parent 链都未找到配置实例。
+            ConfigurationError: If no config instance is found in the
+                entire parent chain.
+
+        Example::
+
+            @on_init
+            def init(self, ctx: Context) -> None:
+                cfg = ctx.config_as(AppConfig)
+                print(cfg.host)  # typed as str
         """
         cur: Context | None = self
         while cur is not None:
-            if cur._entry is not None and cur._entry.config_instance is not None:
-                return cur._entry.config_instance
+            inst = cur._entry.config_instance
+            if inst is not None:
+                return inst  # type: ignore[return-value]
             cur = cur._parent
-        raise RuntimeError("No config bound to this context chain.")
+        raise ConfigurationError(
+            "No config instance bound to this context chain. "
+            "Ensure the root module declares a @config class."
+        )
 
-    @property
-    def service(self) -> object:
-        """当前上下文绑定的服务/模块的运行时实例。"""
-        return self._entry.instance
+    def config(self) -> object:
+        """Return the **untyped** config instance.
 
-    def resolve(self, svc_cls: type) -> object:
-        """沿 parent 链在父模块的 sub_services 中查找并返回指定类型的服务实例。
+        .. deprecated:: 0.2
+            Prefer :meth:`config_as` for type-safe access.
 
-        查找策略: 从当前节点开始，沿 parent 链向上，检查每个模块的 sub_services
-        列表，按 __cf_name__ 匹配类名。找到后通过 Registry 返回运行时实例。
+        Traverses the parent chain to find the first config instance.
+        """
+        return self.config_as(object)
+
+    def service_as(self, _cls: type[_S]) -> _S:
+        """Return the service instance with full type safety.
+
+        Shortcut for ``ctx.resolve(SomeService)`` — resolves the service
+        class to its runtime instance.
 
         Args:
-            svc_cls: 要查找的 @service 或 @module 装饰的类。
+            _cls: The ``@service`` class to retrieve.
 
         Returns:
-            该类的运行时实例。
+            The runtime instance, typed as *_cls*.
 
         Raises:
-            KeyError: 整个 parent 链中均未找到该服务。
+            ServiceNotFoundError: If the service is not found in the
+                current module or any ancestor module.
+        """
+        return self.resolve(_cls)
+
+    def service(self) -> object:
+        """Return the **untyped** current service/module instance.
+
+        .. deprecated:: 0.2
+            Prefer :meth:`service_as` for type-safe access.
+        """
+        return self._entry.instance
+
+    # ------------------------------------------------------------------
+    # Dependency resolution
+    # ------------------------------------------------------------------
+
+    def resolve(self, svc_cls: type[_S]) -> _S:
+        """Find and return the runtime instance of *svc_cls* in the module tree.
+
+        Walks the parent chain upward.  At each module node, scans the
+        module's ``sub_services`` for a class whose ``__cf_name__``
+        matches *svc_cls*'s name.  Also checks whether *svc_cls* is the
+        class of the current entry itself.
+
+        Args:
+            svc_cls: A ``@service`` or ``@module``-decorated class.
+
+        Returns:
+            The runtime instance, typed as *svc_cls*.
+
+        Raises:
+            ServiceNotFoundError: If *svc_cls* is not found in the
+                current module or any ancestor module.
+
+        Example::
+
+            @on_init
+            def init(self, ctx: Context) -> None:
+                db = ctx.resolve(DBService)
+                db.execute("SELECT 1")
         """
         name = getattr(svc_cls, "__cf_name__", svc_cls.__name__)
+
+        # Check the current entry itself
+        if self._entry.cls is svc_cls or getattr(self._entry.cls, "__cf_name__", "") == name:
+            return self._entry.instance  # type: ignore[return-value]
+
         cur: Context | None = self
         while cur is not None:
             entry = cur._entry
-            if entry is not None and entry.is_module:
+            if entry.is_module:
                 for sub_cls in entry.sub_services:
                     if getattr(sub_cls, "__cf_name__", "") == name:
-                        return self._registry.get_instance(sub_cls)
+                        return self._registry.get_instance(sub_cls)  # type: ignore[return-value]
             cur = cur._parent
 
-        raise KeyError(
+        raise ServiceNotFoundError(
             f"Service '{name}' not found in this module or any parent module. "
-            f"Ensure it is registered as a sub-service of a parent @module."
+            f"Ensure it is declared in the 'services' list of a parent @module."
         )

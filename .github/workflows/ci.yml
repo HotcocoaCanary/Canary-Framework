@@ -34,11 +34,23 @@ jobs:
       - name: Format check (ruff)
         run: uv run ruff format --check src/ tests/ example/
 
-      - name: Type check (mypy)
-        run: uv run mypy src/
+      - name: Type check (mypy strict)
+        run: uv run mypy src/ tests/
 
-      - name: Test
-        run: uv run pytest --cov=src/canary_framework --cov-report=term --cov-report=xml
+      - name: Test & coverage
+        run: uv run pytest --cov=src/canary_framework --cov-report=term --cov-report=xml --cov-fail-under=70
+
+      - name: Check version consistency
+        run: |
+          uv run python -c "
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              p = tomllib.load(f)
+          ver = p['project']['version']
+          from canary_framework import __version__
+          assert __version__ == ver, f'{__version__} != {ver}'
+          print(f'Version {ver} OK')
+          "
 
       - name: Upload coverage
         uses: codecov/codecov-action@v5

@@ -1,47 +1,77 @@
-"""@config 装饰器 —— 将普通类转换为 pydantic-settings BaseSettings 子类。
+"""Configuration decorator — converts plain classes to pydantic-settings models.
 
-转换后的类自动读取环境变量和 .env 文件（内置 env_file=".env"）。
-配置字段优先级: 环境变量 > .env 文件 > 默认值。
+The ``@config`` decorator transforms a regular Python class into a
+:class:`pydantic_settings.BaseSettings` subclass.  The resulting class
+automatically reads environment variables and ``.env`` files.
 
-Usage:
-    @config
-    class AppConfig:
-        host: str = "0.0.0.0"
-        port: int = 8000
+Priority (highest first):
+    1. Environment variable (e.g. ``export HOST=...``)
+    2. ``.env`` file in the current working directory
+    3. Default value declared in the class body
 """
 
 from __future__ import annotations
 
+from typing import TypeVar
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_C = TypeVar("_C", bound=type)
 
-def config(cls: type) -> type:
-    """将普通类转为 BaseSettings 子类，使其具备自动配置加载能力。
 
-    动态创建逻辑:
-        1. 提取原始类的 __annotations__ 作为 pydantic 的字段声明
-        2. 提取原始类的类变量作为字段默认值
-        3. SettingsConfigDict(env_file=".env") 让 pydantic-settings 自动读取 .env
-        4. 用 type() 动态构造新类，保持原始类的 __name__ / __qualname__ / __module__
+def config(cls: _C) -> type:  # noqa: UP047
+    """Convert a plain class into a :class:`~pydantic_settings.BaseSettings` subclass.
 
-    参数可以是无括号装饰器 @config 或有括号 @config()，效果相同。
+    The decorator creates a new class dynamically via :func:`type()`:
+
+    1. Copies ``__annotations__`` so pydantic recognises the fields.
+    2. Copies class-level variables as default values.
+    3. Applies :class:`~pydantic_settings.SettingsConfigDict` with
+       ``env_file=".env"``, ``extra="ignore"``, and no prefix — field
+       names map directly to environment variable names.
+    4. Preserves the original class's ``__name__``, ``__qualname__``,
+       and ``__module__`` for debugging.
+
+    The decorator can be used bare (``@config``) or with parentheses
+    (``@config()``) — both are equivalent.
+
+    Args:
+        cls: A class with type-annotated fields and optional defaults.
+
+    Returns:
+        A new class that inherits from :class:`BaseSettings` and behaves
+        identically to the original class plus environment-variable loading.
+
+    Example::
+
+        @config
+        class AppConfig:
+            host: str = "0.0.0.0"
+            port: int = 8000
+
+        cfg = AppConfig()       # reads HOST, PORT env vars and .env
+        assert cfg.host == "…"  # typed, validated by pydantic
+
+    .. note::
+
+        The ``.env`` file path is hard-coded to ``"env_file=.env"``
+        (relative to the current working directory).  For services that
+        need a custom path, consider overriding via
+        :attr:`model_config <pydantic_settings.BaseSettings.model_config>`.
     """
-    # 提取用户定义的类型注解（pydantic 按此推断字段类型和环境变量映射）
     annotations = getattr(cls, "__annotations__", {})
 
-    settings_cls = type(
+    base: type = type(
         cls.__name__,
         (BaseSettings,),
         {
             "__annotations__": annotations,
-            # BaseSettings 的行为配置
             "model_config": SettingsConfigDict(
-                env_file=".env",  # 自动从当前目录 .env 读取
+                env_file=".env",
                 env_file_encoding="utf-8",
-                extra="ignore",  # 忽略未声明的环境变量
-                env_prefix="",  # 无前缀，字段名直接对应环境变量键
+                extra="ignore",
+                env_prefix="",
             ),
-            # 将原始类的类变量（默认值）复制到新类
             **{
                 k: v
                 for k, v in vars(cls).items()
@@ -50,9 +80,8 @@ def config(cls: type) -> type:
         },
     )
 
-    # 保持元信息一致，方便调试和日志
-    settings_cls.__name__ = cls.__name__
-    settings_cls.__qualname__ = cls.__qualname__
-    settings_cls.__module__ = cls.__module__
+    base.__name__ = cls.__name__
+    base.__qualname__ = cls.__qualname__
+    base.__module__ = cls.__module__
 
-    return settings_cls
+    return base

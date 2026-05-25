@@ -1,21 +1,31 @@
-"""CF Web FastAPI 模块 —— FastAPI 集成。
+"""Web FastAPI module — HTTP routing and server integration.
 
-公开 API:
-    - 装饰器: web, router, get, post, put, delete, patch
-    - 引擎:   WebCanary
+Public API:
+    - Decorators:  :func:`web`, :func:`router`, :func:`get`, :func:`post`,
+      :func:`put`, :func:`delete`, :func:`patch`
+    - Engine:      :class:`WebCanary`
+
+Requires ``pip install canary-framework[web]``.
 """
 
-from canary_framework.web.fastapi.decorators.router import delete, get, patch, post, put, router
+from canary_framework.web.fastapi.decorators.router import (
+    delete,
+    get,
+    patch,
+    post,
+    put,
+    router,
+)
 from canary_framework.web.fastapi.decorators.web import web
 from canary_framework.web.fastapi.web_canary import WebCanary
 
 __all__ = [
-    "web",
-    "router",
+    "WebCanary",
+    "delete",
     "get",
+    "patch",
     "post",
     "put",
-    "delete",
-    "patch",
-    "WebCanary",
+    "router",
+    "web",
 ]
