@@ -83,9 +83,7 @@ def topological_sort(registry: Registry) -> list[str]:
     if len(result) != len(names):
         cyclic = [n for n in names if n not in result]
         _log.error("Circular dependency detected: %s", cyclic)
-        raise CircularDependencyError(
-            f"Circular dependency detected among: {sorted(cyclic)}"
-        )
+        raise CircularDependencyError(f"Circular dependency detected among: {sorted(cyclic)}")
 
     _log.debug("Topological sort result: %s", " → ".join(result))
     return result

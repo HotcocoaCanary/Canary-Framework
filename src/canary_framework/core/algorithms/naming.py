@@ -21,9 +21,7 @@ from __future__ import annotations
 
 import re
 
-_CAMEL_SPLIT: re.Pattern[str] = re.compile(
-    r"([A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+)"
-)
+_CAMEL_SPLIT: re.Pattern[str] = re.compile(r"([A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+)")
 
 
 def to_snake(name: str) -> str:

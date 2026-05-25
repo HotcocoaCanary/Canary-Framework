@@ -110,8 +110,7 @@ class Registry:
         # 将 deps 中的类引用解析为字符串名称，供拓扑排序使用
         # Resolve class references in deps to string names for the sorter
         entry.dep_names = [
-            d if isinstance(d, str) else getattr(d, "__cf_name__", d.__name__)
-            for d in entry.deps
+            d if isinstance(d, str) else getattr(d, "__cf_name__", d.__name__) for d in entry.deps
         ]
 
         self._by_name[name] = entry
@@ -132,8 +131,7 @@ class Registry:
             return self._by_name[name]
         except KeyError:
             raise ServiceNotFoundError(
-                f"'{name}' is not registered. "
-                f"Registered names: {sorted(self._by_name)}"
+                f"'{name}' is not registered. Registered names: {sorted(self._by_name)}"
             ) from None
 
     def get_by_class(self, cls: type) -> ServiceEntry:
@@ -146,9 +144,7 @@ class Registry:
         try:
             return self._by_class[cls]
         except KeyError:
-            raise ServiceNotFoundError(
-                f"'{cls.__name__}' is not registered."
-            ) from None
+            raise ServiceNotFoundError(f"'{cls.__name__}' is not registered.") from None
 
     def get_instance(self, cls: type) -> object:
         """Return the runtime instance for the given class.

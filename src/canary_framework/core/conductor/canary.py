@@ -89,9 +89,7 @@ def _init_logging() -> None:
         return
 
     handler = logging.StreamHandler()
-    handler.setFormatter(
-        logging.Formatter("[CF] [%(levelname)-5s] [%(name)s] %(message)s")
-    )
+    handler.setFormatter(logging.Formatter("[CF] [%(levelname)-5s] [%(name)s] %(message)s"))
     _cf_logger.addHandler(handler)
     _cf_logger.propagate = False
     _cf_logger.debug("Logging initialised at level=%s", level_name)
@@ -262,9 +260,7 @@ class Canary:
         if entry.config_cls is not None:
             entry.config_instance = entry.config_cls()
             raw_cfg = {
-                k: v
-                for k, v in vars(entry.config_instance).items()
-                if not k.startswith("_")
+                k: v for k, v in vars(entry.config_instance).items() if not k.startswith("_")
             }
             # 日志中打印配置时自动脱敏
             config_log.info(
@@ -389,9 +385,7 @@ class Canary:
             return
 
         # 既不是 @service 也不是 @module —— 用户错误
-        raise TypeError(
-            f"'{cls.__name__}' is not decorated with @service or @module."
-        )
+        raise TypeError(f"'{cls.__name__}' is not decorated with @service or @module.")
 
     @staticmethod
     def _inherit_config(
