@@ -3,12 +3,12 @@
 ## Minimal
 
 ```python
-from canary_framework import service, on_start
+from canary_framework import service, on_start, Canary
 
 @service(name="HelloService")
 class HelloService:
     @on_start
-    def start(self):
+    def start(self) -> None:
         print("started")
 ```
 
@@ -18,24 +18,38 @@ class HelloService:
 ## Full
 
 ```python
-from canary_framework import service, on_init, Context
+from canary_framework import service, on_init, on_end, Context
 
 @service(
-    name="UserService",         # required
+    name="UserService",         # required: globally unique name
     config=UserConfig,          # optional: @config-decorated config class
     deps=[DBService],           # optional: dependency list, auto-injected as self.db_service
 )
 class UserService:
     @on_init
-    def init(self, ctx: Context):
-        ctx.config.db_url       # access config
-        self.db_service.query() # use injected dependency
+    def init(self, ctx: Context) -> None:
+        cfg = ctx.config_as(UserConfig)  # type-safe config access
+        self.db_service.query()          # use injected dependency
 
     @on_start
-    def start(self):
-        pass
+    async def start(self) -> None:
+        await self.pool.connect()
 
     @on_end
-    def end(self):
-        pass
+    def end(self) -> None:
+        self.pool.close()
 ```
+
+## Lifecycle Hooks
+
+Hooks must be explicitly marked with decorators. The framework does not auto-detect by method name:
+
+```python
+from canary_framework.core.decorators.lifecycle import LifecycleHook
+
+# LifecycleHook.INIT   → @on_init    (topological order, receives Context)
+# LifecycleHook.START  → @on_start   (topological order, no args)
+# LifecycleHook.END    → @on_end     (reverse order, no args)
+```
+
+Hook methods can be sync (`def`) or async (`async def`). The framework adapts automatically.

@@ -23,9 +23,10 @@ DB_POOL_SIZE=20
 
 ```python
 @on_init
-def init(self, ctx: Context):
-    ctx.config.url        # → postgres://prod:5432/app
-    ctx.config.pool_size  # → 20
+def init(self, ctx: Context) -> None:
+    cfg = ctx.config_as(DBConfig)   # 类型安全的配置访问
+    cfg.url        # → postgres://prod:5432/app
+    cfg.pool_size  # → 20
 ```
 
 ## 服务器、FastAPI 参数也走配置
@@ -39,7 +40,7 @@ def init(self, ctx: Context):
 ```python
 @config
 class AppConfig:
-    uvicorn_host: str = "0.0.0.0"      # → uvicorn(host="0.0.0.0")
+    uvicorn_host: str = "127.0.0.1"    # → uvicorn(host="127.0.0.1")
     uvicorn_port: int = 8000            # → uvicorn(port=8000)
     uvicorn_workers: int = 1            # → uvicorn(workers=1)
     fastapi_title: str = "My API"       # → FastAPI(title="My API")
@@ -49,3 +50,24 @@ class AppConfig:
 ```
 
 WebCanary 自动按前缀拆分、去前缀后分发给对应消费者。
+
+## 配置继承
+
+子服务未声明 `config` 时，自动继承父模块的配置类：
+
+```python
+@module(name="DBModule", config=DBConfig, services=[DBService])
+class DBModule:
+    pass
+
+@service(name="DBService")         # 未声明 config → 继承 DBConfig
+class DBService:
+    @on_init
+    def init(self, ctx: Context) -> None:
+        cfg = ctx.config_as(DBConfig)
+        print(cfg.url)  # 可用
+```
+
+## 安全：日志脱敏
+
+框架日志自动对敏感字段脱敏。包含 `password`、`secret`、`token`、`key`、`auth`、`credential`、`private` 的字段值在日志中会被替换为 `***`。

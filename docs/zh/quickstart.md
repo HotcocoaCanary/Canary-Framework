@@ -16,14 +16,14 @@ from canary_framework import service, module, on_start, Canary
 @service(name="hello")
 class HelloService:
     @on_start
-    def start(self):
+    def start(self) -> None:
         print("Hello from Canary!")
 
 @module(name="App", services=[HelloService])
 class App:
     pass
 
-async def main():
+async def main() -> None:
     app = Canary(App)
     await app.init()
     await app.start()
@@ -39,24 +39,24 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from canary_framework import service, module, on_init, on_start, Context, config
+from canary_framework import service, module, on_init, Context, config
 from canary_framework.web.fastapi import web, get, router, WebCanary
 
 # 配置
 @config
 class AppConfig:
-    uvicorn_host: str = "0.0.0.0"
+    uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
 
 # 路由
 @router(prefix="/api")
 class APIRouter:
-    def __init__(self, ctx: Context):
-        self.svc = ctx.service
+    def __init__(self, ctx: Context) -> None:
+        self.svc = ctx.resolve(HelloService)
 
     @get("/hello")
-    async def hello(self):
+    async def hello(self) -> dict:
         return await self.svc.greet("world")
 
 # 服务
@@ -64,23 +64,26 @@ class APIRouter:
 @service(name="HelloService", config=AppConfig)
 class HelloService:
     @on_init
-    def init(self, ctx: Context):
+    async def init(self, ctx: Context) -> None:
         pass
 
     @on_start
-    def start(self):
+    def start(self) -> None:
         print("start")
 
-    def greet(self, name: str):
+    async def greet(self, name: str) -> str:
         return f"Hello, {name}!"
 
 # 模块
 @web()
 @module(name="AppModule", config=AppConfig, services=[HelloService])
 class AppModule:
-    pass
+    @get("/health")
+    async def health(self) -> dict:
+        return {"status": "ok"}
 
-async def main():
+
+async def main() -> None:
     app = WebCanary(AppModule)
     await app.init()
     await app.start()

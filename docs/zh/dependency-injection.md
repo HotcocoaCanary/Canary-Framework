@@ -5,8 +5,8 @@
 ```python
 @service(name="B", deps=[A])
 class B:
-    def work(self):
-        self.a.do()            # A 自动注入为 self.a
+    def work(self) -> str:
+        return self.a.do()            # A 自动注入为 self.a
 ```
 
 ## 注入规则
@@ -29,4 +29,26 @@ class B:
 
 ## 启动顺序
 
-Kahn 拓扑排序：被依赖的服务先启动，无依赖的服务最先启动。检测到循环依赖时抛出 `RuntimeError`。
+Kahn 拓扑排序：被依赖的服务先启动，无依赖的服务最先启动。检测到循环依赖时抛出 `CircularDependencyError`：
+
+```python
+from canary_framework.exceptions import CircularDependencyError
+
+try:
+    await app.init()
+except CircularDependencyError as e:
+    print(f"Cycle detected: {e}")
+```
+
+## 类型安全解析
+
+除了依赖注入，还可以通过 Context 手动解析服务：
+
+```python
+@on_init
+def init(self, ctx: Context) -> None:
+    db = ctx.resolve(DBService)       # 沿模块树向上查找 DBService
+    db.execute("SELECT 1")
+```
+
+如果服务未找到，抛出 `ServiceNotFoundError`。
