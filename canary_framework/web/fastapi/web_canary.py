@@ -14,12 +14,16 @@ import inspect
 from contextlib import asynccontextmanager
 from typing import Any
 
-from cf import Canary
-from cf.core.decorators.module import is_cf_module
-from cf.core.decorators.service import is_cf_service
-from cf.core.registry.registry import Registry
-from cf.web.fastapi.decorators.router import get_route_info, get_router_prefix, is_route_method
-from cf.web.fastapi.decorators.web import get_web_routers, is_web
+from canary_framework import Canary
+from canary_framework.core.decorators.module import is_cf_module
+from canary_framework.core.decorators.service import is_cf_service
+from canary_framework.core.registry.registry import Registry
+from canary_framework.web.fastapi.decorators.router import (
+    get_route_info,
+    get_router_prefix,
+    is_route_method,
+)
+from canary_framework.web.fastapi.decorators.web import get_web_routers, is_web
 from fastapi import FastAPI
 
 _UVICORN_PREFIX = "uvicorn_"  # uvicorn_host → uvicorn.Config(host=...)

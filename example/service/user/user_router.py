@@ -1,5 +1,5 @@
-from cf import Context
-from cf.web.fastapi import get, post, router
+from canary_framework import Context
+from canary_framework.web.fastapi import get, post, router
 
 
 @router(prefix="/users")

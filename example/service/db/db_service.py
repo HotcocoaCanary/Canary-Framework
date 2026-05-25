@@ -1,6 +1,6 @@
 import logging
 
-from cf import Context, on_end, on_init, on_start, service
+from canary_framework import Context, on_end, on_init, on_start, service
 from service.db.db_config import DBConfig
 
 logger = logging.getLogger(__name__)

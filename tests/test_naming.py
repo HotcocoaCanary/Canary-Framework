@@ -1,4 +1,4 @@
-from cf.core.utils.naming import to_snake
+from canary_framework.core.utils.naming import to_snake
 
 
 def test_simple():

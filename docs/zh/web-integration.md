@@ -1,13 +1,13 @@
 # Web 集成
 
-通过 `cf[web]` 和 `WebCanary` 接入 FastAPI。
+通过 `canary-framework[web]` 和 `WebCanary` 接入 FastAPI。
 
 ## 最小 Web 写法
 
 ```python
 import asyncio
-from cf import module
-from cf.web.fastapi import web, get, WebCanary
+from canary_framework import module
+from canary_framework.web.fastapi import web, get, WebCanary
 
 @web()
 @module(name="App", services=[])
@@ -27,8 +27,8 @@ asyncio.run(main())
 ## 完整 Web 写法：服务 + 路由类
 
 ```python
-from cf import service, on_init, Context
-from cf.web.fastapi import web, router, get, post, WebCanary
+from canary_framework import service, on_init, Context
+from canary_framework.web.fastapi import web, router, get, post, WebCanary
 
 # 路由类 —— 接收统一 Context
 @router(prefix="/api/users")

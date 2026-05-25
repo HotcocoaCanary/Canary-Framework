@@ -1,6 +1,6 @@
 import pytest
 
-from cf.core import Canary, module, on_init, on_start, service
+from canary_framework.core import Canary, module, on_init, on_start, service
 
 _log: list[str] = []
 

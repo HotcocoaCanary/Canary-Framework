@@ -1,7 +1,7 @@
 import logging
 
-from cf import Context, on_end, on_init, on_start, service
-from cf.web.fastapi import web
+from canary_framework import Context, on_end, on_init, on_start, service
+from canary_framework.web.fastapi import web
 from service.db.db_service import DBService
 from service.user.user_config import UserConfig
 from service.user.user_router import UserRouter

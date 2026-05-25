@@ -5,9 +5,9 @@
     - 引擎:   WebCanary
 """
 
-from cf.web.fastapi.decorators.router import delete, get, patch, post, put, router
-from cf.web.fastapi.decorators.web import web
-from cf.web.fastapi.web_canary import WebCanary
+from canary_framework.web.fastapi.decorators.router import delete, get, patch, post, put, router
+from canary_framework.web.fastapi.decorators.web import web
+from canary_framework.web.fastapi.web_canary import WebCanary
 
 __all__ = [
     "web",

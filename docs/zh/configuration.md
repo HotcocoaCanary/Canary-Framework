@@ -3,7 +3,7 @@
 ## 最小写法：环境变量直接覆盖默认值
 
 ```python
-from cf import config
+from canary_framework import config
 
 @config
 class DBConfig:

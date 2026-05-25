@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 
-from cf.core.registry.registry import Registry
+from canary_framework.core.registry.registry import Registry
 
 _log = logging.getLogger("cf.sorter")
 

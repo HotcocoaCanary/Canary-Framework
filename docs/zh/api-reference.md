@@ -79,7 +79,7 @@ await app.start()
 ## 内部架构
 
 ```
-cf/
+canary_framework/
 ├── core/
 │   ├── decorators/          # 用户面向的装饰器
 │   │   ├── config.py        # @config（内置 env_file=".env"）

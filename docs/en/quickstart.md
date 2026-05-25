@@ -4,14 +4,14 @@
 
 ```bash
 pip install git+https://github.com/HotcocoaCanary/Canary-Framework.git              # core library
-pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=cf[web]" # with FastAPI
+pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=canary-framework[web]" # with FastAPI
 ```
 
 ## Minimal Example
 
 ```python
 import asyncio
-from cf import service, module, on_start, Canary
+from canary_framework import service, module, on_start, Canary
 
 @service(name="hello")
 class HelloService:
@@ -39,8 +39,8 @@ With config, dependency injection, and web routing:
 
 ```python
 import asyncio
-from cf import service, module, on_init, on_start, Context, config
-from cf.web.fastapi import web, get, router, WebCanary
+from canary_framework import service, module, on_init, on_start, Context, config
+from canary_framework.web.fastapi import web, get, router, WebCanary
 
 @config
 class AppConfig:

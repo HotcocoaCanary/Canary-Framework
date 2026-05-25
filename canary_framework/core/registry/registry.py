@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from cf.core.engine.context import Context
+    from canary_framework.core.engine.context import Context
 
 
 class ServiceEntry:
@@ -82,8 +82,8 @@ class Registry:
             return
 
         if meta is None:
-            from cf.core.decorators.module import get_module_meta
-            from cf.core.decorators.service import get_service_meta
+            from canary_framework.core.decorators.module import get_module_meta
+            from canary_framework.core.decorators.service import get_service_meta
 
             meta = get_module_meta(cls) if is_module else get_service_meta(cls)
 
