@@ -3,8 +3,8 @@
 ## 安装
 
 ```bash
-pip install git+https://github.com/HotcocoaCanary/Canary-Framework.git              # 核心库
-pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=canary-framework[web]" # 含 FastAPI
+pip install canary-framework          # 核心库
+pip install canary-framework[web]     # 含 FastAPI 支持的完整安装
 ```
 
 ## 最小示例
