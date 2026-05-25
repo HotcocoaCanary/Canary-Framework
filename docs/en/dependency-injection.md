@@ -5,8 +5,8 @@
 ```python
 @service(name="B", deps=[A])
 class B:
-    def work(self):
-        self.a.do()            # A auto-injected as self.a
+    def work(self) -> str:
+        return self.a.do()            # A auto-injected as self.a
 ```
 
 ## Injection Rules
@@ -22,11 +22,33 @@ ClassName → snake_case → attribute name:
 ## Injection Timing
 
 ```
-Instantiation → DI → config loading → on_init(ctx)
+Instantiation → Dependency Injection → Config Loading → on_init(ctx)
 ```
 
 All injected dependencies are available in `on_init`.
 
 ## Startup Order
 
-Kahn topological sort: dependencies start before dependents. Circular dependencies raise `RuntimeError`.
+Kahn topological sort: dependencies start before dependents, dependency-free services start first. Circular dependencies raise `CircularDependencyError`:
+
+```python
+from canary_framework.exceptions import CircularDependencyError
+
+try:
+    await app.init()
+except CircularDependencyError as e:
+    print(f"Cycle detected: {e}")
+```
+
+## Type-Safe Resolution
+
+In addition to dependency injection, you can manually resolve services via Context:
+
+```python
+@on_init
+def init(self, ctx: Context) -> None:
+    db = ctx.resolve(DBService)       # look up DBService via parent module chain
+    db.execute("SELECT 1")
+```
+
+If the service is not found, a `ServiceNotFoundError` is raised.

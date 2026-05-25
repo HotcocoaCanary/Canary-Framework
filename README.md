@@ -21,6 +21,8 @@ Canary Framework is a **decorator-driven** service framework. Core philosophy: *
 - **Lifecycle Hooks** — `@on_init` / `@on_start` / `@on_end`, sync/async adaptive
 - **Web Integration** — `WebCanary` for one-click FastAPI + Uvicorn
 - **Context System** — parent chain delegates config and dependency resolution upward
+- **Type Safety** — `ctx.config_as(Type)` / `ctx.service_as(Type)` with full IDE inference
+- **Log Sanitization** — sensitive config fields (password, secret, token) automatically masked
 
 ## Installation
 
@@ -38,7 +40,7 @@ from canary_framework import service, module, on_start, Canary
 @service(name="hello")
 class HelloService:
     @on_start
-    def start(self):
+    def start(self) -> None:
         print("Hello from Canary!")
 
 @module(name="App", services=[HelloService])
@@ -46,7 +48,7 @@ class App:
     pass
 
 if __name__ == "__main__":
-    async def main():
+    async def main() -> None:
         app = Canary(App)
         await app.init()
         await app.start()
@@ -58,12 +60,12 @@ if __name__ == "__main__":
 
 ```python
 import asyncio
-from canary_framework import service, module, on_init, Context, config
+from canary_framework import config, module
 from canary_framework.web.fastapi import web, get, WebCanary
 
 @config
 class AppConfig:
-    uvicorn_host: str = "0.0.0.0"
+    uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
 
@@ -71,10 +73,11 @@ class AppConfig:
 @module(name="AppModule", config=AppConfig, services=[])
 class AppModule:
     @get("/health")
-    async def health(self):
+    async def health(self) -> dict:
         return {"status": "ok"}
 
-async def main():
+
+async def main() -> None:
     app = WebCanary(AppModule)
     await app.init()
     await app.start()
@@ -82,14 +85,20 @@ async def main():
 asyncio.run(main())
 ```
 
+## Documentation
+
+📖 Full documentation: [Canary Framework Docs](https://HotcocoaCanary.github.io/Canary-Framework/)
+
+中文文档: [docs/zh/](./docs/zh/) · English: [docs/en/](./docs/en/)
+
 ## Architecture
 
 ```
-canary_framework/
+src/canary_framework/
 ├── core/
 │   ├── decorators/          # @config, @service, @module, @on_init/start/end
 │   ├── engine/              # Canary, Context, Injector, Sorter
-│   ├── registry/            # Registry
+│   ├── registry/            # Registry (dataclass ServiceEntry)
 │   └── utils/               # Naming utilities
 └── web/
     └── fastapi/             # WebCanary engine, @web, @router, @get/@post/...
@@ -108,17 +117,11 @@ Canary.stop()
   └── reverse order: on_end()
 ```
 
-## Documentation
-
-Full docs: [Wiki](https://github.com/HotcocoaCanary/Canary-Framework/wiki) or [docs/](./docs/en/).
-
-中文文档: [docs/zh/](./docs/zh/)
-
 ## Community
 
 - 💬 [Discussions](https://github.com/HotcocoaCanary/Canary-Framework/discussions)
 - 🐛 [Issues](https://github.com/HotcocoaCanary/Canary-Framework/issues)
-- 📖 [Wiki](https://github.com/HotcocoaCanary/Canary-Framework/wiki)
+- 📖 [Docs](https://HotcocoaCanary.github.io/Canary-Framework/)
 
 ## Contributing
 
