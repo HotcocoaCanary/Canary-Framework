@@ -25,8 +25,8 @@ CF is a **decorator-driven** service framework. Core philosophy: **Services are 
 ## Installation
 
 ```bash
-pip install cf          # core library
-pip install cf[web]     # with FastAPI support
+pip install git+https://github.com/HotcocoaCanary/Canary-Framework.git              # core library
+pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=cf[web]" # with FastAPI
 ```
 
 ## Quick Start
