@@ -25,8 +25,8 @@ Canary Framework is a **decorator-driven** service framework. Core philosophy: *
 ## Installation
 
 ```bash
-pip install git+https://github.com/HotcocoaCanary/Canary-Framework.git              # core library
-pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=canary-framework[web]" # with FastAPI
+pip install canary-framework          # core library
+pip install canary-framework[web]     # with FastAPI support
 ```
 
 ## Quick Start
