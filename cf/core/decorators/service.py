@@ -3,18 +3,19 @@
 服务通过 name 标识自身，通过 deps 声明依赖关系。
 依赖的服务实例由框架自动注入为 snake_case 属性名。
 """
+
 from __future__ import annotations
 
 from typing import Any
 
-_CF_SERVICE_ATTR = "__cf_service__"       # 标记: 属于 CF 服务
+_CF_SERVICE_ATTR = "__cf_service__"  # 标记: 属于 CF 服务
 _CF_SERVICE_META = "__cf_service_meta__"  # 存储: 元数据字典
 
 
 def service(
-    name: str,                      # 服务名称，全局唯一
+    name: str,  # 服务名称，全局唯一
     *,
-    config: type | None = None,     # @config 装饰的配置类（可选）
+    config: type | None = None,  # @config 装饰的配置类（可选）
     deps: list[type] | None = None,  # 依赖的服务类列表（可选）
 ):
     """将类声明为 CF 框架的服务。
@@ -37,7 +38,7 @@ def service(
         meta = {"name": name, "deps": _deps, "config_cls": _config}
         setattr(cls, _CF_SERVICE_ATTR, True)
         setattr(cls, _CF_SERVICE_META, meta)
-        cls.__cf_name__ = name
+        cls.__cf_name__ = name  # type: ignore[attr-defined]
         return cls
 
     return decorator

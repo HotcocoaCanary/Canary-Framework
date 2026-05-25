@@ -7,23 +7,23 @@ WebCanary 仅重写 start(): 从根模块 @config 按前缀提取参数并启动
     fastapi_* → FastAPI(kwargs)
     无前缀    → 业务配置，框架不触碰
 """
+
 from __future__ import annotations
 
 import inspect
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
+from typing import Any
 
 from cf import Canary
 from cf.core.decorators.module import is_cf_module
 from cf.core.decorators.service import is_cf_service
 from cf.core.registry.registry import Registry
+from cf.web.fastapi.decorators.router import get_route_info, get_router_prefix, is_route_method
+from cf.web.fastapi.decorators.web import get_web_routers, is_web
+from fastapi import FastAPI
 
-from cf.web.fastapi.decorators.router import is_route_method, get_route_info, get_router_prefix
-from cf.web.fastapi.decorators.web import is_web, get_web_routers
-
-_UVICORN_PREFIX = "uvicorn_"   # uvicorn_host → uvicorn.Config(host=...)
-_FASTAPI_PREFIX = "fastapi_"   # fastapi_title → FastAPI(title=...)
+_UVICORN_PREFIX = "uvicorn_"  # uvicorn_host → uvicorn.Config(host=...)
+_FASTAPI_PREFIX = "fastapi_"  # fastapi_title → FastAPI(title=...)
 
 
 class WebCanary(Canary):
@@ -57,17 +57,17 @@ class WebCanary(Canary):
         root_entry = self.registry.get_by_class(self._target)
         root_config = root_entry.config_instance
 
-        uvicorn_kwargs: dict[str, object] = {}
-        fastapi_kwargs: dict[str, object] = {}
+        uvicorn_kwargs: dict[str, Any] = {}
+        fastapi_kwargs: dict[str, Any] = {}
 
         if root_config is not None:
             for key, value in vars(root_config).items():
                 if key.startswith("_"):
                     continue
                 if key.startswith(_UVICORN_PREFIX):
-                    uvicorn_kwargs[key[len(_UVICORN_PREFIX):]] = value
+                    uvicorn_kwargs[key[len(_UVICORN_PREFIX) :]] = value
                 elif key.startswith(_FASTAPI_PREFIX):
-                    fastapi_kwargs[key[len(_FASTAPI_PREFIX):]] = value
+                    fastapi_kwargs[key[len(_FASTAPI_PREFIX) :]] = value
 
         host = uvicorn_kwargs.pop("host", "0.0.0.0")
         port = uvicorn_kwargs.pop("port", 8000)
@@ -75,15 +75,16 @@ class WebCanary(Canary):
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             """FastAPI lifespan: 服务器启动 → 注册路由 → 接收请求 → 停止。"""
-            await Canary.start(self)           # 触发 on_start 钩子
+            await Canary.start(self)  # 触发 on_start 钩子
             app.state.cf_registry = self.registry
             _register_routes(app, self.registry)
-            yield                              # 服务器就绪
-            await self.stop()                  # 触发 on_end 钩子
+            yield  # 服务器就绪
+            await self.stop()  # 触发 on_end 钩子
 
         fastapi_app = FastAPI(lifespan=lifespan, **fastapi_kwargs)
 
         import uvicorn
+
         config = uvicorn.Config(fastapi_app, host=host, port=port, **uvicorn_kwargs)
         server = uvicorn.Server(config)
         await server.serve()

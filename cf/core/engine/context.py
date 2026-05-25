@@ -6,6 +6,7 @@ Context 公开三项能力: config（配置）、service（服务实例）、res
 Context 层次:
     EngineContext (未来扩展) → 根模块 Context → 子模块 Context → 服务 Context
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -27,9 +28,9 @@ class Context:
 
     def __init__(
         self,
-        entry: ServiceEntry,         # 绑定的注册项
-        parent: Context | None,      # 父模块的 Context，根模块为 None
-        registry: Registry,          # 全局注册表，供 resolve() 使用
+        entry: ServiceEntry,  # 绑定的注册项
+        parent: Context | None,  # 父模块的 Context，根模块为 None
+        registry: Registry,  # 全局注册表，供 resolve() 使用
     ) -> None:
         self._entry = entry
         self._parent = parent
@@ -45,7 +46,7 @@ class Context:
         Raises:
             RuntimeError: 整条 parent 链都未找到配置实例。
         """
-        cur = self
+        cur: Context | None = self
         while cur is not None:
             if cur._entry is not None and cur._entry.config_instance is not None:
                 return cur._entry.config_instance
@@ -72,13 +73,13 @@ class Context:
         Raises:
             KeyError: 整个 parent 链中均未找到该服务。
         """
-        name = getattr(svc_cls, '__cf_name__', svc_cls.__name__)
-        cur = self
+        name = getattr(svc_cls, "__cf_name__", svc_cls.__name__)
+        cur: Context | None = self
         while cur is not None:
             entry = cur._entry
             if entry is not None and entry.is_module:
                 for sub_cls in entry.sub_services:
-                    if getattr(sub_cls, '__cf_name__', '') == name:
+                    if getattr(sub_cls, "__cf_name__", "") == name:
                         return self._registry.get_instance(sub_cls)
             cur = cur._parent
 

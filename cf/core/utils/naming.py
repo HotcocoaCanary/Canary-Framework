@@ -2,6 +2,7 @@
 
 用于依赖注入时，将依赖类名（如 DBService）转换为属性名（如 db_service）。
 """
+
 import re
 
 # 正则: 切分 CamelCase 为单词列表

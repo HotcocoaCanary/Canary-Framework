@@ -1,7 +1,7 @@
 # 最小示例：一个服务 + 一个模块，无配置、无 Web
 import asyncio
 
-from cf import service, module, on_init, on_start, Context, Canary
+from cf import Canary, Context, module, on_init, on_start, service
 
 
 @service(name="hello")
@@ -24,6 +24,7 @@ async def main():
     app = Canary(App)
     await app.init()
     await app.start()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

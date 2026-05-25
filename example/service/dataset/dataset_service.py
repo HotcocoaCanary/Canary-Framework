@@ -1,12 +1,11 @@
 import logging
 
-from cf import service, on_init, on_start, on_end, Context
+from cf import Context, on_end, on_init, on_start, service
 from cf.web.fastapi import web
-
-from service.db.db_service import DBService
-from service.user.user_service import UserService
 from service.dataset.dataset_config import DataSetConfig
 from service.dataset.dataset_router import DataSetRouter
+from service.db.db_service import DBService
+from service.user.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +13,6 @@ logger = logging.getLogger(__name__)
 @web(routers=[DataSetRouter])
 @service(name="DataSetService", config=DataSetConfig, deps=[DBService, UserService])
 class DataSetService:
-
     @on_init
     def init(self, ctx: Context):
         pass

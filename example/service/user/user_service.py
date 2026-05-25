@@ -1,8 +1,7 @@
 import logging
 
-from cf import service, on_init, on_start, on_end, Context
+from cf import Context, on_end, on_init, on_start, service
 from cf.web.fastapi import web
-
 from service.db.db_service import DBService
 from service.user.user_config import UserConfig
 from service.user.user_router import UserRouter
@@ -13,7 +12,6 @@ logger = logging.getLogger(__name__)
 @web(routers=[UserRouter])
 @service(name="UserService", config=UserConfig, deps=[DBService])
 class UserService:
-
     @on_init
     def init(self, ctx: Context):
         pass

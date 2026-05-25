@@ -5,20 +5,21 @@
     UserService   → user_service
     HTTPSConn     → https_conn
 """
+
 from __future__ import annotations
 
 import logging
 
+from cf.core.registry.registry import Registry, ServiceEntry
 from cf.core.utils.naming import to_snake
-from cf.core.registry.registry import Registry
 
 _log = logging.getLogger("cf.di")
 
 
 def inject_deps(
-    instance: object,   # 接收端: 当前服务/模块的实例
-    entry,              # ServiceEntry: 包含 deps 依赖类列表
-    registry: Registry,  # 全局注册表: 查找依赖的已注册实例
+    instance: object,
+    entry: ServiceEntry,
+    registry: Registry,
 ) -> None:
     """将 deps 中声明的依赖服务实例，按类名 snake_case 注入到 instance 的属性上。
 
