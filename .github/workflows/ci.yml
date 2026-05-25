@@ -29,16 +29,16 @@ jobs:
         run: uv sync --extra dev --extra web
 
       - name: Lint (ruff)
-        run: uv run ruff check canary_framework/ tests/ example/
+        run: uv run ruff check src/ tests/ example/
 
       - name: Format check (ruff)
-        run: uv run ruff format --check canary_framework/ tests/ example/
+        run: uv run ruff format --check src/ tests/ example/
 
       - name: Type check (mypy)
-        run: uv run mypy canary_framework/
+        run: uv run mypy src/
 
       - name: Test
-        run: uv run pytest --cov=canary_framework --cov-report=term --cov-report=xml
+        run: uv run pytest --cov=src/canary_framework --cov-report=term --cov-report=xml
 
       - name: Upload coverage
         uses: codecov/codecov-action@v5
