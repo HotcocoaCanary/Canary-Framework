@@ -131,9 +131,7 @@ class ServiceEntry:
     Assigned during ``_build_context_tree``.  Each entry gets its own
     :class:`Context`, linked via the parent chain."""
 
-    _hooks: dict[str, Callable[..., Any]] | None = field(
-        default=None, repr=False, compare=False
-    )
+    _hooks: dict[str, Callable[..., Any]] | None = field(default=None, repr=False, compare=False)
     """缓存: ``find_hooks`` 的结果。
     延迟到首次钩子调用时填充，避免启动时对每个实例做 ``dir()`` 扫描。
     Cached result of ``find_hooks``.  Populated lazily on first hook

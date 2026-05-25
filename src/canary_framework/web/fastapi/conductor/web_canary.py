@@ -96,15 +96,13 @@ class WebCanary(Canary):
             from fastapi import FastAPI
         except ImportError:
             raise ImportError(
-                "WebCanary requires FastAPI. "
-                "Install it with: pip install canary-framework[web]"
+                "WebCanary requires FastAPI. Install it with: pip install canary-framework[web]"
             ) from None
         try:
             import uvicorn
         except ImportError:
             raise ImportError(
-                "WebCanary requires Uvicorn. "
-                "Install it with: pip install canary-framework[web]"
+                "WebCanary requires Uvicorn. Install it with: pip install canary-framework[web]"
             ) from None
 
         root_entry = self.registry.get_by_class(self._target)
