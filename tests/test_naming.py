@@ -1,10 +1,10 @@
-"""Tests for :mod:`canary_framework.core.utils.naming`."""
+"""Tests for :mod:`canary_framework.core.algorithms.naming`."""
 
 from __future__ import annotations
 
 import pytest
 
-from canary_framework.core.utils.naming import to_snake
+from canary_framework.core.algorithms.naming import to_snake
 
 
 class TestToSnake:

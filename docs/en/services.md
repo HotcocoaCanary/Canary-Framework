@@ -45,7 +45,7 @@ class UserService:
 Hooks must be explicitly marked with decorators. The framework does not auto-detect by method name:
 
 ```python
-from canary_framework.core.decorators.lifecycle import LifecycleHook
+from canary_framework import LifecycleHook
 
 # LifecycleHook.INIT   → @on_init    (topological order, receives Context)
 # LifecycleHook.START  → @on_start   (topological order, no args)

@@ -7,9 +7,9 @@ import pytest
 from canary_framework.core import config as _config_decorator
 from canary_framework.core import module as _module_decorator
 from canary_framework.core import service as _service_decorator
+from canary_framework.core.conductor.canary import Canary
+from canary_framework.core.conductor.context import Context
 from canary_framework.core.decorators.lifecycle import on_end, on_init, on_start
-from canary_framework.core.engine.canary import Canary
-from canary_framework.core.engine.context import Context
 
 # ---------------------------------------------------------------------------
 # Minimal fixture classes

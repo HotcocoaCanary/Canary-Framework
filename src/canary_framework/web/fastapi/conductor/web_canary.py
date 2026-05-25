@@ -1,28 +1,32 @@
 """Web engine — extends :class:`Canary` for FastAPI + Uvicorn integration.
 
-:class:`WebCanary` inherits from :class:`~canary_framework.core.engine.canary.Canary`
-and overrides :meth:`start` to boot a combined FastAPI / Uvicorn server.
+设计思路 (Design rationale):
+    为什么 FastAPI 集成放在 ``web/`` 下作为"插件"而非核心？
+    （Why is FastAPI a plugin under ``web/`` and not in core?）
 
-Configuration prefix convention (root module's ``@config`` class):
+    1. **可选依赖**：并非所有用户都需要 Web 层，拆分后核心库保持轻量
+       Core remains lightweight; ``pip install canary-framework[web]``
+       adds FastAPI support.
+    2. **多框架扩展**：``web/fastapi/conductor/web_canary.py`` 只实现一个
+       ``start()``，未来 ``web/litestar/`` 可以同样覆写
+       Multi-framework: each integration just overrides ``start()``.
+    3. **职责分离**：核心负责生命周期，Web 层负责 HTTP 暴露
+       Separation of concerns: core handles lifecycle, web handles HTTP.
 
-    =================  ===========================  =========================
-    Prefix             Consumer                     Example field
-    =================  ===========================  =========================
-    ``uvicorn_*``      ``uvicorn.Config``           ``uvicorn_host``
-    ``fastapi_*``      ``FastAPI()``                ``fastapi_title``
-    (no prefix)        Business config (untouched)  ``database_url``
-    =================  ===========================  =========================
+配置前缀约定 (Config prefix convention):
+    根模块的 ``@config`` 类通过前缀区分参数归属:
 
-The framework's own lifecycle hooks (``on_start``, ``on_end``) are
-bound to the FastAPI lifespan, so they run when the server starts
-and shuts down.
+        =================  ===========================  =========================
+        Prefix             Consumer                     Example field
+        =================  ===========================  =========================
+        ``uvicorn_*``      ``uvicorn.Config``           ``uvicorn_host``
+        ``fastapi_*``      ``FastAPI()``                ``fastapi_title``
+        (no prefix)        Business config (untouched)  ``database_url``
+        =================  ===========================  =========================
 
-.. important::
-
-    ``WebCanary`` requires the ``[web]`` optional dependency group
-    (``pip install canary-framework[web]``).  Calling :meth:`start`
-    without ``fastapi`` and ``uvicorn`` installed raises an
-    :exc:`ImportError` with a clear upgrade instruction.
+安全默认值 (Safe defaults):
+    ``uvicorn_host`` 默认 ``127.0.0.1``（而非 ``0.0.0.0``），避免
+    新项目暴露到公网。上线时用户显式修改即可。
 """
 
 from __future__ import annotations
@@ -36,10 +40,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
+from canary_framework.core.conductor.canary import Canary
+from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.module import is_cf_module
 from canary_framework.core.decorators.service import is_cf_service
-from canary_framework.core.engine.canary import Canary
-from canary_framework.core.registry.registry import Registry
 from canary_framework.web.fastapi.decorators.router import (
     get_route_info,
     get_router_prefix,
@@ -56,6 +60,8 @@ _log = logging.getLogger("cf.web")
 class WebCanary(Canary):
     """Canary variant that boots a FastAPI application via Uvicorn.
 
+    继承 Canary，仅重写 ``start()`` 以启动 FastAPI + Uvicorn 服务器。
+
     Usage::
 
         @config
@@ -67,65 +73,64 @@ class WebCanary(Canary):
         @web()
         @module(name="AppModule", config=AppConfig, services=[...])
         class AppModule:
-            @get("/health")
-            async def health(self) -> dict:
-                return {"status": "ok"}
+            ...
 
         app = WebCanary(AppModule)
         await app.init()
-        await app.start()  # blocks until server stops
+        await app.start()  # 阻塞直到服务器停止
     """
 
     async def start(self) -> None:
         """Start the FastAPI + Uvicorn server.
 
-        Steps:
-            1. Extract ``uvicorn_*`` and ``fastapi_*`` fields from the
-               root module's config.
-            2. Build a FastAPI lifespan that calls the framework's
-               ``on_start`` / ``on_end`` hooks.
-            3. Register all ``@web``-annotated route methods.
-            4. Launch ``uvicorn.Server.serve()``.
+        1. 从根模块 config 按前缀拆分参数
+        2. 构建 FastAPI lifespan 绑定框架的 on_start / on_end
+        3. 注册所有 @web 路由
+        4. 启动 uvicorn.Server.serve()（阻塞直到收到停止信号）
 
         Raises:
-            ImportError: If ``fastapi`` or ``uvicorn`` are not installed.
-                Install with ``pip install canary-framework[web]``.
+            ImportError: 未安装 fastapi/uvicorn。
+                ``pip install canary-framework[web]``
         """
         try:
             from fastapi import FastAPI
         except ImportError:
             raise ImportError(
-                "WebCanary requires FastAPI. Install it with: pip install canary-framework[web]"
+                "WebCanary requires FastAPI. "
+                "Install it with: pip install canary-framework[web]"
             ) from None
         try:
             import uvicorn
         except ImportError:
             raise ImportError(
-                "WebCanary requires Uvicorn. Install it with: pip install canary-framework[web]"
+                "WebCanary requires Uvicorn. "
+                "Install it with: pip install canary-framework[web]"
             ) from None
 
         root_entry = self.registry.get_by_class(self._target)
         root_config = root_entry.config_instance
 
+        # 按前缀拆分参数
+        # Split config fields by prefix
         uvicorn_kwargs: dict[str, Any] = {}
         fastapi_kwargs: dict[str, Any] = {}
 
         if root_config is not None:
             for key, value in vars(root_config).items():
                 if key.startswith("_"):
-                    continue
+                    continue  # 跳过私有字段
                 if key.startswith(_UVICORN_PREFIX):
                     uvicorn_kwargs[key[len(_UVICORN_PREFIX) :]] = value
                 elif key.startswith(_FASTAPI_PREFIX):
                     fastapi_kwargs[key[len(_FASTAPI_PREFIX) :]] = value
 
-        # Safe defaults: bind to localhost by default
+        # 安全默认值：绑定 localhost
         host: str = uvicorn_kwargs.pop("host", "127.0.0.1")
         port: int = uvicorn_kwargs.pop("port", 8000)
 
         @asynccontextmanager
         async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-            """FastAPI lifespan: start framework services, register routes, stop."""
+            """FastAPI lifespan: 绑定框架生命周期到 HTTP 服务器生命周期。"""
             await Canary.start(self)
             app.state.cf_registry = self.registry
             _register_routes(app, self.registry)
@@ -141,18 +146,20 @@ class WebCanary(Canary):
         await server.serve()
 
 
-# ---------------------------------------------------------------------------
-# Internal route registration
-# ---------------------------------------------------------------------------
+# ============================================================================
+# 内部路由注册 (Internal route registration)
+# ============================================================================
 
 
 def _register_routes(app: FastAPI, registry: Registry) -> None:
     """Scan all ``@web``-marked entries and register their HTTP routes.
 
-    Three scenarios:
-        1. External ``@router`` classes in ``routers=[]``.
-        2. Route methods defined directly on the ``@web`` class (no routers).
-        3. Combination of both (module with routers + own methods).
+    扫描所有 @web 标记的服务/模块，将其路由注册到 FastAPI。
+
+    三种注册场景 (Three scenarios):
+        1. 外部路由类: ``@web(routers=[UserRouter])`` → 注册每个 Router 的方法
+        2. 自身方法: 无 routers 但类自身有 ``@get``/``@post`` 方法
+        3. 混合: 既有 routers 又是 @module → 同时注册
     """
     for entry in registry.all_entries():
         cls = entry.cls
@@ -161,7 +168,7 @@ def _register_routes(app: FastAPI, registry: Registry) -> None:
 
         routers = get_web_routers(cls)
 
-        # External router classes
+        # 1. 外部路由类
         for router_cls in routers:
             prefix = get_router_prefix(router_cls)
             ctx = entry.context
@@ -175,13 +182,14 @@ def _register_routes(app: FastAPI, registry: Registry) -> None:
             router_instance = router_cls(ctx)
             _register_instance_routes(app, router_instance, prefix)
 
-        # Own methods (no external routers, or module with extra methods)
         owns_routers = bool(routers)
         is_container = is_cf_module(cls) or is_cf_service(cls)
 
+        # 2. 自身方法（无外部 routers）
         if not owns_routers and is_container:
             _register_instance_routes(app, entry.instance, "")
 
+        # 3. 混合：有 routers 的模块同时注册自身方法
         if owns_routers and is_cf_module(cls):
             _register_instance_routes(app, entry.instance, "")
 
@@ -193,16 +201,19 @@ def _register_instance_routes(
 ) -> None:
     """Scan *instance* for ``@get`` / ``@post`` / … methods and register them.
 
+    扫描实例类的 @get/@post/@put/@delete/@patch 方法，注册到 FastAPI。
+
     Args:
-        app: The FastAPI application instance.
-        instance: An object whose class may contain route-decorated methods.
-        prefix: URL prefix prepended to each method's path.
+        app: FastAPI 应用实例。
+        instance: 包含路由方法的类实例。
+        prefix: URL 前缀，拼接到每个方法的路径前。
     """
     for _, method in inspect.getmembers(instance.__class__, inspect.isfunction):
         if not is_route_method(method):
             continue
 
         http_method, path, kwargs = get_route_info(method)
+        # 拼接 prefix + path，去除末尾多余斜杠
         full_path = prefix.rstrip("/") + "/" + path.lstrip("/")
         if full_path.endswith("/") and full_path != "/":
             full_path = full_path.rstrip("/")

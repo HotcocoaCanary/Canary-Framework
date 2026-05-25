@@ -1,12 +1,13 @@
-"""Tests for :mod:`canary_framework.core.registry.registry`."""
+"""Tests for :mod:`canary_framework.core.container.registry`."""
 
 from __future__ import annotations
 
 import pytest
 
+from canary_framework.common._types import ServiceEntry
+from canary_framework.common.exceptions import ServiceNotFoundError
+from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.service import service
-from canary_framework.core.registry.registry import Registry, ServiceEntry
-from canary_framework.exceptions import ServiceNotFoundError
 
 
 class TestServiceEntry:

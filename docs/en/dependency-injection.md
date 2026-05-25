@@ -32,7 +32,7 @@ All injected dependencies are available in `on_init`.
 Kahn topological sort: dependencies start before dependents, dependency-free services start first. Circular dependencies raise `CircularDependencyError`:
 
 ```python
-from canary_framework.exceptions import CircularDependencyError
+from canary_framework import CircularDependencyError
 
 try:
     await app.init()

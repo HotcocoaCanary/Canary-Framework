@@ -1,14 +1,14 @@
-"""Tests for :mod:`canary_framework.core.engine.context`."""
+"""Tests for :mod:`canary_framework.core.conductor.context`."""
 
 from __future__ import annotations
 
 import pytest
 
+from canary_framework.common.exceptions import ConfigurationError, ServiceNotFoundError
+from canary_framework.core.conductor.canary import Canary
 from canary_framework.core.decorators.config import config
 from canary_framework.core.decorators.module import module
 from canary_framework.core.decorators.service import service
-from canary_framework.core.engine.canary import Canary
-from canary_framework.exceptions import ConfigurationError, ServiceNotFoundError
 
 
 class TestContextConfigAs:

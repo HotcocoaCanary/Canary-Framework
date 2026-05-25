@@ -75,7 +75,7 @@ select = [
     "SIM", # flake8-simplify
     "RUF", # ruff-specific rules
 ]
-ignore = ["E501"]  # line length handled by formatter
+ignore = ["E501", "RUF001", "RUF002", "RUF003"]  # line length handled by formatter
 
 [tool.ruff.format]
 quote-style = "double"

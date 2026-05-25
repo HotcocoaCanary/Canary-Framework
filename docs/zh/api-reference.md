@@ -107,7 +107,7 @@ await app.start()
 所有框架异常继承自 `CanaryFrameworkError`，可统一捕获：
 
 ```python
-from canary_framework.exceptions import (
+from canary_framework import (
     CanaryFrameworkError,      # 基类
     ConfigurationError,         # 配置加载/查找失败
     ServiceNotFoundError,       # 服务/模块未注册
@@ -132,28 +132,41 @@ from canary_framework.exceptions import (
 ```
 src/canary_framework/
 ├── __init__.py
-├── exceptions.py            # 框架异常体系
+├── common/
+│   ├── __init__.py
+│   ├── _types.py            # ServiceEntry, ServiceMeta, ModuleMeta
+│   ├── enums.py             # LifecycleHook
+│   └── exceptions.py        # CanaryFrameworkError & 子类
 ├── core/
+│   ├── __init__.py
 │   ├── decorators/
+│   │   ├── __init__.py
 │   │   ├── config.py        # @config（内置 env_file=".env"）
-│   │   ├── service.py       # @service + ServiceMeta TypedDict
-│   │   ├── module.py        # @module + ModuleMeta TypedDict
-│   │   └── lifecycle.py     # @on_init/start/end + LifecycleHook StrEnum
-│   ├── engine/
-│   │   ├── canary.py        # Canary 引擎（启动编排 + 日志脱敏）
-│   │   ├── context.py       # Context（类型安全配置/服务访问）
-│   │   ├── injector.py      # 依赖注入（DependencyInjectionError）
-│   │   └── sorter.py        # 拓扑排序（CircularDependencyError）
-│   ├── registry/
-│   │   └── registry.py      # 注册中心（dataclass(slots=True) ServiceEntry）
-│   └── utils/
-│       └── naming.py        # 命名工具（CamelCase → snake_case）
+│   │   ├── lifecycle.py     # @on_init, @on_start, @on_end
+│   │   ├── module.py        # @module
+│   │   └── service.py       # @service
+│   ├── conductor/
+│   │   ├── __init__.py
+│   │   ├── canary.py        # Canary 引擎
+│   │   └── context.py       # Context
+│   ├── algorithms/
+│   │   ├── __init__.py
+│   │   ├── injector.py      # 依赖注入
+│   │   ├── sorter.py        # 拓扑排序
+│   │   └── naming.py        # 命名工具
+│   └── container/
+│       ├── __init__.py
+│       └── registry.py      # 注册中心
 └── web/
     └── fastapi/
-        ├── web_canary.py    # WebCanary 引擎（默认 127.0.0.1）
+        ├── __init__.py
+        ├── conductor/
+        │   ├── __init__.py
+        │   └── web_canary.py # WebCanary 引擎
         └── decorators/
-            ├── web.py       # @web
-            └── router.py    # @router, @get, @post, ...
+            ├── __init__.py
+            ├── router.py    # @router, @get, @post, ...
+            └── web.py       # @web
 ```
 
 ## 初始化流程

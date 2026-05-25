@@ -32,7 +32,7 @@ class B:
 Kahn 拓扑排序：被依赖的服务先启动，无依赖的服务最先启动。检测到循环依赖时抛出 `CircularDependencyError`：
 
 ```python
-from canary_framework.exceptions import CircularDependencyError
+from canary_framework import CircularDependencyError
 
 try:
     await app.init()

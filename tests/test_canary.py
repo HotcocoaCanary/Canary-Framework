@@ -13,8 +13,8 @@ from canary_framework.core import (
     on_start,
     service,
 )
-from canary_framework.core.engine.context import Context
-from canary_framework.core.registry.registry import Registry
+from canary_framework.core.conductor.context import Context
+from canary_framework.core.container.registry import Registry
 
 
 class TestCanaryLifecycle:
