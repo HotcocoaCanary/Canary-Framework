@@ -3,7 +3,7 @@ name: Release & Publish
 on:
   push:
     branches:
-      - "releases/**"
+      - "releases/v*"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -52,8 +52,7 @@ jobs:
         id: version
         run: |
           BRANCH="${{ github.ref_name }}"
-          VERSION="${BRANCH#releases/}"
-          VERSION="${VERSION#v}"
+          VERSION="${BRANCH#releases/v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
