@@ -1,0 +1,76 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/zh/**"
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync docs to wiki
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.wiki.git" /tmp/wiki
+
+          declare -A TITLES=(
+              ["index"]="Home"
+              ["quickstart"]="快速开始"
+              ["core-concepts"]="核心概念"
+              ["services"]="服务"
+              ["modules"]="模块"
+              ["configuration"]="配置"
+              ["lifecycle"]="生命周期"
+              ["dependency-injection"]="依赖注入"
+              ["web-integration"]="Web-集成"
+              ["api-reference"]="API-参考"
+          )
+
+          ORDER=(index quickstart core-concepts services modules configuration lifecycle dependency-injection web-integration api-reference)
+
+          cd /tmp/wiki
+          for key in "${ORDER[@]}"; do
+              src="$GITHUB_WORKSPACE/docs/zh/${key}.md"
+              title="${TITLES[$key]}"
+              dst="${title// /-}.md"
+              if [ -f "$src" ]; then
+                  cp "$src" "$dst"
+              fi
+          done
+
+          cat > _Sidebar.md << 'SIDEBAR'
+          # 文档
+
+          - [快速开始](快速开始)
+          - [核心概念](核心概念)
+          - [服务](服务)
+          - [模块](模块)
+          - [配置](配置)
+          - [生命周期](生命周期)
+          - [依赖注入](依赖注入)
+          - [Web 集成](Web-集成)
+          - [API 参考](API-参考)
+
+          ---
+
+          [回到仓库](https://github.com/HotcocoaCanary/Canary-Framework)
+          SIDEBAR
+
+          git add -A
+          if git diff --cached --quiet; then
+              echo "No wiki changes."
+          else
+              git -c user.name="github-actions[bot]" \
+                  -c user.email="github-actions[bot]@users.noreply.github.com" \
+                  commit -m "Sync docs from main repo"
+              git push origin master
+              echo "Wiki updated!"
+          fi
