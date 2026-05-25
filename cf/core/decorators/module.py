@@ -3,20 +3,21 @@
 模块本身也是服务，支持配置、生命周期钩子。额外的能力是声明 services 子节点列表。
 子服务/子模块通过 services 参数以类列表的形式注册到当前模块。
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 from cf.core.decorators.service import is_cf_service
 
-_CF_MODULE_ATTR = "_cf_module__"       # 标记: 属于 CF 模块
+_CF_MODULE_ATTR = "_cf_module__"  # 标记: 属于 CF 模块
 _CF_MODULE_META = "_cf_module_meta__"  # 存储: 元数据字典
 
 
 def module(
-    name: str,                           # 模块名称，全局唯一
+    name: str,  # 模块名称，全局唯一
     *,
-    config: type | None = None,          # 模块配置类（可选，子服务可继承）
+    config: type | None = None,  # 模块配置类（可选，子服务可继承）
     services: list[type] | None = None,  # 子服务和子模块类列表（可选）
 ):
     """将类声明为 CF 框架的模块。
@@ -43,14 +44,13 @@ def module(
         for svc_cls in _services:
             if not is_cf_service(svc_cls) and not is_cf_module(svc_cls):
                 raise TypeError(
-                    f"@module '{name}': '{svc_cls.__name__}' is not a @service "
-                    f"or @module class."
+                    f"@module '{name}': '{svc_cls.__name__}' is not a @service or @module class."
                 )
 
         meta = {"name": name, "config_cls": _config, "services": _services}
         setattr(cls, _CF_MODULE_ATTR, True)
         setattr(cls, _CF_MODULE_META, meta)
-        cls.__cf_name__ = name
+        cls.__cf_name__ = name  # type: ignore[attr-defined]
         return cls
 
     return decorator

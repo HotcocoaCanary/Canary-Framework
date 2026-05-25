@@ -1,6 +1,6 @@
-import asyncio
+import pytest
 
-from cf.core import service, on_init, on_start, on_end, Canary, module
+from cf.core import Canary, module, on_init, on_start, service
 
 _log: list[str] = []
 
@@ -8,27 +8,39 @@ _log: list[str] = []
 @service("a")
 class A:
     @on_init
-    def init(self, ctx): _log.append("a:init")
+    def init(self, ctx):
+        _log.append("a:init")
+
     @on_start
-    def start(self): _log.append("a:start")
-    def do(self): return "a"
+    def start(self):
+        _log.append("a:start")
+
+    def do(self):
+        return "a"
+
 
 @service("b", deps=[A])
 class B:
     @on_init
-    def init(self, ctx): _log.append("b:init"); self._ok = self.a.do()
+    def init(self, ctx):
+        _log.append("b:init")
+        self._ok = self.a.do()
+
     @on_start
-    def start(self): _log.append("b:start")
+    def start(self):
+        _log.append("b:start")
+
 
 @module("m", services=[A, B])
 class M:
     @on_init
-    def init(self, ctx): _log.append("m:init")
+    def init(self, ctx):
+        _log.append("m:init")
 
-import pytest
 
 @pytest.fixture(autouse=True)
-def _r(): _log.clear()
+def _r():
+    _log.clear()
 
 
 async def test_startup_order():

@@ -9,9 +9,10 @@
     2. 无 routers → 注册类自身定义的 @get/@post 方法
     3. 有 routers + @module → 同时注册 routers 和自身方法
 """
+
 from __future__ import annotations
 
-_CF_WEB_ATTR    = "__cf_web__"         # 标记: 被 @web 装饰
+_CF_WEB_ATTR = "__cf_web__"  # 标记: 被 @web 装饰
 _CF_WEB_ROUTERS = "__cf_web_routers__"  # 存储: 路由类列表
 
 

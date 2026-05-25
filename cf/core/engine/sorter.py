@@ -3,6 +3,7 @@
 根据服务的 dep_names 依赖关系构建有向图，计算出安全启动顺序。
 被依赖方先于依赖方启动；检测到循环依赖时抛出 RuntimeError。
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,7 +36,7 @@ def topological_sort(registry: Registry) -> list[str]:
     names = registry.names()
 
     # 入度表: 节点还需等待多少个依赖
-    in_degree: dict[str, int] = {n: 0 for n in names}
+    in_degree: dict[str, int] = dict.fromkeys(names, 0)
     # 邻接表: 被依赖者 → [依赖者列表]
     adjacency: dict[str, list[str]] = defaultdict(list)
 

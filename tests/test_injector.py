@@ -1,14 +1,16 @@
 from cf.core.decorators.service import service
-from cf.core.registry.registry import Registry
 from cf.core.engine.injector import inject_deps
+from cf.core.registry.registry import Registry
 
 
 def test_inject():
     @service("db")
-    class DB: connected = True
+    class DB:
+        connected = True
 
     @service("user", deps=[DB])
-    class User: pass
+    class User:
+        pass
 
     reg = Registry()
     reg.register(DB)

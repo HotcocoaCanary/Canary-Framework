@@ -9,13 +9,15 @@
 
 路由类构造函数接收统一 Context 对象，通过 ctx.service 访问服务，ctx.resolve() 解析依赖。
 """
+
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-_CF_ROUTER_ATTR   = "__cf_router__"        # 标记: 被 @router 装饰
+_CF_ROUTER_ATTR = "__cf_router__"  # 标记: 被 @router 装饰
 _CF_ROUTER_PREFIX = "__cf_router_prefix__"  # 存储: URL 前缀
-_CF_ROUTE_ATTR    = "__cf_route__"          # 标记: 被 @get/@post 等装饰
+_CF_ROUTE_ATTR = "__cf_route__"  # 标记: 被 @get/@post 等装饰
 
 
 def router(prefix: str = "", deps: list[type] | None = None):
@@ -33,7 +35,7 @@ def router(prefix: str = "", deps: list[type] | None = None):
     def decorator(cls: type) -> type:
         setattr(cls, _CF_ROUTER_ATTR, True)
         setattr(cls, _CF_ROUTER_PREFIX, prefix)
-        setattr(cls, "__cf_router_deps__", _deps)
+        cls.__cf_router_deps__ = _deps  # type: ignore[attr-defined]
         return cls
 
     return decorator
@@ -51,6 +53,7 @@ def get_router_prefix(cls: type) -> str:
 
 # ── HTTP 方法装饰器工厂 ────────────────────────────────────
 
+
 def _make_route(method: str):
     """创建指定 HTTP 方法的装饰器。
 
@@ -60,23 +63,26 @@ def _make_route(method: str):
     Args:
         method: HTTP 方法名（GET / POST / PUT / DELETE / PATCH）。
     """
+
     def decorator(path: str, **kwargs: Any):
         def inner(fn: Callable[..., Any]) -> Callable[..., Any]:
             setattr(fn, _CF_ROUTE_ATTR, True)
-            setattr(fn, "_cf_route_method_", method)
-            setattr(fn, "_cf_route_path_", path)
-            setattr(fn, "_cf_route_kwargs_", kwargs)
+            fn._cf_route_method_ = method  # type: ignore[attr-defined]
+            fn._cf_route_path_ = path  # type: ignore[attr-defined]
+            fn._cf_route_kwargs_ = kwargs  # type: ignore[attr-defined]
             return fn
+
         return inner
+
     return decorator
 
 
 # HTTP 方法装饰器
-get    = _make_route("GET")     # @get("/users")
-post   = _make_route("POST")    # @post("/users", status_code=201)
-put    = _make_route("PUT")     # @put("/users/{id}")
+get = _make_route("GET")  # @get("/users")
+post = _make_route("POST")  # @post("/users", status_code=201)
+put = _make_route("PUT")  # @put("/users/{id}")
 delete = _make_route("DELETE")  # @delete("/users/{id}")
-patch  = _make_route("PATCH")   # @patch("/users/{id}")
+patch = _make_route("PATCH")  # @patch("/users/{id}")
 
 
 def is_route_method(fn: Callable[..., Any]) -> bool:
@@ -94,6 +100,6 @@ def get_route_info(fn: Callable[..., Any]) -> tuple[str, str, dict[str, Any]]:
         三元组 (method, path, kwargs)，例如 ("GET", "/users", {"status_code": 200})。
     """
     method = getattr(fn, "_cf_route_method_", "GET")
-    path   = getattr(fn, "_cf_route_path_", "/")
+    path = getattr(fn, "_cf_route_path_", "/")
     kwargs = getattr(fn, "_cf_route_kwargs_", {})
     return method, path, kwargs

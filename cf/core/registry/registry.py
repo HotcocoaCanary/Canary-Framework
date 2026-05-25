@@ -3,9 +3,10 @@
 ServiceEntry: 单个服务/模块的完整元数据和运行时状态。
 Registry:    管理所有 ServiceEntry，按 name 和 class 建立双向索引。
 """
+
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from cf.core.engine.context import Context
@@ -32,18 +33,18 @@ class ServiceEntry:
         is_module: bool = False,
         sub_services: list[type] | None = None,
     ) -> None:
-        self.cls = cls                          # 原始类（@service 或 @module 装饰）
-        self.instance = instance                # 实例（register 时 cls() 无参构造）
-        self.name = name                        # 名称（全局唯一）
-        self.deps = deps                        # 依赖服务类列表
-        self.config_cls = config_cls            # 配置类（可能从父模块继承）
-        self.is_module = is_module              # 是否为模块
+        self.cls = cls  # 原始类（@service 或 @module 装饰）
+        self.instance = instance  # 实例（register 时 cls() 无参构造）
+        self.name = name  # 名称（全局唯一）
+        self.deps = deps  # 依赖服务类列表
+        self.config_cls = config_cls  # 配置类（可能从父模块继承）
+        self.is_module = is_module  # 是否为模块
         self.sub_services = sub_services or []  # 子服务列表（仅模块有效）
-        self.dep_names: list[str] = []          # 依赖名称列表（拓扑排序用）
+        self.dep_names: list[str] = []  # 依赖名称列表（拓扑排序用）
         self.config_instance: object | None = None  # 配置实例（init 阶段创建）
         self.parent_entry: ServiceEntry | None = None  # 父模块注册项
-        self.context: Context | None = None     # 关联的 Context（构建树时绑定）
-        self._hooks: dict | None = None         # 缓存: find_hooks 结果（延迟查找）
+        self.context: Context | None = None  # 关联的 Context（构建树时绑定）
+        self._hooks: dict | None = None  # 缓存: find_hooks 结果（延迟查找）
 
 
 class Registry:
@@ -81,8 +82,9 @@ class Registry:
             return
 
         if meta is None:
-            from cf.core.decorators.service import get_service_meta
             from cf.core.decorators.module import get_module_meta
+            from cf.core.decorators.service import get_service_meta
+
             meta = get_module_meta(cls) if is_module else get_service_meta(cls)
 
         name = meta["name"]
@@ -103,8 +105,7 @@ class Registry:
 
         # 将 deps 中的类引用转换为字符串名称
         entry.dep_names = [
-            d if isinstance(d, str) else getattr(d, '__cf_name__', d.__name__)
-            for d in entry.deps
+            d if isinstance(d, str) else getattr(d, "__cf_name__", d.__name__) for d in entry.deps
         ]
 
         self._by_name[name] = entry

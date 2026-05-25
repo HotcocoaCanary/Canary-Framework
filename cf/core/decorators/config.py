@@ -9,6 +9,7 @@ Usage:
         host: str = "0.0.0.0"
         port: int = 8000
 """
+
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,10 +36,10 @@ def config(cls: type) -> type:
             "__annotations__": annotations,
             # BaseSettings 的行为配置
             "model_config": SettingsConfigDict(
-                env_file=".env",            # 自动从当前目录 .env 读取
+                env_file=".env",  # 自动从当前目录 .env 读取
                 env_file_encoding="utf-8",
-                extra="ignore",             # 忽略未声明的环境变量
-                env_prefix="",              # 无前缀，字段名直接对应环境变量键
+                extra="ignore",  # 忽略未声明的环境变量
+                env_prefix="",  # 无前缀，字段名直接对应环境变量键
             ),
             # 将原始类的类变量（默认值）复制到新类
             **{

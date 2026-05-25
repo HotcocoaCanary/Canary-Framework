@@ -13,13 +13,15 @@ find_hooks 查找策略:
     2. 回退: 按方法名 on_init / on_start / on_end 直接匹配
     3. 以上均未找到 → 该阶段钩子为 None
 """
+
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-_CF_ON_INIT  = "__cf_on_init__"   # 标记: 初始化钩子
+_CF_ON_INIT = "__cf_on_init__"  # 标记: 初始化钩子
 _CF_ON_START = "__cf_on_start__"  # 标记: 启动钩子
-_CF_ON_END   = "__cf_on_end__"    # 标记: 停止钩子
+_CF_ON_END = "__cf_on_end__"  # 标记: 停止钩子
 
 
 def on_init(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -55,7 +57,9 @@ def find_hooks(instance: object) -> dict[str, Callable[..., Any] | None]:
         未找到的钩子对应值为 None。
     """
     hooks: dict[str, Callable[..., Any] | None] = {
-        "on_init": None, "on_start": None, "on_end": None,
+        "on_init": None,
+        "on_start": None,
+        "on_end": None,
     }
 
     # 第一步: 检查装饰器标记

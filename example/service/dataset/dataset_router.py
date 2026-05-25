@@ -1,10 +1,9 @@
 from cf import Context
-from cf.web.fastapi import router, get
+from cf.web.fastapi import get, router
 
 
 @router(prefix="/datasets")
 class DataSetRouter:
-
     def __init__(self, ctx: Context):
         self.svc = ctx.service
 

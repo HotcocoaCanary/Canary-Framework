@@ -8,6 +8,7 @@
     日志格式: [CF] [LEVEL] [module] message
     与 uvicorn 日志隔离（不同的 logger 名称），不会重复输出。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -15,8 +16,8 @@ import logging
 import os
 
 from cf.core.decorators.lifecycle import find_hooks
-from cf.core.decorators.module import is_cf_module, get_module_meta
-from cf.core.decorators.service import is_cf_service, get_service_meta
+from cf.core.decorators.module import get_module_meta, is_cf_module
+from cf.core.decorators.service import get_service_meta, is_cf_service
 from cf.core.engine.context import Context
 from cf.core.engine.injector import inject_deps
 from cf.core.engine.sorter import topological_sort
@@ -42,9 +43,7 @@ def _init_logging() -> None:
         return
 
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter(
-        "[CF] [%(levelname)-5s] [%(name)s] %(message)s"
-    ))
+    handler.setFormatter(logging.Formatter("[CF] [%(levelname)-5s] [%(name)s] %(message)s"))
     _cf_logger.addHandler(handler)
     # 禁止向 root logger 传播，避免 uvicorn 或其他库的 root handler 重复打印
     _cf_logger.propagate = False
@@ -73,9 +72,9 @@ class Canary:
     """
 
     def __init__(self, target: type) -> None:
-        self._target = target               # 根模块/服务类（入口点）
-        self._registry = Registry()         # 全局注册中心
-        self._startup_order: list[str] = [] # 拓扑排序后的名称列表
+        self._target = target  # 根模块/服务类（入口点）
+        self._registry = Registry()  # 全局注册中心
+        self._startup_order: list[str] = []  # 拓扑排序后的名称列表
 
     @property
     def registry(self) -> Registry:
@@ -109,8 +108,9 @@ class Canary:
         # ── 阶段2: 拓扑排序 ──
         engine.debug("Phase 2: topological sort")
         self._startup_order = topological_sort(self._registry)
-        engine.info("Startup order (%d): %s", len(self._startup_order),
-                     " → ".join(self._startup_order))
+        engine.info(
+            "Startup order (%d): %s", len(self._startup_order), " → ".join(self._startup_order)
+        )
 
         # ── 阶段3: 构建 Context 链 ──
         engine.debug("Phase 3: building context tree")
@@ -160,8 +160,7 @@ class Canary:
             config_log.info(
                 "  %s config loaded: %s",
                 entry.name,
-                {k: v for k, v in vars(entry.config_instance).items()
-                 if not k.startswith("_")}
+                {k: v for k, v in vars(entry.config_instance).items() if not k.startswith("_")},
             )
         else:
             config_log.debug("  %s has no config", entry.name)
@@ -242,13 +241,9 @@ class Canary:
             )
             return
 
-        raise TypeError(
-            f"'{cls.__name__}' is not decorated with @service or @module"
-        )
+        raise TypeError(f"'{cls.__name__}' is not decorated with @service or @module")
 
-    def _inherit_config(
-        self, entry: ServiceEntry, parent_entry: ServiceEntry | None
-    ) -> None:
+    def _inherit_config(self, entry: ServiceEntry, parent_entry: ServiceEntry | None) -> None:
         """子节点未声明 config_cls 时，从父模块拷贝。"""
         if entry.config_cls is None and parent_entry is not None:
             entry.config_cls = parent_entry.config_cls
