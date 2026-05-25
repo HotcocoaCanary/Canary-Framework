@@ -78,7 +78,7 @@ module = [
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["canary_framework"]
+source = ["src/canary_framework"]
 omit = ["tests/*", "example/*"]
 
 [tool.coverage.report]
@@ -89,7 +89,7 @@ exclude_lines = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["canary_framework"]
+packages = ["src/canary_framework"]
 
 [dependency-groups]
 dev = [
