@@ -1,13 +1,13 @@
 # Web Integration
 
-Use `cf[web]` and `WebCanary` for FastAPI integration.
+Use `canary-framework[web]` and `WebCanary` for FastAPI integration.
 
 ## Minimal Web
 
 ```python
 import asyncio
-from cf import module
-from cf.web.fastapi import web, get, WebCanary
+from canary_framework import module
+from canary_framework.web.fastapi import web, get, WebCanary
 
 @web()
 @module(name="App", services=[])
@@ -27,8 +27,8 @@ asyncio.run(main())
 ## Full Web: Service + Router Class
 
 ```python
-from cf import service, on_init, Context
-from cf.web.fastapi import web, router, get, post, WebCanary
+from canary_framework import service, on_init, Context
+from canary_framework.web.fastapi import web, router, get, post, WebCanary
 
 @router(prefix="/api/users")
 class UserRouter:

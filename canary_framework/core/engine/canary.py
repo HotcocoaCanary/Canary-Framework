@@ -15,13 +15,13 @@ import asyncio
 import logging
 import os
 
-from cf.core.decorators.lifecycle import find_hooks
-from cf.core.decorators.module import get_module_meta, is_cf_module
-from cf.core.decorators.service import get_service_meta, is_cf_service
-from cf.core.engine.context import Context
-from cf.core.engine.injector import inject_deps
-from cf.core.engine.sorter import topological_sort
-from cf.core.registry.registry import Registry, ServiceEntry
+from canary_framework.core.decorators.lifecycle import find_hooks
+from canary_framework.core.decorators.module import get_module_meta, is_cf_module
+from canary_framework.core.decorators.service import get_service_meta, is_cf_service
+from canary_framework.core.engine.context import Context
+from canary_framework.core.engine.injector import inject_deps
+from canary_framework.core.engine.sorter import topological_sort
+from canary_framework.core.registry.registry import Registry, ServiceEntry
 
 # 框架日志系统
 # 格式 [CF] [LEVEL] [模块] 消息，与 uvicorn 的 root logger 完全隔离（cf 命名空间）

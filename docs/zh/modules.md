@@ -3,7 +3,7 @@
 ## 最小写法
 
 ```python
-from cf import module
+from canary_framework import module
 
 @module(name="App", services=[SvcA, SvcB])
 class App:
@@ -13,7 +13,7 @@ class App:
 ## 完整写法
 
 ```python
-from cf import module, on_init, on_start, Context
+from canary_framework import module, on_init, on_start, Context
 
 @module(
     name="AppModule",

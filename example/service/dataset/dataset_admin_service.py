@@ -1,6 +1,6 @@
 import logging
 
-from cf import Context, on_end, on_init, on_start, service
+from canary_framework import Context, on_end, on_init, on_start, service
 from service.dataset.dataset_config import DataSetConfig
 from service.dataset.dataset_service import DataSetService
 from service.db.db_service import DBService

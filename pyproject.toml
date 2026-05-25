@@ -3,9 +3,9 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cf"
+name = "canary-framework"
 version = "0.1.0"
-description = "Canary-Framework —— 轻量级 Python 服务框架"
+description = "Canary Framework —— 轻量级 Python 服务框架"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic-settings>=2.3",
@@ -78,7 +78,7 @@ module = [
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["cf"]
+source = ["canary_framework"]
 omit = ["tests/*", "example/*"]
 
 [tool.coverage.report]
@@ -89,7 +89,7 @@ exclude_lines = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["cf"]
+packages = ["canary_framework"]
 
 [dependency-groups]
 dev = [

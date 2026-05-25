@@ -1,7 +1,7 @@
 # 最小示例：一个服务 + 一个模块，无配置、无 Web
 import asyncio
 
-from cf import Canary, Context, module, on_init, on_start, service
+from canary_framework import Canary, Context, module, on_init, on_start, service
 
 
 @service(name="hello")

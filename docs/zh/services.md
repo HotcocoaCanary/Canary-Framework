@@ -3,7 +3,7 @@
 ## 最小写法
 
 ```python
-from cf import service, on_start
+from canary_framework import service, on_start
 
 @service(name="HelloService")
 class HelloService:
@@ -18,7 +18,7 @@ class HelloService:
 ## 完整写法
 
 ```python
-from cf import service, on_init, Context
+from canary_framework import service, on_init, Context
 
 @service(
     name="UserService",         # 必填

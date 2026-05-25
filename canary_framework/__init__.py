@@ -7,7 +7,7 @@
 
 __version__ = "0.1.0"
 
-from cf.core import (
+from canary_framework.core import (
     Canary,
     Context,
     config,

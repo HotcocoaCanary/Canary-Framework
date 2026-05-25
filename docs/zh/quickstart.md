@@ -4,14 +4,14 @@
 
 ```bash
 pip install git+https://github.com/HotcocoaCanary/Canary-Framework.git              # 核心库
-pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=cf[web]" # 含 FastAPI
+pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=canary-framework[web]" # 含 FastAPI
 ```
 
 ## 最小示例
 
 ```python
 import asyncio
-from cf import service, module, on_start, Canary
+from canary_framework import service, module, on_start, Canary
 
 @service(name="hello")
 class HelloService:
@@ -39,8 +39,8 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from cf import service, module, on_init, on_start, Context, config
-from cf.web.fastapi import web, get, router, WebCanary
+from canary_framework import service, module, on_init, on_start, Context, config
+from canary_framework.web.fastapi import web, get, router, WebCanary
 
 # 配置
 @config

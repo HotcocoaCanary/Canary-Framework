@@ -17,10 +17,10 @@ uv sync --extra dev --extra web
 3. 运行检查和测试：
 
 ```bash
-uv run ruff check cf/ tests/       # 代码检查
-uv run ruff format cf/ tests/      # 代码格式化
-uv run mypy cf/                     # 类型检查
-uv run pytest --cov=cf              # 运行测试
+uv run ruff check canary_framework/ tests/       # 代码检查
+uv run ruff format canary_framework/ tests/      # 代码格式化
+uv run mypy canary_framework/                     # 类型检查
+uv run pytest --cov=canary_framework              # 运行测试
 ```
 
 4. 提交 PR，描述变更内容

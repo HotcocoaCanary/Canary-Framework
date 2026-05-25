@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import logging
 
-from cf.core.registry.registry import Registry, ServiceEntry
-from cf.core.utils.naming import to_snake
+from canary_framework.core.registry.registry import Registry, ServiceEntry
+from canary_framework.core.utils.naming import to_snake
 
 _log = logging.getLogger("cf.di")
 

@@ -79,7 +79,7 @@ Unified runtime context. Delegates upward through parent chain.
 ## Internal Architecture
 
 ```
-cf/
+canary_framework/
 ├── core/
 │   ├── decorators/          # User-facing decorators
 │   │   ├── config.py        # @config (built-in env_file=".env")

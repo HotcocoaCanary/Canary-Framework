@@ -1,4 +1,4 @@
-from cf import config
+from canary_framework import config
 
 
 @config

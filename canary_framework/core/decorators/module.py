@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from cf.core.decorators.service import is_cf_service
+from canary_framework.core.decorators.service import is_cf_service
 
 _CF_MODULE_ATTR = "_cf_module__"  # 标记: 属于 CF 模块
 _CF_MODULE_META = "_cf_module_meta__"  # 存储: 元数据字典

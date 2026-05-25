@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cf.core.registry.registry import Registry, ServiceEntry
+    from canary_framework.core.registry.registry import Registry, ServiceEntry
 
 
 class Context:

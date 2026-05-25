@@ -1,16 +1,16 @@
 <p align="center">
-  <h1 align="center">CF (Canary Framework)</h1>
+  <h1 align="center">Canary Framework</h1>
   <p align="center">Lightweight Python Service Framework — Decorator-Driven, Zero Boilerplate</p>
 </p>
 
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
-  <a href="https://pypi.org/project/cf/"><img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python"></a>
+  <a href="https://pypi.org/project/canary-framework/"><img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python"></a>
 </p>
 
 ---
 
-CF is a **decorator-driven** service framework. Core philosophy: **Services are the minimum unit. Modules compose services. Modules themselves are also services.**
+Canary Framework is a **decorator-driven** service framework. Core philosophy: **Services are the minimum unit. Modules compose services. Modules themselves are also services.**
 
 ## Features
 
@@ -26,14 +26,14 @@ CF is a **decorator-driven** service framework. Core philosophy: **Services are 
 
 ```bash
 pip install git+https://github.com/HotcocoaCanary/Canary-Framework.git              # core library
-pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=cf[web]" # with FastAPI
+pip install "git+https://github.com/HotcocoaCanary/Canary-Framework.git#egg=canary-framework[web]" # with FastAPI
 ```
 
 ## Quick Start
 
 ```python
 import asyncio
-from cf import service, module, on_start, Canary
+from canary_framework import service, module, on_start, Canary
 
 @service(name="hello")
 class HelloService:
@@ -58,8 +58,8 @@ if __name__ == "__main__":
 
 ```python
 import asyncio
-from cf import service, module, on_init, Context, config
-from cf.web.fastapi import web, get, WebCanary
+from canary_framework import service, module, on_init, Context, config
+from canary_framework.web.fastapi import web, get, WebCanary
 
 @config
 class AppConfig:
@@ -85,7 +85,7 @@ asyncio.run(main())
 ## Architecture
 
 ```
-cf/
+canary_framework/
 ├── core/
 │   ├── decorators/          # @config, @service, @module, @on_init/start/end
 │   ├── engine/              # Canary, Context, Injector, Sorter

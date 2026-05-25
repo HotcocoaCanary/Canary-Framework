@@ -1,6 +1,6 @@
-from cf.core.decorators.service import service
-from cf.core.engine.injector import inject_deps
-from cf.core.registry.registry import Registry
+from canary_framework.core.decorators.service import service
+from canary_framework.core.engine.injector import inject_deps
+from canary_framework.core.registry.registry import Registry
 
 
 def test_inject():

@@ -7,8 +7,8 @@ from service.dataset.dataset_service import DataSetService
 from service.db.db_service import DBService
 from service.user.user_service import UserService
 
-from cf import Context, config, module, on_end, on_init, on_start
-from cf.web.fastapi import WebCanary, get, web
+from canary_framework import Context, config, module, on_end, on_init, on_start
+from canary_framework.web.fastapi import WebCanary, get, web
 
 logger = logging.getLogger(__name__)
 
