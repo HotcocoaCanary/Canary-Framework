@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from canary_framework.common.enums import LifecycleHook
 from canary_framework.core.decorators.lifecycle import (
     find_hooks,
@@ -11,6 +13,7 @@ from canary_framework.core.decorators.lifecycle import (
 )
 
 
+@pytest.mark.unit
 class TestLifecycleHookEnum:
     """Verify the StrEnum values match hook names used by the engine."""
 
@@ -25,6 +28,7 @@ class TestLifecycleHookEnum:
         assert LifecycleHook.INIT in names
 
 
+@pytest.mark.unit
 class TestFindHooks:
     """Unit tests for hook discovery on service instances."""
 
@@ -117,3 +121,20 @@ class TestFindHooks:
             LifecycleHook.START,
             LifecycleHook.END,
         }
+
+    def test_exception_safe_attribute_access(self) -> None:
+        """find_hooks must survive attributes that raise on access
+        (covers the except Exception: continue branch, lines 165-166)."""
+
+        class Troublemaker:
+            @on_init
+            def init(self, ctx: object) -> None:
+                pass
+
+            @property
+            def broken(self) -> None:
+                raise RuntimeError("cannot access")
+
+        inst = Troublemaker()
+        hooks = find_hooks(inst)
+        assert hooks[LifecycleHook.INIT] is not None

@@ -7,6 +7,7 @@ import pytest
 from canary_framework.core.algorithms.naming import to_snake
 
 
+@pytest.mark.unit
 class TestToSnake:
     """Unit tests for PascalCase → snake_case conversion."""
 

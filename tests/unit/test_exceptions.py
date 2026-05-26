@@ -14,6 +14,7 @@ from canary_framework.common.exceptions import (
 )
 
 
+@pytest.mark.unit
 class TestExceptionHierarchy:
     """All framework exceptions should inherit from CanaryFrameworkError."""
 
