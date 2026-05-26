@@ -40,7 +40,7 @@ With config, dependency injection, and web routing:
 ```python
 import asyncio
 from canary_framework import service, module, on_init, Context, config
-from canary_framework.web.fastapi import web, get, router, WebCanary
+from canary_framework.web.fastapi import get, router, WebCanary
 
 # Config
 @config
@@ -50,17 +50,15 @@ class AppConfig:
     fastapi_title: str = "My API"
 
 # Router
-@router(prefix="/api")
+@router(prefix="/api", deps=[HelloService])
 class APIRouter:
-    def __init__(self, ctx: Context) -> None:
-        self.svc = ctx.resolve(HelloService)
+    hello_service: HelloService
 
     @get("/hello")
     async def hello(self) -> dict:
-        return await self.svc.greet("world")
+        return await self.hello_service.greet("world")
 
 # Service
-@web(routers=[APIRouter])
 @service(name="HelloService", config=AppConfig)
 class HelloService:
     @on_init
@@ -75,7 +73,6 @@ class HelloService:
         return f"Hello, {name}!"
 
 # Module
-@web()
 @module(name="AppModule", config=AppConfig, services=[HelloService])
 class AppModule:
     @get("/health")

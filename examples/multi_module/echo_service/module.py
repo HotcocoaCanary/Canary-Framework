@@ -1,9 +1,7 @@
 """Module definition for the standalone echo service.
 
-This is the most important demo: a **single ``@service``** decorated with
-``@web`` and ``@router`` that can be passed directly to ``WebCanary()``
-without any ``@module`` wrapper.  Demonstrates that ``@service`` is the
-minimum viable entry point for the framework.
+A single ``@service`` with its router declared in ``deps`` can be passed
+directly to ``WebCanary()`` without any ``@module`` wrapper.
 
 Usage::
 
@@ -15,7 +13,6 @@ Usage::
 from __future__ import annotations
 
 from canary_framework import Context, on_end, on_init, on_start, service
-from canary_framework.web.fastapi import web
 from echo_service.config import EchoConfig
 from echo_service.router.echo_router import EchoRouter
 from echo_service.service.echo import EchoServiceImpl
@@ -23,14 +20,13 @@ from echo_service.service.echo import EchoServiceImpl
 __all__ = ["EchoService"]
 
 
-@web(routers=[EchoRouter])
-@service(name="echo_service", config=EchoConfig)
+@service(name="echo_service", config=EchoConfig, deps=[EchoRouter])
 class EchoService:
     """Standalone web service — launched directly via ``WebCanary(EchoService)``.
 
-    A ``@service`` decorated with ``@web(routers=[...])`` is a fully valid
-    ``WebCanary`` entry point.  No ``@module`` is needed when you only need
-    a single service with HTTP routes.
+    The ``@router``-decorated ``EchoRouter`` is declared in ``deps=``,
+    so the framework auto-discovers and initialises it.  No ``@module``
+    wrapper is needed for single-service web deployments.
     """
 
     def __init__(self) -> None:

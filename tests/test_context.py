@@ -33,8 +33,6 @@ class TestContextGetConfig:
         assert cfg.key == "val"
 
     async def test_config_chain_upward(self) -> None:
-        """A child service inherits config from parent module."""
-
         @config
         class RootCfg:
             env: str = "prod"
@@ -71,10 +69,10 @@ class TestContextGetConfig:
             ctx.get_config(object)
 
 
-class TestContextResolve:
-    """Verify dependency resolution via resolve()."""
+class TestContextGetService:
+    """Verify typed service resolution via get_service()."""
 
-    async def test_resolve_finds_service_in_module_tree(self) -> None:
+    async def test_get_service_finds_in_module_tree(self) -> None:
         @service("db")
         class DBService:
             pass
@@ -93,10 +91,10 @@ class TestContextResolve:
         user_entry = app.registry.get_by_name("user")
         ctx = user_entry.context
         assert ctx is not None
-        db = ctx.resolve(DBService)
+        db = ctx.get_service(DBService)
         assert isinstance(db, DBService)
 
-    async def test_resolve_not_found_raises(self) -> None:
+    async def test_get_service_not_found_raises(self) -> None:
         @service("orphan")
         class Orphan:
             pass
@@ -111,12 +109,9 @@ class TestContextResolve:
         ctx = entry.context
         assert ctx is not None
         with pytest.raises(ServiceNotFoundError, match="not found"):
-            ctx.resolve(Unknown)
+            ctx.get_service(Unknown)
 
-    async def test_resolve_across_module_boundaries(self) -> None:
-        """Sibling modules should NOT resolve each other's services
-        via ctx.resolve (only parent chain is traversed)."""
-
+    async def test_get_service_across_module_boundaries(self) -> None:
         @service("a-svc")
         class ASvc:
             pass
@@ -140,17 +135,11 @@ class TestContextResolve:
         app = Canary(Root)
         await app.init()
 
-        # BSvc is in SubB, ASvc is in SubA — resolve from ASvc's ctx
-        # should NOT find BSvc (not in parent chain)
         a_entry = app.registry.get_by_name("a-svc")
         ctx = a_entry.context
         assert ctx is not None
         with pytest.raises(ServiceNotFoundError):
-            ctx.resolve(BSvc)
-
-
-class TestContextGetService:
-    """Verify typed service access via get_service()."""
+            ctx.get_service(BSvc)
 
     async def test_get_service_returns_typed_instance(self) -> None:
         @service("mysvc")

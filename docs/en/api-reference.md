@@ -96,7 +96,6 @@ Unified runtime context. Delegates config lookup and dependency resolution upwar
 |--------|-------------|-------------|
 | `.get_config(type[T])` | `T` | **Type-safe** config access, looked up via parent chain |
 | `.get_service(type[T])` | `T` | **Type-safe** service instance access |
-| `.resolve(type[T])` | `T` | Locate and return a service instance |
 
 ---
 
@@ -118,7 +117,7 @@ from canary_framework import (
 | Exception | Triggered When |
 |-----------|---------------|
 | `ConfigurationError` | `ctx.get_config()` cannot find a config instance |
-| `ServiceNotFoundError` | `Registry.get_by_name/class()` or `ctx.resolve()` not found |
+| `ServiceNotFoundError` | `Registry.get_by_name/class()` or `ctx.get_service()` not found |
 | `CircularDependencyError` | Topological sort detects a cycle |
 | `DependencyInjectionError` | `inject_deps()` encounters a None dependency instance |
 | `LifecycleHookError` | `on_init/start/end` hook raises an exception |

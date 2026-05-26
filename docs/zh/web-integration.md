@@ -7,9 +7,8 @@
 ```python
 import asyncio
 from canary_framework import module
-from canary_framework.web.fastapi import web, get, WebCanary
+from canary_framework.web.fastapi import get, WebCanary
 
-@web()
 @module(name="App", services=[])
 class App:
     @get("/")
@@ -28,24 +27,20 @@ asyncio.run(main())
 
 ```python
 from canary_framework import service, on_init, Context
-from canary_framework.web.fastapi import web, router, get, post, WebCanary
+from canary_framework.web.fastapi import router, get, post, WebCanary
 
-# 路由类 —— 接收统一 Context
-@router(prefix="/api/users")
+@router(prefix="/api/users", deps=[DBService])
 class UserRouter:
-    def __init__(self, ctx: Context) -> None:
-        self.db = ctx.resolve(DBService)     # 沿父链查找依赖
+    db_service: DBService
 
     @get("/")
     async def list_users(self) -> list[dict]:
-        return await self.db.list_users()
+        return await self.db_service.list_users()
 
     @post("/")
     async def create_user(self, name: str) -> dict:
         return {"name": name}
 
-# 服务 —— 绑定路由类
-@web(routers=[UserRouter])
 @service(name="UserService", deps=[DBService])
 class UserService:
     @on_init
@@ -55,18 +50,20 @@ class UserService:
 
 ## 统一 Context
 
-路由类的 `__init__` 和服务的 `on_init` 接收**同一个 Context 类**：
+路由类可通过 `deps=[Svc]` 声明依赖注入，或通过 `@on_init` 接收 Context：
 
 - `ctx.get_config(ConfigType)` — 类型安全的配置访问
 - `ctx.get_service(ServiceType)` — 类型安全的服务/模块实例访问
-- `ctx.resolve(ServiceClass)` — 沿 parent 链查找已注册的服务
 
 ```python
-@router(prefix="/api")
+@router(prefix="/api", deps=[DBService, MyService])
 class Router:
-    def __init__(self, ctx: Context) -> None:
-        self.db = ctx.resolve(DBService)        # 手动解析依赖
-        self.svc = ctx.get_service(MyService)    # 类型安全访问
+    db_service: DBService
+    my_service: MyService
+
+    @on_init
+    def init(self, ctx: Context) -> None:
+        cfg = ctx.get_config(AppConfig)
 ```
 
 ## 配置前缀
@@ -83,8 +80,7 @@ WebCanary 按前缀从根模块 `@config` 分发参数：
 
 | 装饰器 | 用法 |
 |--------|------|
-| `@web` | `@web()` 或 `@web(routers=[R1, R2])` |
-| `@router` | `@router(prefix="/api/users")` |
+| `@router` | `@router(prefix="/api/users")` 或 `@router(prefix="/api/users", deps=[Svc])` |
 | `@get` | `@get("/users/{id}")` |
 | `@post` | `@post("/users", status_code=201)` |
 | `@put` | `@put("/users/{id}")` |

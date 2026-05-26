@@ -42,12 +42,12 @@ except CircularDependencyError as e:
 
 ## 类型安全解析
 
-除了依赖注入，还可以通过 Context 手动解析服务：
+除了依赖注入，还可以通过 Context 手动获取服务：
 
 ```python
 @on_init
 def init(self, ctx: Context) -> None:
-    db = ctx.resolve(DBService)       # 沿模块树向上查找 DBService
+    db = ctx.get_service(DBService)      # 沿模块树向上查找 DBService
     db.execute("SELECT 1")
 ```
 

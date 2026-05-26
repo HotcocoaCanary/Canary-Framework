@@ -20,16 +20,6 @@
     3. **测试友好**：测试可以只调 init 验证注入和配置，无需真的启动服务
        Test-friendly: tests can call init alone to verify DI and config.
 
-    阶段细节 (Phase details):
-        =============  ======================================================
-        Phase           Description
-        =============  ======================================================
-        ``_collect``    Recursively discover ``@service`` / ``@module`` classes
-        ``_validate``   Verify all ``deps=[]`` references are registered
-        ``topo sort``   Kahn's BFS — compute safe startup order
-        ``_init_entry`` DI → config → ``on_init`` hook (per entry)
-        =============  ======================================================
-
 日志系统 (Logging):
     Framework uses the ``"cf"`` logger namespace (``cf.engine``,
     ``cf.di``, ``cf.config``, ``cf.lifecycle``, ``cf.registry``).
@@ -45,6 +35,7 @@ from canary_framework.common._types import ServiceEntry
 from canary_framework.common.enums import LifecycleHook
 from canary_framework.common.exceptions import LifecycleHookError
 from canary_framework.core.algorithms.injector import inject_deps
+from canary_framework.core.algorithms.naming import to_snake
 from canary_framework.core.algorithms.sorter import topological_sort
 from canary_framework.core.conductor.context import Context
 from canary_framework.core.container.registry import Registry
@@ -71,8 +62,6 @@ class Canary:
         await app.stop()    # 逆序调用 on_end
     """
 
-    # __slots__ 减少内存开销，防止运行时动态添加属性
-    # Reduces memory and prevents dynamic attribute assignment
     __slots__ = ("_registry", "_startup_order", "_target")
 
     def __init__(self, target: type) -> None:
@@ -114,6 +103,7 @@ class Canary:
             2. ``topological_sort`` — Kahn BFS
             3. ``_build_context_tree`` — Context parent chain
             4. Per-entry: DI → config loading → ``on_init`` hook
+               (plus sub-service injection for modules)
         """
         init_logging()
         engine = get_logger("engine")
@@ -180,12 +170,10 @@ class Canary:
     # ==================================================================
 
     async def _init_entry(self, entry: ServiceEntry) -> None:
-        """Initialize a single service/module: DI → config → on_init.
+        """Initialize a single service/module: DI → config → on_init → sub-inject.
 
-        单个注册项的初始化流程：依赖注入 → 配置加载 → on_init 钩子。
-
-        配置加载使用 ``config_cls()`` 无参构造。pydantic-settings 的
-        ``BaseSettings.__init__`` 会自动读取 ``.env`` 和环境变量。
+        单个注册项的初始化流程：
+        依赖注入 → 配置加载 → on_init 钩子 → 模块子服务注入。
         """
         engine = get_logger("engine")
         config_log = get_logger("config")
@@ -198,9 +186,10 @@ class Canary:
         if entry.config_cls is not None:
             entry.config_instance = entry.config_cls()
             raw_cfg = {
-                k: v for k, v in vars(entry.config_instance).items() if not k.startswith("_")
+                k: v
+                for k, v in vars(entry.config_instance).items()
+                if not k.startswith("_")
             }
-            # 日志中打印配置时自动脱敏
             config_log.info(
                 "  %s config loaded: %s",
                 entry.name,
@@ -211,6 +200,14 @@ class Canary:
 
         # 3. on_init 钩子：传入 Context
         await self._call_hook(entry, LifecycleHook.INIT, entry.context)
+
+        # 4. 模块子服务注入：将子服务实例注入到模块实例属性上
+        # Inject child service instances as module attributes
+        if entry.is_module and entry.sub_services:
+            for sub_cls in entry.sub_services:
+                sub_entry = self._registry.get_by_class(sub_cls)
+                attr_name = to_snake(sub_cls.__name__)
+                setattr(entry.instance, attr_name, sub_entry.instance)
 
     # ==================================================================
     # 钩子调度 (Hook dispatch)
@@ -272,25 +269,17 @@ class Canary:
         """Recursively discover and register ``@service`` / ``@module`` classes.
 
         递归收集所有被 @service / @module 装饰的类。
-
-        收集策略 (Collection strategy):
-            - 模块：注册自身 → 递归处理 services 列表中的子节点
-            - 服务：注册自身 → 结束（叶子节点）
-            - config 继承：子节点未声明 config_cls 时从父模块拷贝
-
-        为什么不在 init 时一次收集？（当前实现已是一次收集）
-        这个设计的关键在于：registry.register() 是幂等的，因此可以通过
-        ``has()`` 检查避免重复注册，天然支持 DAG 中的共享依赖。
+        使用 Registry.idempotent register 天然支持 DAG 共享依赖。
         """
         if self._registry.has(cls):
-            return  # 已注册，幂等跳过
+            return
 
         registry_log = get_logger("registry")
 
         # ── 模块分支 ──
         if is_cf_module(cls):
             meta = get_module_meta(cls)
-            self._registry.register(cls, is_module=True, meta=meta)  # type: ignore[arg-type]
+            self._registry.register(cls, is_module=True, meta=meta)
             entry = self._registry.get_by_class(cls)
             entry.parent_entry = parent_entry
             self._inherit_config(entry, parent_entry)
@@ -299,17 +288,16 @@ class Canary:
                 "  module %-30s config=%s  services=%d",
                 entry.name,
                 entry.config_cls.__name__ if entry.config_cls else "inherit",
-                len(meta.get("services", ())),
+                len(meta.services),
             )
-            # 递归：处理模块的每个子节点
-            for sub_cls in meta.get("services", ()):
+            for sub_cls in meta.services:
                 self._collect(sub_cls, parent_entry=entry)
             return
 
         # ── 服务分支 ──
         if is_cf_service(cls):
             svc_meta = get_service_meta(cls)
-            self._registry.register(cls, is_module=False, meta=svc_meta)  # type: ignore[arg-type]
+            self._registry.register(cls, is_module=False, meta=svc_meta)
             entry = self._registry.get_by_class(cls)
             entry.parent_entry = parent_entry
             self._inherit_config(entry, parent_entry)
@@ -322,7 +310,6 @@ class Canary:
             )
             return
 
-        # 既不是 @service 也不是 @module —— 用户错误
         raise TypeError(f"'{cls.__name__}' is not decorated with @service or @module.")
 
     @staticmethod
@@ -349,20 +336,12 @@ class Canary:
         """Build the :class:`Context` parent chain for the module tree.
 
         按模块树的层级关系构建 Context 父子链。
-
-        为什么需要 parent 链？
-        （Why a parent chain?）
-        Context 的 ``get_config()`` 和 ``resolve()`` 都依赖向上查找。
-        子服务的 Context.parent 指向所属模块的 Context，形成单向链表。
-        这种设计使得每次查找都是沿链上溯，不需要维护全局映射表。
-
-        每个 ServiceEntry 绑定一个 Context。根模块的 parent 为 None。
+        Context 的 ``get_config()`` 和 ``get_service()`` 都依赖向上查找。
         """
         entry = self._registry.get_by_class(cls)
         ctx = Context(entry=entry, parent=parent_ctx, registry=self._registry)
         entry.context = ctx
 
-        # 递归：为子模块/子服务构建 Context
         if entry.is_module:
             for sub_cls in entry.sub_services:
                 self._build_context_tree(sub_cls, parent_ctx=ctx)
@@ -375,11 +354,7 @@ class Canary:
         """Verify every ``deps=[]`` reference corresponds to a registered entry.
 
         校验所有 deps 中声明的依赖是否都已注册。
-
-        为什么不在 _collect 阶段校验？
-        （Why validate after collection instead of during?）
-        在收集完成后再校验可以确保所有服务都已注册，避免因收集顺序
-        导致的误报。此时 Registry 的状态是完整且一致的。
+        在收集完成后校验确保 Registry 状态完整一致。
         """
         all_names = set(self._registry.names())
         for entry in self._registry.all_entries():

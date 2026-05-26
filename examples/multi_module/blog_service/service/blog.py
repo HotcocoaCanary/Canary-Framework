@@ -1,9 +1,9 @@
 """BlogService — depends on NotifyService (standalone) and UserService (user_module).
 
-Demonstrates cross-module dependency resolution:
+Demonstrates cross-module dependency injection:
     deps=[NotifyService, UserService]
 
-Framework resolves these by ``__cf_name__`` across the entire module tree.
+Framework injects each dependency as ``self.<snake_case_name>``.
 """
 
 from __future__ import annotations
@@ -24,6 +24,9 @@ class BlogService:
         - ``UserService``     (user_module)      — resolves author info
     """
 
+    notify_service: NotifyService
+    user_service: UserService
+
     def __init__(self) -> None:
         self._posts: list[dict[str, object]] = []
 
@@ -32,14 +35,9 @@ class BlogService:
         cfg = ctx.get_config(BlogConfig)
         author = cfg.default_author
 
-        # self.notify_service  — injected as snake_case from deps=[NotifyService]
-        notify: NotifyService = self.notify_service  # type: ignore[attr-defined]
-
-        # self.user_service — injected as snake_case from deps=[UserService]
-        user_svc: UserService = self.user_service  # type: ignore[attr-defined]
-        author_info = user_svc.get_user("1")
-        if author_info:
-            author = author_info["name"]
+        user_info = self.user_service.get_user("1")
+        if user_info:
+            author = user_info["name"]
 
         # Seed some demo posts
         for i in range(1, 4):
@@ -48,12 +46,11 @@ class BlogService:
                 content=f"This is the content of demo post #{i}.",
                 author=author,
             )
-            notify.notify("subscribers", f"New post published (id={pid})")
+            self.notify_service.notify("subscribers", f"New post published (id={pid})")
 
     @on_start
     def start(self) -> None:
-        notify: NotifyService = self.notify_service  # type: ignore[attr-defined]
-        notify.notify("system", "BlogService started")
+        self.notify_service.notify("system", "BlogService started")
 
     def create_post(self, title: str, content: str, author: str) -> str:
         pid = str(len(self._posts) + 1)

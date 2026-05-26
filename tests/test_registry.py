@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from canary_framework.common._types import ServiceEntry
+from canary_framework.common._types import ModuleMeta, ServiceEntry
 from canary_framework.common.exceptions import ServiceNotFoundError
 from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.service import service
@@ -164,11 +164,12 @@ class TestRegistry:
             pass
 
         reg = Registry()
+        meta = ModuleMeta(name="root", services=[Child])
         reg.register(
             Root,
             is_module=True,
             sub_services=[Child],
-            meta={"name": "root", "config_cls": None, "services": [Child]},
+            meta=meta,
         )
         entry = reg.get_by_class(Root)
         assert entry.is_module is True

@@ -36,8 +36,9 @@ _SERVICE_ATTR = "__cf_service__"
 用于 ``is_cf_service()`` 快速判断一个类是否为框架服务。"""
 
 _SERVICE_META = "__cf_service_meta__"
-"""Stores a :class:`ServiceMeta` dict on decorated classes.
-存储服务的完整元数据，由 Registry 在注册阶段读取。"""
+"""Stores a :class:`ServiceMeta` instance on decorated classes.
+存储服务的完整元数据，由 Registry 在注册阶段读取。
+``@module`` 和 ``@router`` 会覆盖为 ``ModuleMeta`` / ``RouterMeta``。"""
 
 
 # ---------------------------------------------------------------------------
@@ -81,15 +82,9 @@ def service(
     _deps = list(deps or ())
 
     def decorator(cls: type) -> type:
-        meta: ServiceMeta = {
-            "name": name,
-            "deps": _deps,
-            "config_cls": _config,
-        }
+        meta = ServiceMeta(name=name, deps=_deps, config_cls=_config)
         setattr(cls, _SERVICE_ATTR, True)
         setattr(cls, _SERVICE_META, meta)
-        # 直接在类上设置 __cf_name__，方便 resolve() 按名称查找
-        # Store name on class so resolve() can match by __cf_name__
         cls.__cf_name__ = name  # type: ignore[attr-defined]
         return cls
 
@@ -104,19 +99,23 @@ def service(
 def is_cf_service(cls: type) -> bool:
     """Return ``True`` if *cls* was decorated with ``@service``.
 
-    判断一个类是否被 ``@service`` 装饰过。用于区分普通类和框架服务。"""
+    判断一个类是否被 ``@service`` 装饰过。用于区分普通类和框架服务。
+
+    ``@module`` 和 ``@router`` 由于内部调用了 ``service()``，
+    因此 ``is_cf_service()`` 也对它们返回 ``True``。"""
     return bool(getattr(cls, _SERVICE_ATTR, False))
 
 
 def get_service_meta(cls: type) -> ServiceMeta:
-    """Return the :class:`ServiceMeta` dictionary attached by ``@service``.
+    """Return the :class:`ServiceMeta` instance attached by the decorator.
 
-    获取 ``@service`` 装饰器设置的元数据字典。
-    如果类未被装饰，返回空的 :class:`ServiceMeta`。
+    获取装饰器设置的元数据实例。
+    如果类被 ``@module`` 或 ``@router`` 装饰，返回的可能是
+    :class:`ModuleMeta` 或 :class:`RouterMeta`（均为 ``ServiceMeta`` 子类）。
 
-    Returns an empty :class:`ServiceMeta` if the class was never decorated.
+    Returns a default :class:`ServiceMeta` if the class was never decorated.
     """
-    raw: object = getattr(cls, _SERVICE_META, {})
-    if isinstance(raw, dict):
-        return raw  # type: ignore[return-value]
-    return {}
+    raw: object = getattr(cls, _SERVICE_META, None)
+    if isinstance(raw, ServiceMeta):
+        return raw
+    return ServiceMeta(name="")

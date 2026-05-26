@@ -7,9 +7,8 @@ Use `canary-framework[web]` and `WebCanary` for FastAPI integration.
 ```python
 import asyncio
 from canary_framework import module
-from canary_framework.web.fastapi import web, get, WebCanary
+from canary_framework.web.fastapi import get, WebCanary
 
-@web()
 @module(name="App", services=[])
 class App:
     @get("/")
@@ -28,24 +27,22 @@ asyncio.run(main())
 
 ```python
 from canary_framework import service, on_init, Context
-from canary_framework.web.fastapi import web, router, get, post, WebCanary
+from canary_framework.web.fastapi import router, get, post, WebCanary
 
-# Router class — receives unified Context
-@router(prefix="/api/users")
+# Router class — uses deps for DI injection
+@router(prefix="/api/users", deps=[DBService])
 class UserRouter:
-    def __init__(self, ctx: Context) -> None:
-        self.db = ctx.resolve(DBService)     # resolve dependency via parent chain
+    db_service: DBService
 
     @get("/")
     async def list_users(self) -> list[dict]:
-        return await self.db.list_users()
+        return await self.db_service.list_users()
 
     @post("/")
     async def create_user(self, name: str) -> dict:
         return {"name": name}
 
-# Service — binds router classes
-@web(routers=[UserRouter])
+# Service
 @service(name="UserService", deps=[DBService])
 class UserService:
     @on_init
@@ -55,18 +52,16 @@ class UserService:
 
 ## Unified Context
 
-Router `__init__` and service `on_init` receive the **same Context class**:
+Service `on_init` receives the **same Context class**:
 
 - `ctx.get_config(ConfigType)` — type-safe config access
 - `ctx.get_service(ServiceType)` — type-safe service/module instance access
-- `ctx.resolve(ServiceClass)` — look up a registered service via parent chain
 
 ```python
-@router(prefix="/api")
+@router(prefix="/api", deps=[DBService, MyService])
 class Router:
-    def __init__(self, ctx: Context) -> None:
-        self.db = ctx.resolve(DBService)        # manual dependency resolution
-        self.svc = ctx.get_service(MyService)    # type-safe access
+    db_service: DBService
+    my_service: MyService
 ```
 
 ## Config Prefixes
@@ -83,8 +78,7 @@ WebCanary distributes params from root module `@config` by prefix:
 
 | Decorator | Usage |
 |-----------|-------|
-| `@web` | `@web()` or `@web(routers=[R1, R2])` |
-| `@router` | `@router(prefix="/api/users")` |
+| `@router` | `@router(prefix="/api/users", deps=[Svc1])` |
 | `@get` | `@get("/users/{id}")` |
 | `@post` | `@post("/users", status_code=201)` |
 | `@put` | `@put("/users/{id}")` |

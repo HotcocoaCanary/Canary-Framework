@@ -1,13 +1,10 @@
-"""EchoRouter — HTTP endpoints for the standalone echo service.
-
-Demonstrates ``@router`` together with ``@get`` and ``@post``.
-"""
+"""EchoRouter — HTTP endpoints for the standalone echo service."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from canary_framework import Context
+from canary_framework import Context, on_init
 from canary_framework.web.fastapi import get, post, router
 
 
@@ -15,7 +12,8 @@ from canary_framework.web.fastapi import get, post, router
 class EchoRouter:
     """Route handler for echo endpoints (prefix: /echo)."""
 
-    def __init__(self, ctx: Context) -> None:
+    @on_init
+    def init(self, ctx: Context) -> None:
         cfg = ctx.get_config(object)
         self._greeting = getattr(cfg, "greeting", "hello")
 

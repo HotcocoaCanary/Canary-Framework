@@ -95,8 +95,7 @@ await app.start()
 | 方法 | 返回类型 | 说明 |
 |------|----------|------|
 | `.get_config(type[T])` | `T` | **类型安全**的配置访问，沿 parent 链查找 |
-| `.get_service(type[T])` | `T` | **类型安全**的服务实例访问 |
-| `.resolve(type[T])` | `T` | 在模块树中定位并返回服务实例 |
+| `.get_service(type[T])` | `T` | **类型安全**的服务实例访问，在模块树中定位并返回 |
 
 ---
 
@@ -118,7 +117,7 @@ from canary_framework import (
 | 异常 | 触发场景 |
 |------|----------|
 | `ConfigurationError` | `ctx.get_config()` 未找到配置实例 |
-| `ServiceNotFoundError` | `Registry.get_by_name/class()` 未找到，`ctx.resolve()` 未找到 |
+| `ServiceNotFoundError` | `Registry.get_by_name/class()` 未找到，`ctx.get_service()` 未找到 |
 | `CircularDependencyError` | 拓扑排序检测到环 |
 | `DependencyInjectionError` | `inject_deps()` 时依赖实例为 None |
 | `LifecycleHookError` | `on_init/start/end` 钩子抛出异常 |
@@ -164,7 +163,6 @@ src/canary_framework/
         └── decorators/
             ├── __init__.py
             ├── router.py    # @router, @get, @post, ...
-            └── web.py       # @web
 ```
 
 ## 初始化流程

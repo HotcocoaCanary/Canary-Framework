@@ -10,59 +10,61 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from canary_framework.core.conductor.context import Context
 
 
 # ============================================================================
-# TypedDict 元数据 — 装饰器在类上设置的元数据
-# TypedDict metadata — stored on decorated classes by @service / @module
+# 元数据 dataclass — 装饰器在类上设置的元数据
+# Metadata stored on decorated classes by @service / @module / @router
 # ============================================================================
 
 
-class ServiceMeta(TypedDict, total=False):
+@dataclass(slots=True)
+class ServiceMeta:
     """Metadata stored on a ``@service``-decorated class.
 
     存储服务声明时的元信息，在注册阶段由 Registry 消费。
-    The dict is created at decoration time and consumed by :class:`Registry`
-    during collection.
-
-    所有字段都是 ``total=False``，因为 TypedDict 在构造时一次性填充，
-    之后不会再修改。
-    All keys are ``total=False`` because the dict is populated once at
-    decoration time and never mutated afterwards.
+    Created at decoration time and consumed by :class:`Registry` during collection.
     """
 
     name: str
     """Globally unique service name, e.g. ``"db"``."""
 
-    deps: list[type]
+    deps: list[type] = field(default_factory=list)
     """List of ``@service`` / ``@module`` classes this service depends on."""
 
-    config_cls: type | None
+    config_cls: type | None = None
     """Optional ``@config``-decorated class.  ``None`` means inherit from parent."""
 
 
-class ModuleMeta(TypedDict, total=False):
+@dataclass(slots=True)
+class ModuleMeta(ServiceMeta):
     """Metadata stored on a ``@module``-decorated class.
 
-    模块元数据格式与 ServiceMeta 类似，额外包含 ``services`` 子节点列表。
-    模块本身也是服务，因此也支持配置和依赖注入。
-    A module is itself a service, so it carries the same shape as
-    :class:`ServiceMeta` with an additional ``services`` list.
+    模块元数据继承自 ServiceMeta，额外包含 ``services`` 子节点列表。
+    A module is itself a service, with an additional ``services`` list.
     """
 
-    name: str
-    """Globally unique module name."""
-
-    config_cls: type | None
-    """Optional ``@config``-decorated class.  Child services inherit this
-    when they don't declare their own."""
-
-    services: list[type]
+    services: list[type] = field(default_factory=list)
     """List of direct child ``@service`` / ``@module`` classes."""
+
+
+@dataclass(slots=True)
+class RouterMeta(ServiceMeta):
+    """Metadata stored on a ``@router``-decorated class.
+
+    Router 是特殊的 service，额外包含路由组公共参数。
+    A router is a specialised service with route group configuration.
+    """
+
+    prefix: str = ""
+    """URL prefix applied to all routes in this router group."""
+
+    tags: list[str] = field(default_factory=list)
+    """OpenAPI tags applied to all routes in this group as default."""
 
 
 # ============================================================================
