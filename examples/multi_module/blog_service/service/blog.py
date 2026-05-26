@@ -29,7 +29,7 @@ class BlogService:
 
     @on_init
     def init(self, ctx: Context) -> None:
-        cfg = ctx.config_as(BlogConfig)
+        cfg = ctx.get_config(BlogConfig)
         author = cfg.default_author
 
         # self.notify_service  — injected as snake_case from deps=[NotifyService]

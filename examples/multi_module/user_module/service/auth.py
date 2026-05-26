@@ -16,7 +16,7 @@ class AuthService:
 
     @on_init
     def init(self, ctx: Context) -> None:
-        cfg = ctx.config_as(UserModuleConfig)
+        cfg = ctx.get_config(UserModuleConfig)
         self._token_expire = cfg.token_expire_minutes
         self._tokens["admin"] = "admin-token"
 

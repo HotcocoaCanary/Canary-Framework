@@ -39,7 +39,7 @@ class EchoService:
 
     @on_init
     def init(self, ctx: Context) -> None:
-        cfg = ctx.config_as(EchoConfig)
+        cfg = ctx.get_config(EchoConfig)
         self._running = True
         self._greeting = cfg.greeting
 

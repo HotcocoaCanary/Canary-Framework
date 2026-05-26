@@ -57,8 +57,8 @@ class UserService:
 
 Router `__init__` and service `on_init` receive the **same Context class**:
 
-- `ctx.config_as(ConfigType)` — type-safe config access
-- `ctx.service_as(ServiceType)` — type-safe service/module instance access
+- `ctx.get_config(ConfigType)` — type-safe config access
+- `ctx.get_service(ServiceType)` — type-safe service/module instance access
 - `ctx.resolve(ServiceClass)` — look up a registered service via parent chain
 
 ```python
@@ -66,7 +66,7 @@ Router `__init__` and service `on_init` receive the **same Context class**:
 class Router:
     def __init__(self, ctx: Context) -> None:
         self.db = ctx.resolve(DBService)        # manual dependency resolution
-        self.svc = ctx.service_as(MyService)    # type-safe access
+        self.svc = ctx.get_service(MyService)    # type-safe access
 ```
 
 ## Config Prefixes

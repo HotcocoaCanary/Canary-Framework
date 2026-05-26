@@ -32,7 +32,6 @@
 from __future__ import annotations
 
 import inspect
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -40,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
+from canary_framework.common._logging import get_logger
 from canary_framework.core.conductor.canary import Canary
 from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.module import is_cf_module
@@ -54,7 +54,7 @@ from canary_framework.web.fastapi.decorators.web import get_web_routers, is_web
 _UVICORN_PREFIX = "uvicorn_"
 _FASTAPI_PREFIX = "fastapi_"
 
-_log = logging.getLogger("cf.web")
+_log = get_logger("web")
 
 
 class WebCanary(Canary):

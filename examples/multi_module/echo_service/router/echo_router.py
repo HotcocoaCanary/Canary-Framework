@@ -16,7 +16,7 @@ class EchoRouter:
     """Route handler for echo endpoints (prefix: /echo)."""
 
     def __init__(self, ctx: Context) -> None:
-        cfg = ctx.config_as(object)
+        cfg = ctx.get_config(object)
         self._greeting = getattr(cfg, "greeting", "hello")
 
     @get("/")

@@ -36,7 +36,7 @@ class ConfigurationError(CanaryFrameworkError):
     """Raised when configuration loading or validation fails.
 
     触发场景 (When raised):
-        - ``ctx.config_as()`` 在整个 parent 链上找不到配置实例
+        - ``ctx.get_config()`` 在整个 parent 链上找不到配置实例
         - ``@config`` 类缺少必要的 pydantic 字段声明
         - pydantic 在构造时校验失败
     """

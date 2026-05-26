@@ -28,7 +28,7 @@ from canary_framework import service, on_init, on_end, Context
 class UserService:
     @on_init
     def init(self, ctx: Context) -> None:
-        cfg = ctx.config_as(UserConfig)  # type-safe config access
+        cfg = ctx.get_config(UserConfig)  # type-safe config access
         self.db_service.query()          # use injected dependency
 
     @on_start

@@ -23,7 +23,7 @@ class NotifyService:
 
     @on_init
     def init(self, ctx: Context) -> None:
-        cfg = ctx.config_as(NotifyConfig)
+        cfg = ctx.get_config(NotifyConfig)
         if not cfg.enabled:
             return
         self._impl.send("system", f"NotifyService initialised (provider={cfg.provider})")

@@ -15,7 +15,7 @@ Receives Context. At this point, dependencies are injected and config is loaded:
 ```python
 @on_init
 def init(self, ctx: Context) -> None:
-    cfg = ctx.config_as(AppConfig)
+    cfg = ctx.get_config(AppConfig)
     self.pool = create_pool(cfg.db_url)
 ```
 

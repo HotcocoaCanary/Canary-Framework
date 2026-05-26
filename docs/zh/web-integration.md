@@ -57,8 +57,8 @@ class UserService:
 
 路由类的 `__init__` 和服务的 `on_init` 接收**同一个 Context 类**：
 
-- `ctx.config_as(ConfigType)` — 类型安全的配置访问
-- `ctx.service_as(ServiceType)` — 类型安全的服务/模块实例访问
+- `ctx.get_config(ConfigType)` — 类型安全的配置访问
+- `ctx.get_service(ServiceType)` — 类型安全的服务/模块实例访问
 - `ctx.resolve(ServiceClass)` — 沿 parent 链查找已注册的服务
 
 ```python
@@ -66,7 +66,7 @@ class UserService:
 class Router:
     def __init__(self, ctx: Context) -> None:
         self.db = ctx.resolve(DBService)        # 手动解析依赖
-        self.svc = ctx.service_as(MyService)    # 类型安全访问
+        self.svc = ctx.get_service(MyService)    # 类型安全访问
 ```
 
 ## 配置前缀

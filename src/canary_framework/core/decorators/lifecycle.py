@@ -21,11 +21,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeVar
 
 from canary_framework.common.enums import LifecycleHook
-
-_Fn = TypeVar("_Fn", bound=Callable[..., object])
 
 # ---------------------------------------------------------------------------
 # 标记属性映射
@@ -48,7 +45,7 @@ _MARKER_TO_HOOK: dict[str, LifecycleHook] = {v: k for k, v in _MARKER_MAP.items(
 # ---------------------------------------------------------------------------
 
 
-def on_init(fn: _Fn) -> _Fn:  # noqa: UP047
+def on_init[FnT: Callable[..., object]](fn: FnT) -> FnT:
     """Mark a method as the ``on_init`` lifecycle hook.
 
     标记方法为初始化钩子。框架在 init 阶段的最后调用，此时依赖已注入、
@@ -66,14 +63,14 @@ def on_init(fn: _Fn) -> _Fn:  # noqa: UP047
 
         @on_init
         async def init(self, ctx: Context) -> None:
-            cfg = ctx.config_as(AppConfig)
+            cfg = ctx.get_config(AppConfig)
             self.pool = await create_pool(cfg.dsn)
     """
     setattr(fn, _MARKER_MAP[LifecycleHook.INIT], True)
     return fn
 
 
-def on_start(fn: _Fn) -> _Fn:  # noqa: UP047
+def on_start[FnT: Callable[..., object]](fn: FnT) -> FnT:
     """Mark a method as the ``on_start`` lifecycle hook.
 
     标记方法为启动钩子。按拓扑序在 ``Canary.start()`` 中调用，无参数。
@@ -95,7 +92,7 @@ def on_start(fn: _Fn) -> _Fn:  # noqa: UP047
     return fn
 
 
-def on_end(fn: _Fn) -> _Fn:  # noqa: UP047
+def on_end[FnT: Callable[..., object]](fn: FnT) -> FnT:
     """Mark a method as the ``on_end`` lifecycle hook.
 
     标记方法为停止钩子。按逆拓扑序在 ``Canary.stop()`` 中调用，无参数。

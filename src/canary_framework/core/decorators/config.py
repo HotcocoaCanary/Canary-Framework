@@ -23,14 +23,10 @@
 
 from __future__ import annotations
 
-from typing import TypeVar
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_C = TypeVar("_C", bound=type)
 
-
-def config(cls: _C) -> type:  # noqa: UP047
+def config[ConfigT: type](cls: ConfigT) -> type:
     """Convert a plain class into a :class:`~pydantic_settings.BaseSettings` subclass.
 
     将普通 Python 类转换为 pydantic-settings 子类，使其自动从环境变量和

@@ -21,14 +21,13 @@
 
 from __future__ import annotations
 
-import logging
-
+from canary_framework.common._logging import get_logger
 from canary_framework.common._types import ServiceEntry
 from canary_framework.common.exceptions import DependencyInjectionError
 from canary_framework.core.algorithms.naming import to_snake
 from canary_framework.core.container.registry import Registry
 
-_log = logging.getLogger("cf.di")
+_log = get_logger("di")
 
 
 def inject_deps(

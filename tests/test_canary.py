@@ -144,7 +144,7 @@ class TestCanaryLifecycle:
         class Configured:
             @on_init
             def init(self, ctx: Context) -> None:
-                captured["name"] = ctx.config_as(MyCfg).name
+                captured["name"] = ctx.get_config(MyCfg).name
 
         app = Canary(Configured)
         await app.init()
@@ -162,7 +162,7 @@ class TestCanaryLifecycle:
 
             @on_init
             def init(self, ctx: Context) -> None:
-                self.got = ctx.config_as(RootCfg).env
+                self.got = ctx.get_config(RootCfg).env
 
         @module("root", config=RootCfg, services=[Child])
         class Root:

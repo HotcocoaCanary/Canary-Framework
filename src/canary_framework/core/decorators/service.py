@@ -74,7 +74,7 @@ def service(
         class DBService:
             @on_init
             def init(self, ctx: Context) -> None:
-                cfg = ctx.config_as(DBConfig)
+                cfg = ctx.get_config(DBConfig)
                 self.pool = create_pool(cfg.dsn)
     """
     _config = config

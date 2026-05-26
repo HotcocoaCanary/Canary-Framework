@@ -11,10 +11,10 @@ from canary_framework.core.decorators.module import module
 from canary_framework.core.decorators.service import service
 
 
-class TestContextConfigAs:
-    """Verify typed config access via config_as()."""
+class TestContextGetConfig:
+    """Verify typed config access via get_config()."""
 
-    async def test_config_as_returns_typed_config(self) -> None:
+    async def test_get_config_returns_typed_config(self) -> None:
         @config
         class MyCfg:
             key: str = "val"
@@ -29,7 +29,7 @@ class TestContextConfigAs:
         entry = app.registry.get_by_class(Svc)
         ctx = entry.context
         assert ctx is not None
-        cfg = ctx.config_as(MyCfg)
+        cfg = ctx.get_config(MyCfg)
         assert cfg.key == "val"
 
     async def test_config_chain_upward(self) -> None:
@@ -53,7 +53,7 @@ class TestContextConfigAs:
         child_entry = app.registry.get_by_name("child")
         ctx = child_entry.context
         assert ctx is not None
-        cfg = ctx.config_as(RootCfg)
+        cfg = ctx.get_config(RootCfg)
         assert cfg.env == "prod"
 
     async def test_no_config_raises(self) -> None:
@@ -68,7 +68,7 @@ class TestContextConfigAs:
         ctx = entry.context
         assert ctx is not None
         with pytest.raises(ConfigurationError, match="No config instance"):
-            ctx.config_as(object)
+            ctx.get_config(object)
 
 
 class TestContextResolve:
@@ -149,10 +149,10 @@ class TestContextResolve:
             ctx.resolve(BSvc)
 
 
-class TestContextServiceAs:
-    """Verify typed service access via service_as()."""
+class TestContextGetService:
+    """Verify typed service access via get_service()."""
 
-    async def test_service_as_returns_typed_instance(self) -> None:
+    async def test_get_service_returns_typed_instance(self) -> None:
         @service("mysvc")
         class MySvc:
             pass
@@ -163,41 +163,5 @@ class TestContextServiceAs:
         entry = app.registry.get_by_class(MySvc)
         ctx = entry.context
         assert ctx is not None
-        inst = ctx.service_as(MySvc)
-        assert isinstance(inst, MySvc)
-
-
-class TestContextPropertyRetained:
-    """Verify backward-compatible property access still works."""
-
-    async def test_config_property_returns_instance(self) -> None:
-        @config
-        class Cfg:
-            x: int = 42
-
-        @service("s", config=Cfg)
-        class Svc:
-            pass
-
-        app = Canary(Svc)
-        await app.init()
-
-        entry = app.registry.get_by_class(Svc)
-        ctx = entry.context
-        assert ctx is not None
-        cfg_obj = ctx.config()
-        assert cfg_obj is not None
-
-    async def test_service_property_returns_instance(self) -> None:
-        @service("mysvc")
-        class MySvc:
-            pass
-
-        app = Canary(MySvc)
-        await app.init()
-
-        entry = app.registry.get_by_class(MySvc)
-        ctx = entry.context
-        assert ctx is not None
-        inst = ctx.service()
+        inst = ctx.get_service(MySvc)
         assert isinstance(inst, MySvc)

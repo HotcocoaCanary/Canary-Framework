@@ -39,11 +39,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-import os
-import re
-from typing import Any
 
+from canary_framework.common._logging import get_logger, init_logging, sanitize_config_values
 from canary_framework.common._types import ServiceEntry
 from canary_framework.common.enums import LifecycleHook
 from canary_framework.common.exceptions import LifecycleHookError
@@ -54,65 +51,6 @@ from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.lifecycle import HookDict, find_hooks
 from canary_framework.core.decorators.module import get_module_meta, is_cf_module
 from canary_framework.core.decorators.service import get_service_meta, is_cf_service
-
-# ============================================================================
-# 日志系统 (Logging setup)
-# ============================================================================
-
-_cf_logger = logging.getLogger("cf")
-
-# 敏感字段正则：用于日志脱敏
-# Sensitive field regex: used to mask config values in log output
-# 不区分大小写匹配包含 password、secret、token、key 等的字段名
-_SENSITIVE_RE = re.compile(
-    r"(password|passwd|secret|token|key|api_key|auth|credential|private)",
-    re.IGNORECASE,
-)
-
-
-def _init_logging() -> None:
-    """Initialize the framework logger (idempotent).
-
-    幂等初始化：多次调用不会重复添加 handler。
-    从 ``CF_LOG_LEVEL`` 环境变量读取日志级别（默认 INFO）。
-    ``propagate=False`` 防止日志传播到 root logger。
-
-    Idempotent: multiple calls won't add duplicate handlers.
-    Reads ``CF_LOG_LEVEL`` env var (default ``INFO``).
-    """
-    level_name = os.environ.get("CF_LOG_LEVEL", "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
-    _cf_logger.setLevel(level)
-
-    # 幂等检查：已有 handler 则跳过
-    if _cf_logger.handlers:
-        return
-
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("[CF] [%(levelname)-5s] [%(name)s] %(message)s"))
-    _cf_logger.addHandler(handler)
-    _cf_logger.propagate = False
-    _cf_logger.debug("Logging initialised at level=%s", level_name)
-
-
-def _get_logger(name: str) -> logging.Logger:
-    """Return a child logger under the ``cf`` namespace.
-
-    返回 ``cf.<name>`` 子 logger，如 ``cf.engine``、``cf.di``。"""
-    return logging.getLogger(f"cf.{name}")
-
-
-def _sanitize_config_values(data: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy with sensitive values replaced by ``'***'``.
-
-    返回脱敏后的配置字典副本，敏感字段值替换为 ``***``。
-    不会修改原始字典。
-
-    敏感字段匹配规则：字段名（忽略大小写）包含
-    password、passwd、secret、token、key、api_key、auth、credential、private。
-    """
-    return {k: "***" if _SENSITIVE_RE.search(k) else v for k, v in data.items()}
-
 
 # ============================================================================
 # Canary — 生命周期编排器 (Lifecycle orchestrator)
@@ -177,8 +115,8 @@ class Canary:
             3. ``_build_context_tree`` — Context parent chain
             4. Per-entry: DI → config loading → ``on_init`` hook
         """
-        _init_logging()
-        engine = _get_logger("engine")
+        init_logging()
+        engine = get_logger("engine")
         engine.info("── init start ──")
 
         # ── 阶段0: 递归收集 ──
@@ -215,7 +153,7 @@ class Canary:
 
         Calls ``on_start`` on every registered entry.
         按拓扑序触发所有服务的 on_start 钩子。"""
-        engine = _get_logger("engine")
+        engine = get_logger("engine")
         engine.info("── start ──")
         for name in self._startup_order:
             entry = self._registry.get_by_name(name)
@@ -230,7 +168,7 @@ class Canary:
         Calls ``on_end`` on every registered entry, starting with the
         most dependent service and ending with the least dependent.
         """
-        engine = _get_logger("engine")
+        engine = get_logger("engine")
         engine.info("── stop ──")
         for name in reversed(self._startup_order):
             entry = self._registry.get_by_name(name)
@@ -249,8 +187,8 @@ class Canary:
         配置加载使用 ``config_cls()`` 无参构造。pydantic-settings 的
         ``BaseSettings.__init__`` 会自动读取 ``.env`` 和环境变量。
         """
-        engine = _get_logger("engine")
-        config_log = _get_logger("config")
+        engine = get_logger("engine")
+        config_log = get_logger("config")
         engine.info("  init %s", entry.name)
 
         # 1. 依赖注入：将 deps 中的服务实例 setattr 到目标实例
@@ -266,7 +204,7 @@ class Canary:
             config_log.info(
                 "  %s config loaded: %s",
                 entry.name,
-                _sanitize_config_values(raw_cfg),
+                sanitize_config_values(raw_cfg),
             )
         else:
             config_log.debug("  %s has no config", entry.name)
@@ -294,7 +232,7 @@ class Canary:
         ``LifecycleHookError`` 既保留了原始异常栈，又让调用方能区分
         "钩子业务逻辑异常"和"框架内部 bug"。
         """
-        lifecycle = _get_logger("lifecycle")
+        lifecycle = get_logger("lifecycle")
 
         # 延迟加载：首次调用时扫描实例并缓存钩子
         # Lazy: scan and cache hooks on first invocation
@@ -347,7 +285,7 @@ class Canary:
         if self._registry.has(cls):
             return  # 已注册，幂等跳过
 
-        registry_log = _get_logger("registry")
+        registry_log = get_logger("registry")
 
         # ── 模块分支 ──
         if is_cf_module(cls):
@@ -414,7 +352,7 @@ class Canary:
 
         为什么需要 parent 链？
         （Why a parent chain?）
-        Context 的 ``config_as()`` 和 ``resolve()`` 都依赖向上查找。
+        Context 的 ``get_config()`` 和 ``resolve()`` 都依赖向上查找。
         子服务的 Context.parent 指向所属模块的 Context，形成单向链表。
         这种设计使得每次查找都是沿链上溯，不需要维护全局映射表。
 

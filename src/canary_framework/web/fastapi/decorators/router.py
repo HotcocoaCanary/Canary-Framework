@@ -6,7 +6,7 @@
 
     原生 ``APIRouter`` 需要在模块级别实例化，无法接收框架的 ``Context``。
     框架的路由类在 ``__init__(self, ctx)`` 中接收 Context，使得路由方法
-    可以访问 ``ctx.resolve(DBService)`` 和 ``ctx.config_as(AppConfig)``。
+    可以访问 ``ctx.resolve(DBService)`` 和 ``ctx.get_config(AppConfig)``。
     这是框架统一 Context 设计的自然延伸。
 
     装饰器工厂模式 (Decorator factory pattern):
@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
 _RT_ATTR = "__cf_router__"
 """Set to ``True`` on classes decorated with ``@router``."""
@@ -27,8 +27,6 @@ _RT_PREFIX = "__cf_router_prefix__"
 
 _RT_ROUTE = "__cf_route__"
 """Set to ``True`` on methods decorated with ``@get`` / ``@post`` / …."""
-
-_Fn = TypeVar("_Fn", bound=Callable[..., Any])
 
 
 # ============================================================================
@@ -102,8 +100,8 @@ def _make_route(method: str) -> Callable[..., Any]:
         method: 大写 HTTP 方法名 (``"GET"``, ``"POST"``, …).
     """
 
-    def decorator(path: str, **kwargs: Any) -> Callable[[_Fn], _Fn]:
-        def inner(fn: _Fn) -> _Fn:
+    def decorator[FnT: Callable[..., Any]](path: str, **kwargs: Any) -> Callable[[FnT], FnT]:
+        def inner(fn: FnT) -> FnT:
             setattr(fn, _RT_ROUTE, True)
             fn._cf_route_method_ = method  # type: ignore[attr-defined]
             fn._cf_route_path_ = path  # type: ignore[attr-defined]
