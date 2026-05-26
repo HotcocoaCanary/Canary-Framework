@@ -8,11 +8,10 @@ Framework resolves these by ``__cf_name__`` across the entire module tree.
 
 from __future__ import annotations
 
-from standalone.module import NotifyService
-from user_module.service.user import UserService
-
 from blog_service.config import BlogConfig
 from canary_framework import Context, on_init, on_start, service
+from standalone.module import NotifyService
+from user_module.service.user import UserService
 
 
 @service(name="blog", deps=[NotifyService, UserService])
@@ -57,12 +56,14 @@ class BlogService:
 
     def create_post(self, title: str, content: str, author: str) -> str:
         pid = str(len(self._posts) + 1)
-        self._posts.append({
-            "id": pid,
-            "title": title,
-            "content": content,
-            "author": author,
-        })
+        self._posts.append(
+            {
+                "id": pid,
+                "title": title,
+                "content": content,
+                "author": author,
+            }
+        )
         return pid
 
     def list_posts(self) -> list[dict[str, object]]:
