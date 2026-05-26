@@ -20,20 +20,18 @@ class HelloService:
 ## Full
 
 ```python
-from canary_framework import service, on_init, on_end
+from canary_framework import service, on_config, on_init, on_end
 
 @service(
     name="UserService",
-    config=AppConfig,           # optional: @config-decorated class
     deps=[DBService],           # optional: dependency list
 )
 class UserService:
-    app_config: AppConfig       # type annotation for IDE support
     db_service: DBService
 
-    @on_init
-    def init(self) -> None:
-        self.pool = create_pool(self.app_config.dsn)
+    @on_config
+    def setup(self) -> None:
+        self.pool = create_pool(self.dsn)  # config fields injected by wiring
 
     @on_end
     async def stop(self) -> None:
@@ -43,21 +41,19 @@ class UserService:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | required | Globally unique service name |
-| `config` | `type \| None` | `None` | `@config`-decorated class; inherits from parent module when `None` |
 | `deps` | `list[type] \| None` | `None` | Dependency classes injected as `self.<snake_case>` attributes |
 
 ## Naming Convention
 
-Dependencies and config are injected as instance attributes using the **snake_case** version of the class name:
+Dependencies are injected as instance attributes using the **snake_case** version of the class name:
 
 | Class | Injected As |
 |-------|-------------|
 | `DBService` | `self.db_service` |
 | `CacheService` | `self.cache_service` |
-| `AppConfig` | `self.app_config` |
 | `DataSetAdminService` | `self.data_set_admin_service` |
 
-Type annotations (`app_config: AppConfig`) are optional but recommended for IDE support.
+Config fields are injected directly by wiring (via `app.config(config=Model())`), where the config model's field names match service names. See [Configuration](./configuration.md).
 
 ## Lifecycle Hooks
 
@@ -66,6 +62,7 @@ Hooks must be explicitly marked with decorators. The framework does **not** auto
 ```python
 from canary_framework import LifecycleHook
 
+# LifecycleHook.CONFIG → @on_config  (topological order, after wiring)
 # LifecycleHook.INIT   → @on_init    (topological order, no parameters)
 # LifecycleHook.START  → @on_start   (topological order)
 # LifecycleHook.END    → @on_end     (reverse order)

@@ -48,7 +48,6 @@ _MODULE_ATTR = "_cf_module__"
 def module(
     name: str,
     *,
-    config: type | None = None,
     deps: list[type] | None = None,
     services: list[type] | None = None,
 ) -> Callable[[type], type]:
@@ -59,15 +58,8 @@ def module(
 
     Args:
         name: 全局唯一模块名称。
-              Globally unique module name.
-        config: 可选的 ``@config`` 装饰的配置类。子服务未声明 ``config``
-                时自动继承此配置。
-                Optional ``@config``-decorated class shared by child services.
-        deps: 依赖的 ``@service`` / ``@module`` 类列表。模块本身也可以
-              声明依赖。
-              Modules can declare their own dependencies.
+        deps: 依赖的 ``@service`` / ``@module`` 类列表。
         services: 直接子节点（``@service`` 或 ``@module`` 类）列表。
-                  List of child ``@service`` / ``@module`` classes.
 
     Returns:
         一个类装饰器。A class decorator.
@@ -78,11 +70,10 @@ def module(
 
     Example::
 
-        @module(name="AppModule", config=AppConfig, services=[DBService, UserService])
+        @module(name="AppModule", services=[DBService, UserService])
         class AppModule:
             pass
     """
-    _config = config
     _deps = list(deps or ())
     _services = list(services or ())
 
@@ -94,17 +85,9 @@ def module(
                     f"decorated with @service or @module."
                 )
 
-        # 1. 应用 @service 基础标记
-        # Apply @service foundation — sets __cf_service__, __cf_service_meta__, __cf_name__
-        service(name=name, config=_config, deps=_deps)(cls)
-
-        # 2. 覆盖元数据为 ModuleMeta（继承 ServiceMeta 全部字段 + services）
-        # Upgrade metadata to ModuleMeta — carries all ServiceMeta fields plus services
-        meta = ModuleMeta(name=name, deps=_deps, config_cls=_config, services=_services)
+        service(name=name, deps=_deps)(cls)
+        meta = ModuleMeta(name=name, deps=_deps, services=_services)
         setattr(cls, _SERVICE_META, meta)
-
-        # 3. 模块标记
-        # Module marker — orthogonal to __cf_service__, used by is_cf_module()
         setattr(cls, _MODULE_ATTR, True)
         return cls
 

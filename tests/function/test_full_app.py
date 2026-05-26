@@ -1,12 +1,13 @@
 """Functional (end-to-end) tests for Canary Framework.
 
 Tests the complete application lifecycle from the user's perspective:
-@config → @service/@module → Canary.init/start/stop
+config model → @service/@module → Canary.init/start/stop
 """
 
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel
 
 
 @pytest.mark.functional
@@ -16,7 +17,6 @@ class TestFullApplicationLifecycle:
     async def test_full_init_start_stop_with_config_and_deps(self) -> None:
         from canary_framework import (
             Canary,
-            config,
             module,
             on_end,
             on_init,
@@ -24,10 +24,17 @@ class TestFullApplicationLifecycle:
             service,
         )
 
-        @config
-        class AppConfig:
+        class DBConfig(BaseModel):
             app_name: str = "myapp"
             debug: bool = False
+
+        class WorkerConfig(BaseModel):
+            app_name: str = "myapp"
+            debug: bool = False
+
+        class AppConfig(BaseModel):
+            db: DBConfig = DBConfig()
+            worker: WorkerConfig = WorkerConfig()
 
         @service("logger")
         class LoggerService:
@@ -39,17 +46,16 @@ class TestFullApplicationLifecycle:
             def log(self, msg: str) -> None:
                 self.messages.append(msg)
 
-        @service("db", config=AppConfig)
+        @service("db")
         class DBService:
             connected: bool
-            app_config: AppConfig
 
             def __init__(self) -> None:
                 self.connected = False
 
             @on_init
             def init(self) -> None:
-                self.name = self.app_config.app_name
+                self.name = self.app_name  # type: ignore[attr-defined]
                 self.connected = True
 
             @on_end
@@ -60,11 +66,10 @@ class TestFullApplicationLifecycle:
         class WorkerService:
             logger_service: LoggerService
             db_service: DBService
-            app_config: AppConfig
 
             @on_init
             def init(self) -> None:
-                self.logger_service.log(f"worker init: {self.app_config.app_name}")
+                self.logger_service.log(f"worker init: {self.app_name}")  # type: ignore[attr-defined]
 
             @on_start
             def start(self) -> None:
@@ -74,11 +79,12 @@ class TestFullApplicationLifecycle:
             def stop(self) -> None:
                 self.logger_service.log("worker stopped")
 
-        @module("app", config=AppConfig, services=[LoggerService, DBService, WorkerService])
+        @module("app", services=[LoggerService, DBService, WorkerService])
         class AppModule:
             pass
 
         app = Canary(AppModule)
+        await app.config(config=AppConfig())
         await app.init()
         await app.start()
         await app.stop()
@@ -96,35 +102,36 @@ class TestFullApplicationLifecycle:
     async def test_nested_modules_with_config_inheritance(self) -> None:
         from canary_framework import (
             Canary,
-            config,
             module,
             on_init,
             service,
         )
 
-        @config
-        class RootCfg:
+        class InnerSvcCfg(BaseModel):
             env: str = "production"
             secret: str = "s3cret"
 
-        @service("inner-svc")
+        class AppConfig(BaseModel):
+            inner_svc: InnerSvcCfg = InnerSvcCfg()
+
+        @service("inner_svc")
         class InnerService:
             cfg_env: str = ""
-            root_cfg: RootCfg
 
             @on_init
             def init(self) -> None:
-                self.cfg_env = self.root_cfg.env
+                self.cfg_env = self.env  # type: ignore[attr-defined]
 
         @module("inner", services=[InnerService])
         class InnerModule:
             pass
 
-        @module("root", config=RootCfg, services=[InnerModule])
+        @module("root", services=[InnerModule])
         class RootModule:
             pass
 
         app = Canary(RootModule)
+        await app.config(config=AppConfig())
         await app.init()
 
         inner: InnerService = app.registry.get_instance(InnerService)  # type: ignore[assignment]
@@ -165,6 +172,7 @@ class TestFullApplicationLifecycle:
             pass
 
         app = Canary(RootModule)
+        await app.config()
         await app.init()
 
         reporter: ReporterService = app.registry.get_instance(ReporterService)  # type: ignore[assignment]
@@ -187,6 +195,7 @@ class TestErrorScenarios:
                 raise RuntimeError("init failed")
 
         app = Canary(BrokenService)
+        await app.config()
         with pytest.raises(LifecycleHookError, match="init failed"):
             await app.init()
 

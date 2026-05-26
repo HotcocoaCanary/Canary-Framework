@@ -46,8 +46,8 @@ class UserRouter:
 
 Because `@router` is a service, it supports:
 - **`deps`** — DI injection of dependencies
-- **`config`** — pydantic-settings configuration
-- **`@on_init` / `@on_start` / `@on_end`** — full lifecycle
+- **`config`** — config fields injected via `app.config(config=Model())`
+- **`@on_config` / `@on_init` / `@on_start` / `@on_end`** — full lifecycle
 
 Routers are auto-discovered by `WebCanary` — no `@web` decorator needed. Simply include the router class in a module's `services` list (or in the `deps` of a service), and `WebCanary.start()` will register all HTTP routes.
 

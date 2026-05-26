@@ -81,17 +81,17 @@ These map directly to FastAPI's route parameters — no need to learn a differen
 |-----------|------|-------------|
 | `prefix` | `str` | URL prefix applied to all routes in this group |
 | `name` | `str` | Service name (auto-generated via `to_snake` if omitted) |
-| `config` | `type` | `@config`-decorated class (DI-injected as attribute) |
 | `deps` | `list[type]` | Dependencies injected via DI |
 | `tags` | `list[str]` | OpenAPI tags applied to all routes |
 
 ## Configuration Prefixes
 
-Root module config fields with `uvicorn_` or `fastapi_` prefixes are automatically routed:
+Root config model fields with `uvicorn_` or `fastapi_` prefixes are automatically routed:
 
 ```python
-@config
-class AppConfig:
+from pydantic import BaseModel
+
+class AppConfig(BaseModel):
     uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"

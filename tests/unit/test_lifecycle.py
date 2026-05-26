@@ -7,6 +7,7 @@ import pytest
 from canary_framework.common.enums import LifecycleHook
 from canary_framework.core.decorators.lifecycle import (
     find_hooks,
+    on_config,
     on_end,
     on_init,
     on_start,
@@ -18,14 +19,15 @@ class TestLifecycleHookEnum:
     """Verify the StrEnum values match hook names used by the engine."""
 
     def test_values_are_strings(self) -> None:
+        assert LifecycleHook.CONFIG == "on_config"  # type: ignore[comparison-overlap]
         assert LifecycleHook.INIT == "on_init"  # type: ignore[comparison-overlap]
         assert LifecycleHook.START == "on_start"  # type: ignore[comparison-overlap]
         assert LifecycleHook.END == "on_end"  # type: ignore[comparison-overlap]
 
     def test_iteration(self) -> None:
         names = list(LifecycleHook)
-        assert len(names) == 3
-        assert LifecycleHook.INIT in names
+        assert len(names) == 4
+        assert LifecycleHook.CONFIG in names
 
 
 @pytest.mark.unit
@@ -34,6 +36,10 @@ class TestFindHooks:
 
     def test_all_hooks_decorated(self) -> None:
         class MyService:
+            @on_config
+            def setup(self) -> None:
+                pass
+
             @on_init
             def init(self) -> None:
                 pass
@@ -49,6 +55,7 @@ class TestFindHooks:
         inst = MyService()
         hooks = find_hooks(inst)
 
+        assert hooks[LifecycleHook.CONFIG] is not None
         assert hooks[LifecycleHook.INIT] is not None
         assert hooks[LifecycleHook.START] is not None
         assert hooks[LifecycleHook.END] is not None
@@ -117,6 +124,7 @@ class TestFindHooks:
 
         hooks = find_hooks(Svc())
         assert set(hooks.keys()) == {
+            LifecycleHook.CONFIG,
             LifecycleHook.INIT,
             LifecycleHook.START,
             LifecycleHook.END,

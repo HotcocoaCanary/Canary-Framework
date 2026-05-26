@@ -8,7 +8,7 @@ Lightweight decorator-driven Python service framework.
 
 | Package | Purpose |
 |---------|---------|
-| [Core](./core.md) | `@service`, `@module`, `@config`, lifecycle, DI |
+| [Core](./core.md) | `@service`, `@module`, lifecycle, DI |
 | [Web / FastAPI](./fastapi.md) | `@router`, `@get`/`@post`, `WebCanary` — HTTP server |
 
 ## Contents

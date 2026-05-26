@@ -39,14 +39,19 @@ Service + router + config + WebCanary:
 
 ```python
 import asyncio
-from canary_framework import service, module, on_init, config
+from pydantic import BaseModel
+from canary_framework import service, module, on_config
 from canary_framework.web.fastapi import get, router, WebCanary
 
-@config
-class AppConfig:
+class DBConfig(BaseModel):
+    connection_string: str = "postgresql://localhost/mydb"
+    pool_size: int = 10
+
+class AppConfig(BaseModel):
     uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
+    dbservice: DBConfig = DBConfig()   # field name matches service name
 
 @router(prefix="/api", deps=[], tags=["api"])
 class APIRouter:
@@ -54,20 +59,19 @@ class APIRouter:
     async def hello(self) -> dict:
         return {"message": "Hello, world!"}
 
-@service(name="DBService", config=AppConfig)
+@service(name="dbservice")
 class DBService:
-    app_config: AppConfig
+    @on_config
+    def setup(self) -> None:
+        print(f"DB ready at {self.connection_string}")
 
-    @on_init
-    def init(self) -> None:
-        print(f"DB ready at {self.app_config.uvicorn_host}")
-
-@module(name="AppModule", config=AppConfig, services=[APIRouter, DBService])
+@module(name="AppModule", services=[APIRouter, DBService])
 class AppModule:
     pass
 
 async def main() -> None:
     app = WebCanary(AppModule)
+    await app.config(config=AppConfig())
     await app.init()
     await app.start()
 

@@ -49,7 +49,6 @@ _SERVICE_META = "__cf_service_meta__"
 def service(
     name: str,
     *,
-    config: type | None = None,
     deps: list[type] | None = None,
 ) -> Callable[[type], type]:
     """Declare a class as a Canary Framework service.
@@ -58,32 +57,22 @@ def service(
 
     Args:
         name: 全局唯一名称，用于依赖声明和注册表查找。
-              Globally unique service name.
-        config: 可选的 ``@config`` 装饰的配置类。
-                Optional ``@config``-decorated class.
         deps: 依赖的 ``@service`` / ``@module`` 类列表。
               框架将其实例按 snake_case 注入为属性。
-              List of ``@service`` / ``@module`` classes this service
-              depends on.  Each is injected as ``self.<snake_case_name>``.
 
     Returns:
         一个类装饰器。A class decorator.
 
     Example::
 
-        @service(name="database", config=DBConfig)
+        @service(name="database", deps=[CacheService])
         class DBService:
-            db_config: DBConfig
-
-            @on_init
-            def init(self) -> None:
-                self.pool = create_pool(self.db_config.dsn)
+            cache_service: CacheService
     """
-    _config = config
     _deps = list(deps or ())
 
     def decorator(cls: type) -> type:
-        meta = ServiceMeta(name=name, deps=_deps, config_cls=_config)
+        meta = ServiceMeta(name=name, deps=_deps)
         setattr(cls, _SERVICE_ATTR, True)
         setattr(cls, _SERVICE_META, meta)
         cls.__cf_name__ = name  # type: ignore[attr-defined]

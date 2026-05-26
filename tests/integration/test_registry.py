@@ -20,10 +20,8 @@ class TestServiceEntry:
         assert entry.instance == "hello"
         assert entry.name == "test"
         assert entry.deps == []
-        assert entry.config_cls is None
         assert entry.sub_services == []
         assert entry.dep_names == []
-        assert entry.config_instance is None
         assert entry.parent_entry is None
         assert entry._hooks is None
 

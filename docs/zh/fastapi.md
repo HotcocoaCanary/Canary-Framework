@@ -81,21 +81,26 @@ await app.start()
 |------|------|------|
 | `prefix` | `str` | 应用于该组所有路由的 URL 前缀 |
 | `name` | `str` | 服务名称（省略时通过 `to_snake` 自动生成） |
-| `config` | `type` | `@config` 装饰的配置类（通过 DI 作为属性注入） |
 | `deps` | `list[type]` | 通过 DI 注入的依赖 |
 | `tags` | `list[str]` | 应用于所有路由的 OpenAPI 标签 |
 
 ## 配置前缀
 
-根模块配置中带有 `uvicorn_` 或 `fastapi_` 前缀的字段会被自动路由：
+通过 pydantic `BaseModel` 传入配置。带有 `uvicorn_` 或 `fastapi_` 前缀的字段会被自动路由：
 
 ```python
-@config
-class AppConfig:
+from pydantic import BaseModel
+
+class AppConfig(BaseModel):
     uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
     database_url: str = "postgresql://"  # 无前缀 → 业务配置
+
+app = WebCanary(AppModule)
+await app.config(config=AppConfig())
+await app.init()
+await app.start()
 ```
 
 ## HTTP 请求日志

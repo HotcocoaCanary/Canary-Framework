@@ -5,35 +5,31 @@
     （Why "Canary"?）
 
     金丝雀在煤矿中作为早期预警系统——框架同样用于「检测」和「编排」服务。
-    类比：框架是矿工，服务是矿道。  The name evokes the canary in the coal
-    mine — the framework "detects" and "orchestrates" services.
+    The name evokes the canary in the coal mine — the framework "detects"
+    and "orchestrates" services.
 
-    为什么 init/start/stop 分为三个阶段而不是一个？
-    （Why three phases — init, start, stop — instead of one?）
+    为什么 config / init / start / stop 分为四个阶段？
+    （Why four phases — config, init, start, stop — instead of one?）
 
-    1. **依赖完整性**：init 阶段结束后，所有服务的依赖链已就绪。start
-       阶段保证各服务在依赖方已初始化后再开始真正的工作
-       After init, all dependency chains are resolved.  start runs
-       when every service can rely on its dependencies being initialised.
-    2. **优雅关闭**：stop 逆序执行，先停止依赖方，再停止被依赖方
-       Graceful shutdown: dependants stop first, dependencies last.
-    3. **测试友好**：测试可以只调 init 验证注入和配置，无需真的启动服务
-       Test-friendly: tests can call init alone to verify DI and config.
-
-日志系统 (Logging):
-    Framework uses the ``"cf"`` logger namespace (``cf.engine``,
-    ``cf.di``, ``cf.config``, ``cf.lifecycle``, ``cf.registry``).
-    ``propagate=False`` 确保不与 uvicorn 等库的 root logger 重复输出。
+    1. **config** — wiring 完成、配置可用，服务可以校验和调整配置
+       After wiring, config is available; services validate settings.
+    2. **init** — 所有服务的 config 钩子已执行，可以安全建立连接
+       All config hooks have run; safe to establish connections.
+    3. **start** — topo 序启动，依赖方在依赖就绪后才开始工作
+       Topological start; dependants start after dependencies.
+    4. **stop** — 逆序关闭，依赖方先停、被依赖方后停
+       Reverse shutdown; dependants stop first.
 """
 
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
-from canary_framework.common._logging import get_logger, init_logging, sanitize_config_values
+from canary_framework.common._logging import get_logger, init_logging
 from canary_framework.common._types import ServiceEntry
 from canary_framework.common.enums import LifecycleHook
-from canary_framework.common.exceptions import ConfigurationError, LifecycleHookError
+from canary_framework.common.exceptions import LifecycleHookError
 from canary_framework.core.algorithms.injector import inject_deps
 from canary_framework.core.algorithms.naming import to_snake
 from canary_framework.core.algorithms.sorter import topological_sort
@@ -42,80 +38,76 @@ from canary_framework.core.decorators.lifecycle import HookDict, find_hooks
 from canary_framework.core.decorators.module import get_module_meta, is_cf_module
 from canary_framework.core.decorators.service import get_service_meta, is_cf_service
 
-# ============================================================================
-# Canary — 生命周期编排器 (Lifecycle orchestrator)
-# ============================================================================
-
 
 class Canary:
     """Core engine — life-cycle orchestrator for the service graph.
 
     框架的核心引擎，负责完整的服务生命周期编排。
 
-    使用方式 (Usage)::
+    Usage::
 
         app = Canary(MyRootModule)
-        await app.init()    # 收集 → 校验 → 排序 → DI → 配置 → on_init
-        await app.start()   # 拓扑序调用 on_start
-        # … application runs …
-        await app.stop()    # 逆序调用 on_end
+        await app.config(config=MyConfig())  # 收集 → 校验 → 排序 → wiring → on_config
+        await app.init()                     # 拓扑序调用 on_init
+        await app.start()                    # 拓扑序调用 on_start
+        await app.stop()                     # 逆序调用 on_end
     """
 
-    __slots__ = ("_registry", "_startup_order", "_target")
+    __slots__ = ("_config", "_registry", "_startup_order", "_target", "_wired")
 
     def __init__(self, target: type) -> None:
-        """Create a :class:`Canary` instance for the given root class.
-
-        Args:
-            target: 根模块或服务类（入口点）。
-                    A ``@module`` or ``@service``-decorated class
-                    serving as the entry point of the service graph.
-        """
         self._target = target
         self._registry = Registry()
         self._startup_order: list[str] = []
+        self._wired = False
+        self._config: Any = None
 
     @property
     def registry(self) -> Registry:
-        """The global :class:`Registry` (read-only after :meth:`init`).
-
-        全局注册中心。init 之后只读，不应再修改。"""
+        """The global :class:`Registry` (read-only after :meth:`config`)."""
         return self._registry
 
     @property
     def startup_order(self) -> list[str]:
-        """The topological startup order computed during :meth:`init`.
-
-        拓扑排序后的启动顺序列表。返回副本以防止外泄修改内部状态。"""
+        """The topological startup order computed during :meth:`config`."""
         return list(self._startup_order)
+
+    @property
+    def config_model(self) -> Any:
+        """The config model passed to :meth:`config`."""
+        return self._config
 
     # ==================================================================
     # 公开生命周期 (Public lifecycle)
     # ==================================================================
 
-    async def init(self) -> None:
-        """Initialize the service graph.
+    async def config(self, *, config: Any = None) -> None:
+        """Collect, validate, wire, and call ``on_config`` on every entry.
 
-        Phases executed in order:
+        Args:
+            config: A pydantic ``BaseModel`` whose field names match service/module names.
+                    Each field is either a nested ``BaseModel`` (injected as attributes)
+                    or a raw dict.
+
+        Phases:
             0. ``_collect``       — recursive discovery
             1. ``_validate``      — dependency integrity check
             2. ``topological_sort`` — Kahn BFS
-            3. Per-entry: DI → config loading & injection → ``on_init`` hook
-               (plus sub-service injection for modules)
+            3. ``_wire_entry``    — DI + config injection + sub-service injection (per entry)
+            4. ``on_config``      — user hook (topological order)
         """
         init_logging()
         engine = get_logger("engine")
-        engine.info("── init start ──")
+        engine.info("── config start ──")
 
-        # ── 阶段0: 递归收集 ──
+        self._config = config
+
         engine.debug("Phase 0: collecting services/modules")
         self._collect(self._target)
 
-        # ── 阶段1: 依赖完整性校验 ──
         engine.debug("Phase 1: validating dependencies")
         self._validate()
 
-        # ── 阶段2: 拓扑排序（Kahn BFS） ──
         engine.debug("Phase 2: topological sort")
         self._startup_order = topological_sort(self._registry)
         engine.info(
@@ -124,18 +116,35 @@ class Canary:
             " → ".join(self._startup_order),
         )
 
-        # ── 阶段3: 按拓扑序逐个初始化 ──
-        engine.debug("Phase 3: initialising entries")
+        engine.debug("Phase 3: wiring entries")
         for name in self._startup_order:
             entry = self._registry.get_by_name(name)
-            await self._init_entry(entry)
+            self._wire_entry(entry)
 
-        engine.info("── init complete (%d services) ──", len(self._startup_order))
+        engine.debug("Phase 4: on_config hooks")
+        for name in self._startup_order:
+            entry = self._registry.get_by_name(name)
+            await self._call_hook(entry, LifecycleHook.CONFIG)
+
+        self._wired = True
+        engine.info("── config complete (%d services) ──", len(self._startup_order))
+
+    async def init(self) -> None:
+        """Call ``on_init`` on every entry in topological order.
+
+        按拓扑序触发所有服务的 on_init 钩子。
+        必须在 ``config()`` 之后调用。
+        """
+        engine = get_logger("engine")
+        engine.info("── init start ──")
+        for name in self._startup_order:
+            entry = self._registry.get_by_name(name)
+            await self._call_hook(entry, LifecycleHook.INIT)
+        engine.info("── init complete ──")
 
     async def start(self) -> None:
-        """Start all services in topological order.
+        """Call ``on_start`` on every entry in topological order.
 
-        Calls ``on_start`` on every registered entry.
         按拓扑序触发所有服务的 on_start 钩子。"""
         engine = get_logger("engine")
         engine.info("── start ──")
@@ -145,13 +154,9 @@ class Canary:
         engine.info("── start complete ──")
 
     async def stop(self) -> None:
-        """Stop all services in **reverse** topological order.
+        """Call ``on_end`` on every entry in **reverse** topological order.
 
-        按逆序触发所有服务的 on_end 钩子。
-        依赖方先停止，被依赖方后停止。
-        Calls ``on_end`` on every registered entry, starting with the
-        most dependent service and ending with the least dependent.
-        """
+        按逆序触发所有服务的 on_end 钩子。依赖方先停止，被依赖方后停止。"""
         engine = get_logger("engine")
         engine.info("── stop ──")
         for name in reversed(self._startup_order):
@@ -160,47 +165,31 @@ class Canary:
         engine.info("── stop complete ──")
 
     # ==================================================================
-    # 单个 entry 的初始化 (Entry initialisation)
+    # Entry wiring (framework-only)
     # ==================================================================
 
-    async def _init_entry(self, entry: ServiceEntry) -> None:
-        """Initialize a single service/module: DI → config → on_init → sub-inject.
+    def _wire_entry(self, entry: ServiceEntry) -> None:
+        """Inject deps, load config from model, inject sub-services.
 
-        单个注册项的初始化流程：
-        依赖注入 → 配置加载 → on_init 钩子 → 模块子服务注入。
+        Pure framework wiring — no user hooks.
+        Config is looked up by ``entry.name`` in the config model.
+        Nested ``BaseModel`` fields are injected as individual attributes.
         """
         engine = get_logger("engine")
-        config_log = get_logger("config")
-        engine.info("  init %s", entry.name)
+        engine.info("  wire %s", entry.name)
 
-        # 1. 依赖注入：将 deps 中的服务实例 setattr 到目标实例
         inject_deps(entry.instance, entry, self._registry)
 
-        # 2. 配置加载 + DI 注入 config
-        if entry.config_cls is not None:
-            try:
-                entry.config_instance = entry.config_cls()
-            except Exception as exc:
-                raise ConfigurationError(
-                    f"Failed to load config for '{entry.name}': {exc}"
-                ) from exc
-            attr_name = to_snake(entry.config_cls.__name__)
-            setattr(entry.instance, attr_name, entry.config_instance)
-            raw_cfg = {
-                k: v for k, v in vars(entry.config_instance).items() if not k.startswith("_")
-            }
-            config_log.info(
-                "  %s config loaded: %s",
-                entry.name,
-                sanitize_config_values(raw_cfg),
-            )
-        else:
-            config_log.debug("  %s has no config", entry.name)
+        if self._config is not None:
+            service_config = getattr(self._config, entry.name, None)
+            if service_config is not None:
+                if hasattr(service_config, "model_dump"):
+                    for key, value in service_config.model_dump().items():
+                        setattr(entry.instance, key, value)
+                elif isinstance(service_config, dict):
+                    for key, value in service_config.items():
+                        setattr(entry.instance, key, value)
 
-        # 3. on_init 钩子（不再传递 Context——config 已通过 DI 注入）
-        await self._call_hook(entry, LifecycleHook.INIT)
-
-        # 4. 模块子服务注入
         if entry.sub_services:
             for sub_cls in entry.sub_services:
                 sub_entry = self._registry.get_by_class(sub_cls)
@@ -217,24 +206,11 @@ class Canary:
         hook: LifecycleHook,
         *args: object,
     ) -> None:
-        """Dispatch a lifecycle hook on *entry*.
-
-        统一钩子调度：支持同步和异步方法。
-
-        为什么需要 ``try/except`` 包装？
-        （Why wrap in try/except?）
-        钩子内部的异常不能无声地吞掉，也不能让框架崩溃。包装为
-        ``LifecycleHookError`` 既保留了原始异常栈，又让调用方能区分
-        "钩子业务逻辑异常"和"框架内部 bug"。
-        """
+        """Dispatch a lifecycle hook on *entry*.  Supports sync and async."""
         lifecycle = get_logger("lifecycle")
 
-        # 延迟加载：首次调用时扫描实例并缓存钩子
-        # Lazy: scan and cache hooks on first invocation
         if entry._hooks is None:
             raw_hooks: HookDict = find_hooks(entry.instance)
-            # 将 LifecycleHook 键转为字符串存入缓存
-            # Convert LifecycleHook keys to strings for cache storage
             entry._hooks = {k.value: v for k, v in raw_hooks.items()}  # type: ignore[misc]
 
         fn_s = entry._hooks.get(hook.value)
@@ -250,8 +226,6 @@ class Canary:
                 f"Service '{entry.name}' raised an error in {hook.value} hook: {exc}"
             ) from exc
 
-        # 自适应: sync 或 async 钩子
-        # Adaptive: detect coroutine and await if needed
         if asyncio.iscoroutine(result):
             await result
 
@@ -264,78 +238,50 @@ class Canary:
         cls: type,
         parent_entry: ServiceEntry | None = None,
     ) -> None:
-        """Recursively discover and register ``@service`` / ``@module`` classes.
-
-        递归收集所有被 @service / @module 装饰的类。
-        使用 Registry.idempotent register 天然支持 DAG 共享依赖。
-        """
+        """Recursively discover and register ``@service`` / ``@module`` classes."""
         if self._registry.has(cls):
             return
 
         registry_log = get_logger("registry")
 
-        # ── 模块分支 ──
         if is_cf_module(cls):
             meta = get_module_meta(cls)
             self._registry.register(cls, meta=meta)
             entry = self._registry.get_by_class(cls)
             entry.parent_entry = parent_entry
-            self._inherit_config(entry, parent_entry)
 
             registry_log.info(
-                "  module %-30s config=%s  services=%d",
+                "  module %-30s services=%d",
                 entry.name,
-                entry.config_cls.__name__ if entry.config_cls else "inherit",
                 len(meta.services),
             )
             for sub_cls in meta.services:
                 self._collect(sub_cls, parent_entry=entry)
             return
 
-        # ── 服务分支 ──
         if is_cf_service(cls):
             svc_meta = get_service_meta(cls)
             self._registry.register(cls, meta=svc_meta)
             entry = self._registry.get_by_class(cls)
             entry.parent_entry = parent_entry
-            self._inherit_config(entry, parent_entry)
 
             registry_log.info(
-                "  service %-30s config=%s  deps=%d",
+                "  service %-30s deps=%d",
                 entry.name,
-                entry.config_cls.__name__ if entry.config_cls else "inherit",
                 len(entry.deps),
             )
-            # 递归收集依赖，使 deps 中的 @router 等也能被注册
-            # Recurse into deps so @router classes listed in deps are also collected
             for dep_cls in entry.deps:
                 self._collect(dep_cls, parent_entry=parent_entry)
             return
 
         raise TypeError(f"'{cls.__name__}' is not decorated with @service or @module.")
 
-    @staticmethod
-    def _inherit_config(
-        entry: ServiceEntry,
-        parent_entry: ServiceEntry | None,
-    ) -> None:
-        """Copy *config_cls* from parent when the child has none.
-
-        配置继承：子节点未声明 config_cls 时，从父模块拷贝。
-        这是模块系统最核心的能力之一——避免在每个子服务中重复配置声明。"""
-        if entry.config_cls is None and parent_entry is not None:
-            entry.config_cls = parent_entry.config_cls
-
     # ==================================================================
     # 依赖校验 (Dependency validation)
     # ==================================================================
 
     def _validate(self) -> None:
-        """Verify every ``deps=[]`` reference corresponds to a registered entry.
-
-        校验所有 deps 中声明的依赖是否都已注册。
-        在收集完成后校验确保 Registry 状态完整一致。
-        """
+        """Verify every ``deps=[]`` reference corresponds to a registered entry."""
         all_names = set(self._registry.names())
         for entry in self._registry.all_entries():
             for dep_name in entry.dep_names:

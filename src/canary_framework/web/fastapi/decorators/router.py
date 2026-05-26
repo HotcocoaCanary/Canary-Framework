@@ -44,24 +44,19 @@ def router(
     prefix: str = "",
     *,
     name: str | None = None,
-    config: type | None = None,
     deps: list[type] | None = None,
     tags: list[str] | None = None,
 ) -> Callable[[type], type]:
     """Mark a class as a Canary route handler (a specialised service).
 
     将类声明为路由处理器（特殊的框架服务）。内部调用 ``@service``，
-    因此 Router 拥有完整的 DI、配置和生命周期支持。
+    因此 Router 拥有完整的 DI 和生命周期支持。
 
     Args:
         prefix: URL 前缀，应用于该路由组所有端点。
-                URL prefix applied to all routes in this group.
         name: 服务名称，默认根据类名自动生成 snake_case。
-              Service name; auto-generated from class name if omitted.
-        config: 可选的 ``@config`` 装饰的配置类。
         deps: 依赖的 ``@service`` / ``@module`` 类列表，通过 DI 注入。
         tags: OpenAPI 文档标签，应用于该路由组所有端点（可在端点级覆盖）。
-              OpenAPI tags applied to all routes as default.
 
     Returns:
         一个类装饰器。A class decorator.
@@ -83,21 +78,14 @@ def router(
 
     def decorator(cls: type) -> type:
         svc_name = _name or to_snake(cls.__name__)
-
-        # 1. 应用 @service 基础标记
-        service(name=svc_name, config=config, deps=_deps)(cls)
-
-        # 2. 覆盖元数据为 RouterMeta
+        service(name=svc_name, deps=_deps)(cls)
         meta = RouterMeta(
             name=svc_name,
             deps=_deps,
-            config_cls=config,
             prefix=_prefix,
             tags=_tags,
         )
         setattr(cls, _SERVICE_META, meta)
-
-        # 3. Router 标记
         setattr(cls, _RT_ATTR, True)
         return cls
 

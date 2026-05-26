@@ -107,7 +107,7 @@ class WebCanary(Canary):
         """Start the FastAPI + Uvicorn server.
 
         1. 从根模块 config 按前缀拆分参数
-        2. 构建 FastAPI lifespan 绑定框架的 on_start / on_end
+        2. 构建 FastAPI lifespan 绑定 config → init → start → stop 生命周期
         3. 注册所有 @router 路由（使用 APIRouter + include_router）
         4. 启动 uvicorn.Server.serve()（阻塞直到收到停止信号）
 
@@ -128,8 +128,7 @@ class WebCanary(Canary):
                 "WebCanary requires Uvicorn. Install it with: pip install canary-framework[web]"
             ) from None
 
-        root_entry = self.registry.get_by_class(self._target)
-        root_config = root_entry.config_instance
+        root_config = self.config_model
 
         uvicorn_kwargs: dict[str, Any] = {}
         fastapi_kwargs: dict[str, Any] = {}
@@ -149,6 +148,7 @@ class WebCanary(Canary):
         @asynccontextmanager
         async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             """FastAPI lifespan: 绑定框架生命周期到 HTTP 服务器生命周期。"""
+            await self.init()
             await Canary.start(self)
             app.state.cf_registry = self.registry
             _register_routes(app, self.registry)

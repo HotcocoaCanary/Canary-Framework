@@ -26,7 +26,8 @@ canary_framework
 from canary_framework.web.fastapi import WebCanary
 
 app = WebCanary(MyRootModule)
-await app.init()    # 与 Canary 相同：收集 → 校验 → 排序 → DI → 配置 → on_init
+await app.config(config=AppConfig())   # wiring + on_config 钩子
+await app.init()    # 与 Canary 相同：收集 → 校验 → 排序 → DI → on_init
 await app.start()   # 被重写：启动 FastAPI + Uvicorn，注册路由
 ```
 
@@ -46,8 +47,7 @@ class UserRouter:
 
 因为 `@router` 是服务，所以它支持：
 - **`deps`** — DI 注入依赖
-- **`config`** — pydantic-settings 配置
-- **`@on_init` / `@on_start` / `@on_end`** — 完整的生命周期
+- **`@on_config` / `@on_init` / `@on_start` / `@on_end`** — 完整的生命周期
 
 路由由 `WebCanary` 自动发现 —— 无需 `@web` 装饰器。只需将路由类放到模块的 `services` 列表（或服务的 `deps`）中，`WebCanary.start()` 就会注册所有 HTTP 路由。
 

@@ -8,7 +8,7 @@
 
 | 包 | 用途 |
 |----|------|
-| [Core](./core.md) | `@service`、`@module`、`@config`、生命周期、DI |
+| [Core](./core.md) | `@service`、`@module`、`on_config`、生命周期、DI |
 | [Web / FastAPI](./fastapi.md) | `@router`、`@get`/`@post`、`WebCanary` — HTTP 服务器 |
 
 ## 目录

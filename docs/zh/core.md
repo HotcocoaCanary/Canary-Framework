@@ -6,10 +6,10 @@
 
 | 装饰器 | 用途 | 声明内容 |
 |--------|------|----------|
-| `@service` | 业务逻辑的最小单元 | `name`、`deps`、`config` |
-| `@module` | 将服务组织成树状结构 | `name`、`services`、`deps`、`config` — 继承自 `@service` |
-| `@config` | 将普通类转为 pydantic-settings 模型 | 带类型注解和默认值的字段 |
-| `@on_init` | 在 DI + 配置就绪后运行 | (无参数 — 依赖和配置是实例属性) |
+| `@service` | 业务逻辑的最小单元 | `name`、`deps` |
+| `@module` | 将服务组织成树状结构 | `name`、`services`、`deps` — 继承自 `@service` |
+| `@on_config` | 在 wiring 之后、on_init 之前执行 | config 属性在此可用 |
+| `@on_init` | 在配置加载后运行 | (无参数 — 依赖和配置是实例属性) |
 | `@on_start` | 在 `app.start()` 时按拓扑序运行 | (无参数) |
 | `@on_end` | 在 `app.stop()` 时按逆序运行 | (无参数) |
 
@@ -30,31 +30,30 @@ ServiceMeta              ModuleMeta (继承 ServiceMeta)    RouterMeta (继承 S
 ## 快速示例
 
 ```python
+from pydantic import BaseModel
 from canary_framework import (
-    Canary, config, service, module, on_init, on_start
+    Canary, service, module, on_config, on_init, on_start
 )
 
-@config
-class AppConfig:
+class AppConfig(BaseModel):
     database_url: str = "sqlite://"
 
-@service(name="db", config=AppConfig)
+@service(name="db")
 class DBService:
-    app_config: AppConfig
-
-    @on_init
-    def init(self) -> None:
-        self.pool = connect(self.app_config.database_url)
+    @on_config
+    def setup(self) -> None:
+        self.pool = connect(self.database_url)
 
     @on_start
     def start(self) -> None:
         self.pool.ping()
 
-@module(name="app", config=AppConfig, services=[DBService])
+@module(name="app", services=[DBService])
 class AppModule:
     pass
 
 app = Canary(AppModule)
+await app.config(config=AppConfig())
 await app.init()
 await app.start()
 # ...
@@ -65,7 +64,7 @@ await app.stop()
 
 - [服务](./services.md) — 声明和使用服务
 - [模块](./modules.md) — 将服务组合为模块
-- [配置](./configuration.md) — @config 与配置继承
-- [生命周期](./lifecycle.md) — init / start / end 钩子
+- [配置](./configuration.md) — pydantic BaseModel 配置系统
+- [生命周期](./lifecycle.md) — config / init / start / end 钩子
 - [依赖注入](./dependency-injection.md) — deps、命名和解析
 
