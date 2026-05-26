@@ -30,7 +30,8 @@ class TestModuleValidation:
             TypeError,
             match="not decorated with @service or @module",
         ):
-            @module("bad", services=[NotDecorated])  # type: ignore[arg-type]
+
+            @module("bad", services=[NotDecorated])
             class BadModule:
                 pass
 

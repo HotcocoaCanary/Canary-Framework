@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeVar
 
 from canary_framework.common._types import RouterMeta
 from canary_framework.core.algorithms.naming import to_snake
@@ -131,7 +131,11 @@ def get_router_meta(cls: type) -> RouterMeta:
 # users who need them can use raw FastAPI directly.
 
 
-def _make_route(method: str) -> Callable[..., Any]:
+_FnT = TypeVar("_FnT", bound=Callable[..., Any])
+"""Type variable for the decorated function."""
+
+
+def _make_route(method: str) -> Callable[..., Callable[[_FnT], _FnT]]:
     """Create a decorator for a specific HTTP method.
 
     创建指定 HTTP 方法的装饰器。显式声明 8 个筛选后的参数，
@@ -152,7 +156,7 @@ def _make_route(method: str) -> Callable[..., Any]:
         dependencies: list[object] | None = None,
         deprecated: bool | None = None,
         response_description: str | None = None,
-    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    ) -> Callable[[_FnT], _FnT]:
         # 只保留非 None 的参数，避免将 None 传给 FastAPI 覆盖其默认行为
         # Filter to non-None values — passing None to FastAPI may override defaults
         opts: dict[str, Any] = {
@@ -170,7 +174,7 @@ def _make_route(method: str) -> Callable[..., Any]:
             if v is not None
         }
 
-        def inner(fn: Callable[..., Any]) -> Callable[..., Any]:
+        def inner(fn: _FnT) -> _FnT:
             setattr(fn, _RT_ROUTE, True)
             fn._cf_route_method_ = method  # type: ignore[attr-defined]
             fn._cf_route_path_ = path  # type: ignore[attr-defined]

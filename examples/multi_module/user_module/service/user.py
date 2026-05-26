@@ -26,7 +26,7 @@ class UserService:
         self.auth_service.issue("alice")
 
     def list_users(self) -> list[dict[str, str]]:
-        return [{"id": uid, **info} for uid, info in self._users.items()]  # type: ignore[misc]
+        return [{"id": uid, **info} for uid, info in self._users.items()]
 
     def get_user(self, user_id: str) -> dict[str, str] | None:
         return self._users.get(user_id)
@@ -34,4 +34,4 @@ class UserService:
     def create_user(self, name: str, role: str | None = None) -> dict[str, str]:
         uid = str(len(self._users) + 1)
         self._users[uid] = {"name": name, "role": role or "user"}
-        return {"id": uid, **self._users[uid]}  # type: ignore[misc]
+        return {"id": uid, **self._users[uid]}

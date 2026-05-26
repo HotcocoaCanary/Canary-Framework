@@ -41,7 +41,7 @@ class BlogRouter:
         return {"id": pid}
 
     @put("/{post_id}")
-    async def update_post(self, post_id: str, body: dict[str, Any]) -> dict[str, str]:
+    async def update_post(self, post_id: str, body: dict[str, Any]) -> dict[str, object]:
         """PUT /api/blog/{post_id} — update an existing post."""
         post = self.blog_service.get_post(post_id)
         if post is None:
@@ -51,7 +51,7 @@ class BlogRouter:
         return {"id": post_id, "updated": True}
 
     @patch("/{post_id}")
-    async def patch_post(self, post_id: str, body: dict[str, Any]) -> dict[str, str]:
+    async def patch_post(self, post_id: str, body: dict[str, Any]) -> dict[str, object]:
         """PATCH /api/blog/{post_id} — partially update a post."""
         post = self.blog_service.get_post(post_id)
         if post is None:

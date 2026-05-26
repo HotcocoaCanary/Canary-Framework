@@ -85,11 +85,11 @@ class TestFullApplicationLifecycle:
         await app.stop()
 
         # Verify lifecycle executed correctly
-        db = app.registry.get_instance(DBService)
-        assert db.connected is False  # shut down
+        db: DBService = app.registry.get_instance(DBService)  # type: ignore[assignment]
+        assert db.connected is False
         assert db.name == "myapp"
 
-        logger = app.registry.get_instance(LoggerService)
+        logger: LoggerService = app.registry.get_instance(LoggerService)  # type: ignore[assignment]
         assert "worker init: myapp" in logger.messages
         assert "worker started" in logger.messages
         assert "worker stopped" in logger.messages
@@ -128,7 +128,7 @@ class TestFullApplicationLifecycle:
         app = Canary(RootModule)
         await app.init()
 
-        inner = app.registry.get_instance(InnerService)
+        inner: InnerService = app.registry.get_instance(InnerService)  # type: ignore[assignment]
         assert inner.cfg_env == "production"
 
     async def test_multiple_modules_cross_dependency(self) -> None:
@@ -169,7 +169,7 @@ class TestFullApplicationLifecycle:
         app = Canary(RootModule)
         await app.init()
 
-        reporter = app.registry.get_instance(ReporterService)
+        reporter: ReporterService = app.registry.get_instance(ReporterService)  # type: ignore[assignment]
         assert reporter.result == 7
 
 
