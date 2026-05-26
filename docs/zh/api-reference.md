@@ -2,27 +2,25 @@
 
 ## 装饰器
 
-### `@service(name, *, config=None, deps=None)`
+### `@service(name, *, deps=None)`
 
 将类声明为 CF 框架的服务（最小运行单元）。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | `str` | ✓ | 全局唯一名称，用于依赖声明和名称索引 |
-| `config` | `type \| None` | | `@config` 装饰的配置类，None 时从父模块继承 |
 | `deps` | `list[type] \| None` | | 依赖的服务类列表，自动注入为 snake_case 属性 |
 
-### `@module(name, *, config=None, services=None)`
+### `@module(name, *, services=None)`
 
 将类声明为 CF 框架的模块（服务的组合容器）。`@module` 内部调用 `@service` —— 模块也是服务。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | `str` | ✓ | 全局唯一名称 |
-| `config` | `type \| None` | | 模块的配置类（子服务未声明时继承） |
 | `services` | `list[type] \| None` | | 子服务和子模块类列表 |
 
-### `@router(prefix, *, name=None, config=None, deps=None, tags=None)`
+### `@router(prefix, *, name=None, deps=None, tags=None)`
 
 将类声明为路由。`@router` 内部调用 `@service` —— 路由也是服务。由 `WebCanary` 自动发现。
 
@@ -30,7 +28,6 @@
 |------|------|------|------|
 | `prefix` | `str` | ✓ | 应用于该组所有路由的 URL 前缀 |
 | `name` | `str` | | 服务名称（省略时通过 `to_snake` 自动生成） |
-| `config` | `type \| None` | | `@config` 装饰的配置类 |
 | `deps` | `list[type] \| None` | | 通过 DI 注入的依赖列表 |
 | `tags` | `list[str] \| None` | | 应用于所有路由的 OpenAPI 标签 |
 
@@ -46,22 +43,11 @@
 
 关键字参数直接传递到 FastAPI 的 `app.add_api_route()`。
 
-### `@config`
-
-将普通类转为 pydantic-settings `BaseSettings` 子类。内置 `env_file=".env"`。
-
-优先级：**环境变量 > .env 文件 > 默认值**。
-
-```python
-@config
-class MyConfig:
-    key: str = "default"
-```
-
 ### 生命周期钩子
 
 | 装饰器 | 签名 | 执行顺序 | 说明 |
 |--------|------|----------|------|
+| `@on_config` | `()` | 拓扑序 | wiring 之后、on_init 之前执行，config 属性在此可用 |
 | `@on_init` | `()` | 拓扑序 | 依赖已注入、配置已加载，无需 `ctx` 参数 |
 | `@on_start` | `()` | 拓扑序 | 无参数 |
 | `@on_end` | `()` | 逆序 | 无参数 |
@@ -73,6 +59,7 @@ class MyConfig:
 ```python
 from canary_framework import LifecycleHook
 
+LifecycleHook.CONFIG # "on_config"
 LifecycleHook.INIT   # "on_init"
 LifecycleHook.START  # "on_start"
 LifecycleHook.END    # "on_end"
@@ -91,7 +78,6 @@ LifecycleHook.END    # "on_end"
 class ServiceMeta:
     name: str
     deps: list[type]
-    config_cls: type | None
 
 @dataclass
 class ModuleMeta(ServiceMeta):
@@ -128,7 +114,8 @@ class ServiceEntry:
 |-----------|------|
 | `.registry` | 全局 `Registry` 注册中心 |
 | `.startup_order` | 拓扑排序后的启动顺序列表 |
-| `await .init()` | 收集 → 校验 → 拓扑排序 → DI → 配置加载 → on_init |
+| `await .config(config=Model())` | wiring + on_config 钩子 |
+| `await .init()` | on_init 钩子 |
 | `await .start()` | 拓扑序调用 on_start |
 | `await .stop()` | 逆序调用 on_end |
 
@@ -136,16 +123,18 @@ class ServiceEntry:
 
 继承自 Canary，仅重写 `start()` 接入 FastAPI + Uvicorn。
 
-按前缀从根模块 `@config` 分发参数：`uvicorn_*` → uvicorn，`fastapi_*` → FastAPI()，无前缀为业务配置。
+按前缀从根模块配置分发参数：`uvicorn_*` → uvicorn，`fastapi_*` → FastAPI()，无前缀为业务配置。
 
 ```python
-@config
-class AppConfig:
+from pydantic import BaseModel
+
+class AppConfig(BaseModel):
     uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
 
 app = WebCanary(MyModule)
+await app.config(config=AppConfig())
 await app.init()
 await app.start()
 ```
@@ -173,7 +162,7 @@ from canary_framework import (
 | `ServiceNotFoundError` | `Registry.get_by_name/class()` 未找到指定服务 |
 | `CircularDependencyError` | 拓扑排序检测到环 |
 | `DependencyInjectionError` | `inject_deps()` 时依赖实例为 None |
-| `LifecycleHookError` | `on_init/start/end` 钩子抛出异常 |
+| `LifecycleHookError` | `on_config/init/start/end` 钩子抛出异常 |
 
 ---
 
@@ -191,11 +180,9 @@ src/canary_framework/
 │   ├── __init__.py
 │   ├── decorators/
 │   │   ├── __init__.py
-│   │   ├── config.py        # @config（内置 env_file=".env"）
-│   │   ├── lifecycle.py     # @on_init、@on_start、@on_end
+│   │   ├── lifecycle.py     # @on_config、@on_init、@on_start、@on_end
 │   │   ├── module.py        # @module
 │   │   ├── service.py       # @service
-
 │   ├── conductor/
 │   │   ├── __init__.py
 │   │   └── canary.py        # Canary 引擎
@@ -221,19 +208,24 @@ src/canary_framework/
 ## 初始化流程
 
 ```
+Canary.config(config=Model())
+    │
+    ├── wiring()                         阶段0：属性注入
+    │   └── 根据字段名匹配 service name，将 config 字段注入实例
+    │
+    └── on_config()                      阶段1：config 钩子（拓扑序）
+
 Canary.init()
     │
-    ├── _collect(target)         阶段0：递归收集 @service/@module 类
+    ├── _collect(target)                 阶段2：递归收集 @service/@module 类
     │   ├── 注册到 Registry
-    │   ├── 记录 parent_entry
-    │   └── config_cls 继承
+    │   └── 记录 parent_entry
     │
-    ├── _validate()              阶段1：校验依赖完整性
+    ├── _validate()                      阶段3：校验依赖完整性
     │
-    ├── topological_sort()       阶段2：Kahn 拓扑排序 (O(V+E))
+    ├── topological_sort()               阶段4：Kahn 拓扑排序 (O(V+E))
     │
-    └── for each in startup_order:   阶段3：按拓扑序初始化
-        ├── inject_deps()            setattr 注入依赖
-        ├── config_cls()             直接实例化（pydantic-settings 自动读 .env）
-        └── on_init()                钩子回调
+    └── for each in startup_order:       阶段5：按拓扑序初始化
+        ├── inject_deps()                setattr 注入依赖
+        └── on_init()                    钩子回调
 ```

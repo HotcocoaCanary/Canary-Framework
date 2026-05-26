@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel
 
 from canary_framework.core.conductor.canary import Canary
-from canary_framework.core.decorators.config import config
 from canary_framework.core.decorators.lifecycle import on_init
 from canary_framework.core.decorators.module import module
 from canary_framework.core.decorators.service import service
@@ -16,58 +16,57 @@ class TestDIConfigInjection:
     """Verify typed config access via dependency injection."""
 
     async def test_get_config_returns_typed_config(self) -> None:
-        @config
-        class MyCfg:
+        class MyCfg(BaseModel):
             key: str = "val"
 
-        @service("s", config=MyCfg)
-        class Svc:
-            my_cfg: MyCfg
+        class AppConfig(BaseModel):
+            s: MyCfg = MyCfg()
 
+        @service("s")
+        class Svc:
             @on_init
             def init(self) -> None:
                 pass
 
         app = Canary(Svc)
+        await app.config(config=AppConfig())
         await app.init()
 
         inst: Svc = app.registry.get_instance(Svc)  # type: ignore[assignment]
-        assert inst.my_cfg.key == "val"
+        assert inst.key == "val"  # type: ignore[attr-defined]
 
     async def test_config_chain_upward(self) -> None:
-        @config
-        class RootCfg:
+        class SvcCfg(BaseModel):
             env: str = "prod"
+
+        class AppConfig(BaseModel):
+            root: SvcCfg = SvcCfg()
+            child: SvcCfg = SvcCfg()
 
         @service("child")
         class ChildSvc:
-            root_cfg: RootCfg
-
             @on_init
             def init(self) -> None:
                 pass
 
-        @module("root", config=RootCfg, services=[ChildSvc])
+        @module("root", services=[ChildSvc])
         class Root:
             pass
 
         app = Canary(Root)
+        await app.config(config=AppConfig())
         await app.init()
 
         inst: ChildSvc = app.registry.get_instance(ChildSvc)  # type: ignore[assignment]
-        assert inst.root_cfg.env == "prod"
+        assert inst.env == "prod"  # type: ignore[attr-defined]
 
     async def test_no_config_raises(self) -> None:
-        @config
-        class UnboundCfg:
-            x: int = 1
-
         @service("orphan")
         class Orphan:
             pass
 
         app = Canary(Orphan)
-        await app.init()
+        await app.config()
 
         inst: Orphan = app.registry.get_instance(Orphan)  # type: ignore[assignment]
         with pytest.raises(AttributeError):
@@ -96,6 +95,7 @@ class TestDIServiceInjection:
             pass
 
         app = Canary(App)
+        await app.config()
         await app.init()
 
         inst: UserService = app.registry.get_instance(UserService)  # type: ignore[assignment]
@@ -111,7 +111,7 @@ class TestDIServiceInjection:
 
         app = Canary(Orphan)
         with pytest.raises(TypeError, match="not decorated"):
-            await app.init()
+            await app.config()
 
     async def test_get_service_across_module_boundaries(self) -> None:
         @service("a-svc")
@@ -135,7 +135,7 @@ class TestDIServiceInjection:
             pass
 
         app = Canary(Root)
-        await app.init()
+        await app.config()
 
         a_inst: ASvc = app.registry.get_instance(ASvc)  # type: ignore[assignment]
         with pytest.raises(AttributeError):
@@ -155,6 +155,7 @@ class TestDIServiceInjection:
                 pass
 
         app = Canary(Consumer)
+        await app.config()
         await app.init()
 
         inst: Consumer = app.registry.get_instance(Consumer)  # type: ignore[assignment]

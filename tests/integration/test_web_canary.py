@@ -128,17 +128,20 @@ class TestWebCanaryConfigSplitting:
     """Verify config prefix splitting in WebCanary.start()."""
 
     async def test_uvicorn_fastapi_prefix_splitting(self) -> None:
+        from pydantic import BaseModel
 
-        from canary_framework import config, module
+        from canary_framework import module
         from canary_framework.web.fastapi import WebCanary
         from canary_framework.web.fastapi.decorators.router import get, router
 
-        @config
-        class AppCfg:
+        class AppCfg(BaseModel):
             uvicorn_host: str = "0.0.0.0"
             uvicorn_port: int = 9999
             fastapi_title: str = "Test API"
             database_url: str = "sqlite://"
+
+        class AppConfig(BaseModel):
+            root: AppCfg = AppCfg()
 
         @router(prefix="/", name="root-router")
         class RootRouter:
@@ -146,17 +149,16 @@ class TestWebCanaryConfigSplitting:
             async def ping(self) -> dict[str, str]:
                 return {"pong": "true"}
 
-        @module("root", config=AppCfg, services=[RootRouter])
+        @module("root", services=[RootRouter])
         class RootModule:
             pass
 
         app = WebCanary(RootModule)
-        await app.init()
+        await app.config(config=AppConfig())
 
         root_entry = app.registry.get_by_name("root")
-        cfg = root_entry.config_instance
-        assert cfg is not None
-        assert getattr(cfg, "uvicorn_host", None) == "0.0.0.0"
-        assert getattr(cfg, "uvicorn_port", None) == 9999
-        assert getattr(cfg, "fastapi_title", None) == "Test API"
-        assert getattr(cfg, "database_url", None) == "sqlite://"
+        inst = root_entry.instance
+        assert getattr(inst, "uvicorn_host", None) == "0.0.0.0"
+        assert getattr(inst, "uvicorn_port", None) == 9999
+        assert getattr(inst, "fastapi_title", None) == "Test API"
+        assert getattr(inst, "database_url", None) == "sqlite://"

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from canary_framework.core import config as _config_decorator
 from canary_framework.core import module as _module_decorator
 from canary_framework.core import service as _service_decorator
 from canary_framework.core.conductor.canary import Canary
@@ -86,19 +85,6 @@ class ModuleM:
         self.calls.append("m:init")
 
 
-@_config_decorator
-class TestConfig:
-    host: str = "localhost"
-    port: int = 9999
-
-
-@_service_decorator("with-config", config=TestConfig)
-class ServiceWithConfig:
-    @on_init
-    def init(self) -> None:
-        pass
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -114,5 +100,6 @@ def clean_canary() -> Canary:
 async def init_canary() -> Canary:
     """Return a Canary instance that has already been initialised."""
     app = Canary(ModuleM)
+    await app.config()
     await app.init()
     return app

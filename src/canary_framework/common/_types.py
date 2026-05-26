@@ -32,9 +32,6 @@ class ServiceMeta:
     deps: list[type] = field(default_factory=list)
     """List of ``@service`` / ``@module`` classes this service depends on."""
 
-    config_cls: type | None = None
-    """Optional ``@config``-decorated class.  ``None`` means inherit from parent."""
-
 
 @dataclass(slots=True)
 class ModuleMeta(ServiceMeta):
@@ -96,10 +93,6 @@ class ServiceEntry:
 
     deps: list[type] = field(default_factory=list)
     """依赖类列表，用于 DI (Dependency class list from ``deps=[]``)."""
-
-    config_cls: type | None = None
-    """``@config`` 装饰的类，``None`` 时从父模块继承
-    (The ``@config``-decorated class, or ``None`` to inherit from parent)."""
 
     sub_services: list[type] = field(default_factory=list)
     """子服务列表，仅模块有效 (Child classes declared in ``services=[]``)."""

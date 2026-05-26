@@ -26,19 +26,25 @@ class LifecycleHook(StrEnum):
     by ``@on_init`` / ``@on_start`` / ``@on_end``.
     """
 
-    INIT = "on_init"
-    """Called after DI and config loading.  No arguments — dependencies
-    and config are injected as instance attributes before the hook runs.
+    CONFIG = "on_config"
+    """Called after DI and config injection.  No arguments — dependencies
+    and config are already available as instance attributes.
 
-    初始化钩子：此时依赖和配置已通过 DI 注入为实例属性。无参数。"""
+    配置钩子：DI 依赖已注入、config 已加载为实例属性。无参数。"""
+
+    INIT = "on_init"
+    """Called after on_config, in topological order.  No arguments.
+    All wiring is complete — deps, config, and (for modules) sub-services.
+
+    初始化钩子：所有 wiring 完毕，适合建立连接池等内部状态。"""
 
     START = "on_start"
     """Called in topological order during application start.  No arguments.
 
-    启动钩子：按拓扑序依次调用，无参数。适合启动连接池、监听端口等."""
+    启动钩子：按拓扑序依次调用，适合对外暴露服务。"""
 
     END = "on_end"
     """Called in reverse topological order during application stop.  No arguments.
+    Dependants stop first, dependencies last.
 
-    停止钩子：按逆拓扑序依次调用，无参数。依赖方先停止，被依赖方后停止。
-    适合关闭连接、刷新缓冲区等操作."""
+    停止钩子：按逆拓扑序调用，依赖方先停止，适合关闭连接、刷新缓冲区。"""

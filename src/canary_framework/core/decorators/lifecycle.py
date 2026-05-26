@@ -30,6 +30,7 @@ from canary_framework.common.enums import LifecycleHook
 # ---------------------------------------------------------------------------
 
 _MARKER_MAP: dict[LifecycleHook, str] = {
+    LifecycleHook.CONFIG: "__cf_on_config__",
     LifecycleHook.INIT: "__cf_on_init__",
     LifecycleHook.START: "__cf_on_start__",
     LifecycleHook.END: "__cf_on_end__",
@@ -41,10 +42,39 @@ _MARKER_MAP: dict[LifecycleHook, str] = {
 # ---------------------------------------------------------------------------
 
 
+def on_config[FnT: Callable[..., object]](fn: FnT) -> FnT:
+    """Mark a method as the ``on_config`` lifecycle hook.
+
+    标记方法为配置钩子。框架在 DI 和 config 注入后立即调用——是 wiring 完成后
+    第一个用户钩子。此时 ``self.app_config`` 和 ``self.db_service`` 等 DI 属性已就绪。
+
+    Args:
+        fn: 要标记的方法。A method to mark.
+
+    Returns:
+        同一个方法（装饰器不替换函数）。The same method (decorator is non-wrapping).
+
+    Example::
+
+        @service(name="db", config=DBConfig, deps=[CacheService])
+        class DBService:
+            db_config: DBConfig
+            cache_service: CacheService
+
+            @on_config
+            def setup(self) -> None:
+                if self.db_config.debug:
+                    self.enable_debug_mode()
+    """
+    setattr(fn, _MARKER_MAP[LifecycleHook.CONFIG], True)
+    return fn
+
+
 def on_init[FnT: Callable[..., object]](fn: FnT) -> FnT:
     """Mark a method as the ``on_init`` lifecycle hook.
 
-    标记方法为初始化钩子。框架在 init 阶段调用，此时依赖（含 config）已注入。
+    标记方法为初始化钩子。在 ``on_config`` 之后按拓扑序调用。此时所有 wiring
+    已完成（deps、config、模块子服务均已注入），适合建立连接池等内部状态。
 
     Args:
         fn: 要标记的方法。A method to mark.
@@ -151,6 +181,7 @@ def find_hooks(instance: object) -> HookDict:
         Scanned at most once per instance; result cached on ``ServiceEntry._hooks``.
     """
     hooks: HookDict = {
+        LifecycleHook.CONFIG: None,
         LifecycleHook.INIT: None,
         LifecycleHook.START: None,
         LifecycleHook.END: None,

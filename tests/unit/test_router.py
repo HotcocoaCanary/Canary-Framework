@@ -4,7 +4,7 @@ Covers:
     - @router creates RouterMeta on __cf_service_meta__
     - @router sets __cf_router__ = True
     - @router with auto-generated name (to_snake)
-    - @router with explicit name, config, deps, tags
+    - @router with explicit name, deps, tags
     - @get / @post / @put / @delete / @patch with explicit params
     - Route decorator kwargs filtering (None excluded)
     - get_route_info extracts correct (method, path, kwargs)
@@ -78,17 +78,6 @@ class TestRouterDecorator:
         meta = get_router_meta(R)
         assert meta.deps == [str]
 
-    def test_with_config(self) -> None:
-        class Cfg:
-            pass
-
-        @router(prefix="/api", name="cfg-router", config=Cfg)
-        class R:
-            pass
-
-        meta = get_router_meta(R)
-        assert meta.config_cls is Cfg
-
     def test_service_meta_is_router_meta(self) -> None:
         @router(prefix="/x", name="srv")
         class R:
@@ -108,7 +97,6 @@ class TestRouterDecorator:
         meta = get_router_meta(R)
         assert meta.name == "srv"
         assert meta.deps == [int]
-        assert meta.config_cls is None
 
     def test_get_router_meta_on_non_router_returns_default(self) -> None:
         class Plain:

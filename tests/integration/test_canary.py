@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import BaseModel
 
 from canary_framework.common.exceptions import CanaryFrameworkError, LifecycleHookError
 from canary_framework.core import (
     Canary,
-    config,
     module,
     on_end,
     on_init,
@@ -39,6 +39,7 @@ class TestCanaryLifecycle:
                 calls.append("stop")
 
         app = Canary(Hello)
+        await app.config()
         await app.init()
         await app.start()
         await app.stop()
@@ -73,6 +74,7 @@ class TestCanaryLifecycle:
             pass
 
         app = Canary(M)
+        await app.config()
         await app.init()
         await app.start()
 
@@ -100,6 +102,7 @@ class TestCanaryLifecycle:
             pass
 
         app = Canary(M)
+        await app.config()
         await app.init()
         await app.start()
         calls.clear()
@@ -129,50 +132,54 @@ class TestCanaryLifecycle:
             pass
 
         app = Canary(M)
+        await app.config()
         await app.init()
         await app.start()
 
         assert app.registry.get_by_name("b").instance.ok == "a"  # type: ignore[attr-defined]
 
     async def test_config_loaded_before_init(self) -> None:
-        @config
-        class MyCfg:
+        class MyCfg(BaseModel):
             name: str = "canary"
+
+        class AppConfig(BaseModel):
+            configured: MyCfg = MyCfg()
 
         captured: dict[str, object] = {}
 
-        @service("configured", config=MyCfg)
+        @service("configured")
         class Configured:
-            my_cfg: MyCfg
-
             @on_init
             def init(self) -> None:
-                captured["name"] = self.my_cfg.name
+                captured["name"] = self.name  # type: ignore[attr-defined]
 
         app = Canary(Configured)
+        await app.config(config=AppConfig())
         await app.init()
 
         assert captured.get("name") == "canary"
 
     async def test_config_inheritance(self) -> None:
-        @config
-        class RootCfg:
+        class CfgModel(BaseModel):
             env: str = "test"
+
+        class AppConfig(BaseModel):
+            child: CfgModel = CfgModel()
 
         @service("child")
         class Child:
             got: str = ""
-            root_cfg: RootCfg
 
             @on_init
             def init(self) -> None:
-                self.got = self.root_cfg.env
+                self.got = self.env  # type: ignore[attr-defined]
 
-        @module("root", config=RootCfg, services=[Child])
+        @module("root", services=[Child])
         class Root:
             pass
 
         app = Canary(Root)
+        await app.config(config=AppConfig())
         await app.init()
 
         child_inst = app.registry.get_by_name("child").instance
@@ -207,7 +214,7 @@ class TestCanaryLifecycle:
             pass
 
         app = Canary(M)
-        await app.init()
+        await app.config()
         order = app.startup_order
         assert len(order) == 3  # M, A, B (M has no hooks/deps)
         assert order[order.index("a")] == "a"
@@ -232,6 +239,7 @@ class TestCanaryNoHooks:
             pass
 
         app = Canary(Silent)
+        await app.config()
         await app.init()
         await app.start()
         await app.stop()
@@ -246,6 +254,7 @@ class TestCanaryNoHooks:
             pass
 
         app = Canary(Root)
+        await app.config()
         await app.init()
         await app.start()
         await app.stop()
@@ -273,7 +282,7 @@ class TestCanaryCollections:
             pass
 
         app = Canary(Root)
-        await app.init()
+        await app.config()
 
         names = app.registry.names()
         assert "root" in names
@@ -297,6 +306,7 @@ class TestCanaryAsyncHooks:
                 called = True
 
         app = Canary(AsyncInit)
+        await app.config()
         await app.init()
         assert called is True
 
@@ -311,6 +321,7 @@ class TestCanaryAsyncHooks:
                 called = True
 
         app = Canary(AsyncStart)
+        await app.config()
         await app.init()
         await app.start()
         assert called is True
@@ -326,6 +337,7 @@ class TestCanaryAsyncHooks:
                 called = True
 
         app = Canary(AsyncEnd)
+        await app.config()
         await app.init()
         await app.start()
         await app.stop()
@@ -349,6 +361,7 @@ class TestCanaryAsyncHooks:
                 log.append("end:async")
 
         app = Canary(Mixed)
+        await app.config()
         await app.init()
         await app.start()
         await app.stop()
@@ -367,6 +380,7 @@ class TestCanaryEdgeCases:
                 raise RuntimeError("crash")
 
         app = Canary(Broken)
+        await app.config()
         with pytest.raises(LifecycleHookError, match="crash"):
             await app.init()
 
@@ -394,7 +408,7 @@ class TestCanaryEdgeCases:
             pass
 
         app = Canary(DupMod)
-        await app.init()
+        await app.config()
         assert len(app.registry) == 2  # DupMod + Duplicate (only one Duplicate)
 
     def test_lifecycle_error_is_framework_error(self) -> None:

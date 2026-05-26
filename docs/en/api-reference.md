@@ -2,57 +2,43 @@
 
 ## Decorators
 
-### `@service(name, *, config=None, deps=None)`
+### `@service(name, *, deps=None)`
 
 Declares a class as a Canary Framework service — the smallest runtime unit.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | `str` | yes | Globally unique service name |
-| `config` | `type \| None` | no | `@config`-decorated class; inherits from parent module when `None` |
 | `deps` | `list[type] \| None` | no | Dependency classes, auto-injected as `self.<snake_case>` attributes |
 
 ```python
-@service(name="db", config=DBConfig, deps=[CacheService])
+@service(name="db", deps=[CacheService])
 class DBService:
-    db_config: DBConfig
     cache_service: CacheService
 ```
 
-### `@module(name, *, config=None, deps=None, services=None)`
+### `@module(name, *, deps=None, services=None)`
 
 Declares a class as a composable module. Internally calls `@service` — modules are services too.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | `str` | yes | Globally unique module name |
-| `config` | `type \| None` | no | Config class inherited by child services when not declared |
 | `deps` | `list[type] \| None` | no | Dependencies for the module itself |
 | `services` | `list[type] \| None` | no | Child `@service`, `@module`, or `@router` classes |
 
 ```python
-@module(name="App", config=AppConfig, deps=[MonitorService], services=[DBService, UserService])
+@module(name="App", deps=[MonitorService], services=[DBService, UserService])
 class App:
-    app_config: AppConfig
     monitor_service: MonitorService
-```
-
-### `@config`
-
-Converts a plain class into a `pydantic-settings.BaseSettings` subclass with `env_file=".env"`. Priority: **environment variable > .env file > class default**.
-
-```python
-@config
-class MyConfig:
-    key: str = "default"
-    count: int = 0
 ```
 
 ### Lifecycle Hooks
 
 | Decorator | Signature | Execution Order | Description |
 |-----------|-----------|-----------------|-------------|
-| `@on_init` | `(self) -> None` | topological | Called after DI and config injection |
+| `@on_config` | `(self) -> None` | topological | Called after wiring and config field injection, during `Canary.config()` |
+| `@on_init` | `(self) -> None` | topological | Called after `on_config`, during `Canary.init()` |
 | `@on_start` | `(self) -> None` | topological | Called during `Canary.start()` |
 | `@on_end` | `(self) -> None` | reverse | Called during `Canary.stop()` |
 
@@ -63,12 +49,13 @@ All hooks accept **only `self`** — dependencies and config are already instanc
 ```python
 from canary_framework import LifecycleHook
 
-LifecycleHook.INIT   # "on_init"
-LifecycleHook.START  # "on_start"
-LifecycleHook.END    # "on_end"
+LifecycleHook.CONFIG  # "on_config"
+LifecycleHook.INIT    # "on_init"
+LifecycleHook.START   # "on_start"
+LifecycleHook.END     # "on_end"
 ```
 
-### `@router(prefix="", *, name=None, config=None, deps=None, tags=None)`
+### `@router(prefix="", *, name=None, deps=None, tags=None)`
 
 Marks a class as an HTTP route handler. Internally calls `@service` — routers are services with full DI and lifecycle support.
 
@@ -76,7 +63,6 @@ Marks a class as an HTTP route handler. Internally calls `@service` — routers 
 |-----------|------|---------|-------------|
 | `prefix` | `str` | `""` | URL prefix for all routes in the group |
 | `name` | `str \| None` | auto from class name | Service name |
-| `config` | `type \| None` | `None` | `@config`-decorated class |
 | `deps` | `list[type] \| None` | `None` | Dependency classes |
 | `tags` | `list[str] \| None` | `None` | OpenAPI tags applied as default |
 
@@ -106,12 +92,14 @@ Core engine — lifecycle orchestrator for the service graph.
 |--------------------|-------------|
 | `.registry` | Global `Registry` (read-only after init) |
 | `.startup_order` | Topologically sorted startup order (copy) |
-| `await .init()` | Collect → validate → sort → DI → config → `on_init` |
+| `await .config(config=Model())` | Collect → validate → sort → DI → config injection → `on_config` |
+| `await .init()` | Call `on_init` in topological order |
 | `await .start()` | Call `on_start` in topological order |
 | `await .stop()` | Call `on_end` in reverse topological order |
 
 ```python
 app = Canary(MyRootModule)
+await app.config(config=AppConfig())
 await app.init()
 await app.start()
 # ... application runs ...
@@ -120,18 +108,19 @@ await app.stop()
 
 ### `WebCanary(target: type)`
 
-Extends `Canary`, overrides `start()` for FastAPI + Uvicorn integration. Distributes root-module config fields by prefix: `uvicorn_*` → uvicorn, `fastapi_*` → FastAPI(), no prefix → business config.
+Extends `Canary`, overrides `start()` for FastAPI + Uvicorn integration. Distributes root config model fields by prefix: `uvicorn_*` → uvicorn, `fastapi_*` → FastAPI(), no prefix → business config.
 
 ```python
+from pydantic import BaseModel
 from canary_framework.web.fastapi import WebCanary
 
-@config
-class AppConfig:
+class AppConfig(BaseModel):
     uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
 
 app = WebCanary(MyModule)
+await app.config(config=AppConfig())
 await app.init()
 await app.start()      # blocks until server stops
 ```
@@ -158,7 +147,7 @@ CanaryFrameworkError
 | `ServiceNotFoundError` | `Registry.get_by_name()` / `get_by_class()` lookup fails |
 | `CircularDependencyError` | Topological sort detects a dependency cycle |
 | `DependencyInjectionError` | `inject_deps()` encounters a `None` dependency instance |
-| `LifecycleHookError` | An `on_init` / `on_start` / `on_end` hook raises an exception |
+| `LifecycleHookError` | An `on_config` / `on_init` / `on_start` / `on_end` hook raises an exception |
 
 ---
 
@@ -170,7 +159,6 @@ Metadata stored on `@service`-decorated classes. A frozen dataclass with `slots=
 
 - `name: str` — globally unique name
 - `deps: list[type]` — dependency class list
-- `config_cls: type | None` — config class or `None`
 
 ### `ModuleMeta(ServiceMeta)`
 
@@ -208,10 +196,10 @@ from canary_framework.web.fastapi import router, get, delete, patch, post, put, 
 
 __all__ = [
     # Core decorators
-    "config",
     "service",
     "module",
     # Lifecycle
+    "on_config",
     "on_init",
     "on_start",
     "on_end",
@@ -292,21 +280,22 @@ Each sets __cf_service__ = True, then upgrades __cf_service_meta__:
 ### Initialization Flow
 
 ```
-Canary.init()
+Canary.config(config=Model())
     │
     ├── _collect(target)           Phase 0: recursive discovery
-    │   ├── register in Registry   (idempotent — supports shared deps in DAG)
-    │   ├── record parent_entry    (for config inheritance)
-    │   └── config_cls inheritance (copy from parent when None)
+    │   └── register in Registry   (idempotent — supports shared deps in DAG)
     │
     ├── _validate()                Phase 1: verify all deps references exist
     │
     ├── topological_sort()         Phase 2: Kahn BFS (O(V+E))
     │
-    └── for each in startup_order:  Phase 3: init in topological order
+    └── for each in startup_order:  Phase 3: wiring + on_config
         ├── inject_deps()           setattr dependencies → self.<snake_case>
-        ├── config_cls()             instantiate config → setattr → self.<snake_case>
-        └── on_init()                hook callback (self only, no arguments)
+        ├── inject_config()          setattr config fields from BaseModel → self.<field>
+        └── on_config()              hook callback (self only, no arguments)
+
+Canary.init()
+    └── for each in startup_order:  on_init() (topological order)
 
 Canary.start()
     └── for each in startup_order:  on_start() (topological order)

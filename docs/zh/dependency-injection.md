@@ -22,23 +22,26 @@ class B:
 ## 注入时机
 
 ```
-实例化 → 依赖注入 → 配置加载 → on_init()
+app.config()→ wiring + on_config() → app.init()→ 依赖注入 → on_init()
 ```
 
-在 `on_init` 中已可访问所有注入的依赖。
+在 `on_config` 中可访问 config 属性，在 `on_init` 中可访问所有注入的依赖。
 
-## Config 作为 DI
+## Config 属性注入
 
-`@service(config=AppConfig)` 声明的配置类同样通过 DI 注入为实例属性，属性名由配置类名经 `to_snake` 转换而来：
+Config 通过字段名匹配注入为实例属性，不再使用 `@service(config=...)` 参数：
 
 ```python
-@service(name="db", config=AppConfig)
-class DBService:
-    app_config: AppConfig          # AppConfig → app_config
+from pydantic import BaseModel
 
-@service(name="user", config=UserServiceConfig)
-class UserService:
-    user_service_config: UserServiceConfig  # UserServiceConfig → user_service_config
+class AppConfig(BaseModel):
+    db: dict = {"url": "localhost"}
+
+@service(name="db")
+class DBService:
+    @on_config
+    def setup(self) -> None:
+        self.pool = connect(self.url)  # config 字段直接可用
 ```
 
 ## 启动顺序

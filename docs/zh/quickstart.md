@@ -31,7 +31,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-不需要 `@config`、`@on_init`、`deps` —— 什么都没有也能跑。
+不需要配置、`@on_init`、`deps` —— 什么都没有也能跑。
 
 ## 完整示例
 
@@ -39,12 +39,12 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from canary_framework import service, module, on_init, config
+from pydantic import BaseModel
+from canary_framework import service, module, on_config, on_start
 from canary_framework.web.fastapi import get, router, WebCanary
 
 # 配置
-@config
-class AppConfig:
+class AppConfig(BaseModel):
     uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
@@ -59,12 +59,10 @@ class APIRouter:
         return await self.hello_service.greet("world")
 
 # 服务
-@service(name="HelloService", config=AppConfig)
+@service(name="HelloService")
 class HelloService:
-    app_config: AppConfig
-
-    @on_init
-    def init(self) -> None:
+    @on_config
+    def setup(self) -> None:
         pass
 
     @on_start
@@ -75,7 +73,7 @@ class HelloService:
         return f"Hello, {name}!"
 
 # 模块
-@module(name="AppModule", config=AppConfig, services=[HelloService])
+@module(name="AppModule", services=[HelloService])
 class AppModule:
     @get("/health")
     async def health(self) -> dict:
@@ -84,6 +82,7 @@ class AppModule:
 
 async def main() -> None:
     app = WebCanary(AppModule)
+    await app.config(config=AppConfig())
     await app.init()
     await app.start()
 

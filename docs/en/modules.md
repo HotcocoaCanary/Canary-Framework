@@ -21,13 +21,11 @@ from canary_framework import module, on_init, on_end
 
 @module(
     name="AppModule",
-    config=AppConfig,              # inherited by child services without their own config
     deps=[MonitorService],         # modules can declare their own dependencies too
     services=[DBService, UserService],
 )
 class AppModule:
     monitor_service: MonitorService
-    app_config: AppConfig
 
     @on_init
     def init(self) -> None:
@@ -41,27 +39,8 @@ class AppModule:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | required | Globally unique module name |
-| `config` | `type \| None` | `None` | Config class inherited by child services when not declared |
 | `deps` | `list[type] \| None` | `None` | Dependencies for the module itself |
 | `services` | `list[type] \| None` | `None` | Direct children — `@service`, `@module`, or `@router` classes |
-
-## Config Inheritance
-
-Child services without a declared `config` automatically inherit the parent module's config class:
-
-```python
-@module(name="DBModule", config=DBConfig, services=[DBService])
-class DBModule:
-    pass
-
-@service(name="DBService")         # no config declared — inherits parent's DBConfig
-class DBService:
-    db_config: DBConfig
-
-    @on_init
-    def init(self) -> None:
-        print(self.db_config.url)   # available via inherited config
-```
 
 ## Module Nesting
 

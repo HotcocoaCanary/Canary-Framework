@@ -80,7 +80,6 @@ class Registry:
             instance=instance,
             name=name,
             deps=list(meta.deps),
-            config_cls=meta.config_cls,
             sub_services=list(meta.services if isinstance(meta, ModuleMeta) else []),
         )
 
