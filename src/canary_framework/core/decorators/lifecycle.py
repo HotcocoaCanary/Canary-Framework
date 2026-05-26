@@ -35,10 +35,6 @@ _MARKER_MAP: dict[LifecycleHook, str] = {
     LifecycleHook.END: "__cf_on_end__",
 }
 
-# 反向映射：标记名 → LifecycleHook（用于 find_hooks 快速查找）
-# Inverse lookup: marker name → LifecycleHook
-_MARKER_TO_HOOK: dict[str, LifecycleHook] = {v: k for k, v in _MARKER_MAP.items()}
-
 
 # ---------------------------------------------------------------------------
 # Decorators
@@ -48,10 +44,7 @@ _MARKER_TO_HOOK: dict[str, LifecycleHook] = {v: k for k, v in _MARKER_MAP.items(
 def on_init[FnT: Callable[..., object]](fn: FnT) -> FnT:
     """Mark a method as the ``on_init`` lifecycle hook.
 
-    标记方法为初始化钩子。框架在 init 阶段的最后调用，此时依赖已注入、
-    配置已加载。是所有钩子中唯一接收 Context 参数的。
-
-    也可以使用 ``async def``，框架会自动 ``await``。
+    标记方法为初始化钩子。框架在 init 阶段调用，此时依赖（含 config）已注入。
 
     Args:
         fn: 要标记的方法。A method to mark.
@@ -61,10 +54,14 @@ def on_init[FnT: Callable[..., object]](fn: FnT) -> FnT:
 
     Example::
 
-        @on_init
-        async def init(self, ctx: Context) -> None:
-            cfg = ctx.get_config(AppConfig)
-            self.pool = await create_pool(cfg.dsn)
+        @service(name="db", config=DBConfig, deps=[CacheService])
+        class DBService:
+            db_config: DBConfig
+            cache_service: CacheService
+
+            @on_init
+            def init(self) -> None:
+                self.pool = create_pool(self.db_config.dsn)
     """
     setattr(fn, _MARKER_MAP[LifecycleHook.INIT], True)
     return fn
@@ -169,7 +166,7 @@ def find_hooks(instance: object) -> HookDict:
 
         # 检查每个标记，找到第一个匹配的钩子类型
         # Check each marker; assign to the first matching hook
-        for marker, hook in _MARKER_TO_HOOK.items():
+        for hook, marker in _MARKER_MAP.items():
             if getattr(attr, marker, False) and hooks[hook] is None:
                 hooks[hook] = attr
                 break

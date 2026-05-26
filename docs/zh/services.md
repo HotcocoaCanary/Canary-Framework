@@ -18,7 +18,7 @@ class HelloService:
 ## 完整写法
 
 ```python
-from canary_framework import service, on_init, on_end, Context
+from canary_framework import service, on_init, on_end
 
 @service(
     name="UserService",         # 必填：全局唯一名称
@@ -26,9 +26,11 @@ from canary_framework import service, on_init, on_end, Context
     deps=[DBService],           # 可选：依赖列表，自动注入为 self.db_service
 )
 class UserService:
+    user_config: UserConfig
+    db_service: DBService
+
     @on_init
-    def init(self, ctx: Context) -> None:
-        cfg = ctx.get_config(UserConfig)  # 类型安全的配置访问
+    def init(self) -> None:
         self.db_service.query()          # 使用已注入的依赖
 
     @on_start
@@ -47,9 +49,26 @@ class UserService:
 ```python
 from canary_framework import LifecycleHook
 
-# LifecycleHook.INIT   → @on_init    (拓扑序，接收 Context)
-# LifecycleHook.START  → @on_start   (拓扑序，无参数)
-# LifecycleHook.END    → @on_end      (逆序，无参数)
+# LifecycleHook.INIT   → @on_init    （拓扑序）
+# LifecycleHook.START  → @on_start   （拓扑序，无参数）
+# LifecycleHook.END    → @on_end     （逆序，无参数）
 ```
 
 钩子方法可以是同步 (`def`) 或异步 (`async def`)，框架自动适配。
+
+## Config 和 Deps 作为属性
+
+配置和依赖在 `@on_init` 之前通过 DI 注入为实例属性。属性名由类名通过 `to_snake` 转换而来：
+
+```python
+@service(name="db", deps=[CacheService], config=AppConfig)
+class DBService:
+    app_config: AppConfig
+    cache_service: CacheService
+
+    @on_init
+    def init(self) -> None:
+        self.pool = connect(self.app_config.dsn)
+```
+
+

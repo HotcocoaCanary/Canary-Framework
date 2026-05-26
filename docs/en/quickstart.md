@@ -9,6 +9,8 @@ pip install canary-framework[web]     # full install with FastAPI support
 
 ## Minimal Example
 
+One service, no config, no dependencies — just init and start:
+
 ```python
 import asyncio
 from canary_framework import service, module, on_start, Canary
@@ -31,54 +33,38 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-No `@config`, `@on_init`, or `deps` needed — it works out of the box.
-
 ## Full Example
 
-With config, dependency injection, and web routing:
+Service + router + config + WebCanary:
 
 ```python
 import asyncio
-from canary_framework import service, module, on_init, Context, config
+from canary_framework import service, module, on_init, config
 from canary_framework.web.fastapi import get, router, WebCanary
 
-# Config
 @config
 class AppConfig:
     uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
 
-# Router
-@router(prefix="/api", deps=[HelloService])
+@router(prefix="/api", deps=[], tags=["api"])
 class APIRouter:
-    hello_service: HelloService
-
     @get("/hello")
     async def hello(self) -> dict:
-        return await self.hello_service.greet("world")
+        return {"message": "Hello, world!"}
 
-# Service
-@service(name="HelloService", config=AppConfig)
-class HelloService:
+@service(name="DBService", config=AppConfig)
+class DBService:
+    app_config: AppConfig
+
     @on_init
-    async def init(self, ctx: Context) -> None:
-        pass
+    def init(self) -> None:
+        print(f"DB ready at {self.app_config.uvicorn_host}")
 
-    @on_start
-    def start(self) -> None:
-        print("start")
-
-    async def greet(self, name: str) -> str:
-        return f"Hello, {name}!"
-
-# Module
-@module(name="AppModule", config=AppConfig, services=[HelloService])
+@module(name="AppModule", config=AppConfig, services=[APIRouter, DBService])
 class AppModule:
-    @get("/health")
-    async def health(self) -> dict:
-        return {"status": "ok"}
-
+    pass
 
 async def main() -> None:
     app = WebCanary(AppModule)

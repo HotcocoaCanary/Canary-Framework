@@ -3,20 +3,23 @@
 三阶段钩子，全部可选。钩子名由 `LifecycleHook` 枚举定义，必须使用 `@on_init` / `@on_start` / `@on_end` 显式装饰。
 
 ```
-Canary.init()  → on_init(ctx) → ...   （拓扑序）
+Canary.init()  → on_init() → ...     （拓扑序）
 Canary.start() → on_start() → ...     （拓扑序）
 Canary.stop()  ← on_end() ← ...       （逆序）
 ```
 
-## `on_init(ctx)`
+## `on_init()`
 
-接收 Context，此时依赖已注入、配置已加载：
+此时依赖已注入、配置已作为属性加载。**`@on_init` 不再接收 `ctx` 参数** —— 所有依赖和配置直接通过 `self` 访问：
 
 ```python
-@on_init
-def init(self, ctx: Context) -> None:
-    cfg = ctx.get_config(AppConfig)
-    self.pool = create_pool(cfg.db_url)
+@service(name="db", config=AppConfig)
+class DBService:
+    app_config: AppConfig
+
+    @on_init
+    def init(self) -> None:
+        self.pool = create_pool(self.app_config.db_url)
 ```
 
 ## `on_start()`
@@ -35,7 +38,7 @@ def end(self) -> None:
     self.pool.close()
 ```
 
-钩子可以是 `async def`，框架通过 `asyncio.iscoroutine` 自动判断并 `await`。
+钩子可以是 `async def` —— 框架通过 `asyncio.iscoroutine` 自动检测并 `await`。
 
 ## LifecycleHook 枚举
 
@@ -57,5 +60,5 @@ from canary_framework import LifecycleHookError
 try:
     await app.init()
 except LifecycleHookError as e:
-    print(f"Hook failed: {e}")
+    print(f"钩子失败: {e}")
 ```

@@ -36,8 +36,7 @@ class ConfigurationError(CanaryFrameworkError):
     """Raised when configuration loading or validation fails.
 
     触发场景 (When raised):
-        - ``ctx.get_config()`` 在整个 parent 链上找不到配置实例
-        - ``@config`` 类缺少必要的 pydantic 字段声明
+        - ``@config`` 类缺少必要的字段声明
         - pydantic 在构造时校验失败
     """
 
@@ -47,8 +46,7 @@ class ServiceNotFoundError(CanaryFrameworkError):
 
     触发场景 (When raised):
         - ``Registry.get_by_name(name)`` 传入未注册的名称
-        - ``Context.resolve(cls)`` 在当前模块及其祖先模块中找不到该服务
-        - ``deps=[]`` 中声明了未被 ``@service`` 或 ``@module`` 装饰的类
+        - ``Registry.get_by_class(cls)`` 目标服务未注册
     """
 
 

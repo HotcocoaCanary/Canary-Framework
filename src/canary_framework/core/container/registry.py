@@ -44,8 +44,6 @@ class Registry:
         self,
         cls: type,
         *,
-        is_module: bool = False,
-        sub_services: list[type] | None = None,
         meta: ServiceMeta | None = None,
     ) -> None:
         """Register a ``@service`` or ``@module`` class.
@@ -57,8 +55,6 @@ class Registry:
 
         Args:
             cls: 被 ``@service`` 或 ``@module`` 装饰的类。
-            is_module: 是否为模块。
-            sub_services: 子服务列表（仅模块）。
             meta: 预解析的元数据实例，为 ``None`` 时从类的装饰器属性读取。
         """
         if cls in self._by_class:
@@ -85,16 +81,11 @@ class Registry:
             name=name,
             deps=list(meta.deps),
             config_cls=meta.config_cls,
-            is_module=is_module,
-            sub_services=list(
-                meta.services if isinstance(meta, ModuleMeta) else (sub_services or ())
-            ),
+            sub_services=list(meta.services if isinstance(meta, ModuleMeta) else []),
         )
 
         # 将 deps 中的类引用解析为字符串名称，供拓扑排序使用
-        entry.dep_names = [
-            d if isinstance(d, str) else getattr(d, "__cf_name__", d.__name__) for d in entry.deps
-        ]
+        entry.dep_names = [getattr(d, "__cf_name__", d.__name__) for d in entry.deps]
 
         self._by_name[name] = entry
         self._by_class[cls] = entry

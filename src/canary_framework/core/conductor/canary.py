@@ -33,11 +33,10 @@ import asyncio
 from canary_framework.common._logging import get_logger, init_logging, sanitize_config_values
 from canary_framework.common._types import ServiceEntry
 from canary_framework.common.enums import LifecycleHook
-from canary_framework.common.exceptions import LifecycleHookError
+from canary_framework.common.exceptions import ConfigurationError, LifecycleHookError
 from canary_framework.core.algorithms.injector import inject_deps
 from canary_framework.core.algorithms.naming import to_snake
 from canary_framework.core.algorithms.sorter import topological_sort
-from canary_framework.core.conductor.context import Context
 from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.lifecycle import HookDict, find_hooks
 from canary_framework.core.decorators.module import get_module_meta, is_cf_module
@@ -101,8 +100,7 @@ class Canary:
             0. ``_collect``       — recursive discovery
             1. ``_validate``      — dependency integrity check
             2. ``topological_sort`` — Kahn BFS
-            3. ``_build_context_tree`` — Context parent chain
-            4. Per-entry: DI → config loading → ``on_init`` hook
+            3. Per-entry: DI → config loading & injection → ``on_init`` hook
                (plus sub-service injection for modules)
         """
         init_logging()
@@ -126,12 +124,8 @@ class Canary:
             " → ".join(self._startup_order),
         )
 
-        # ── 阶段3: 构建 Context 树 ──
-        engine.debug("Phase 3: building context tree")
-        self._build_context_tree(self._target, parent_ctx=None)
-
-        # ── 阶段4: 按拓扑序逐个初始化 ──
-        engine.debug("Phase 4: initialising entries")
+        # ── 阶段3: 按拓扑序逐个初始化 ──
+        engine.debug("Phase 3: initialising entries")
         for name in self._startup_order:
             entry = self._registry.get_by_name(name)
             await self._init_entry(entry)
@@ -182,9 +176,16 @@ class Canary:
         # 1. 依赖注入：将 deps 中的服务实例 setattr 到目标实例
         inject_deps(entry.instance, entry, self._registry)
 
-        # 2. 配置加载：config_cls() 触发 pydantic-settings 读取 .env
+        # 2. 配置加载 + DI 注入 config
         if entry.config_cls is not None:
-            entry.config_instance = entry.config_cls()
+            try:
+                entry.config_instance = entry.config_cls()
+            except Exception as exc:
+                raise ConfigurationError(
+                    f"Failed to load config for '{entry.name}': {exc}"
+                ) from exc
+            attr_name = to_snake(entry.config_cls.__name__)
+            setattr(entry.instance, attr_name, entry.config_instance)
             raw_cfg = {
                 k: v for k, v in vars(entry.config_instance).items() if not k.startswith("_")
             }
@@ -196,12 +197,11 @@ class Canary:
         else:
             config_log.debug("  %s has no config", entry.name)
 
-        # 3. on_init 钩子：传入 Context
-        await self._call_hook(entry, LifecycleHook.INIT, entry.context)
+        # 3. on_init 钩子（不再传递 Context——config 已通过 DI 注入）
+        await self._call_hook(entry, LifecycleHook.INIT)
 
-        # 4. 模块子服务注入：将子服务实例注入到模块实例属性上
-        # Inject child service instances as module attributes
-        if entry.is_module and entry.sub_services:
+        # 4. 模块子服务注入
+        if entry.sub_services:
             for sub_cls in entry.sub_services:
                 sub_entry = self._registry.get_by_class(sub_cls)
                 attr_name = to_snake(sub_cls.__name__)
@@ -277,7 +277,7 @@ class Canary:
         # ── 模块分支 ──
         if is_cf_module(cls):
             meta = get_module_meta(cls)
-            self._registry.register(cls, is_module=True, meta=meta)
+            self._registry.register(cls, meta=meta)
             entry = self._registry.get_by_class(cls)
             entry.parent_entry = parent_entry
             self._inherit_config(entry, parent_entry)
@@ -295,7 +295,7 @@ class Canary:
         # ── 服务分支 ──
         if is_cf_service(cls):
             svc_meta = get_service_meta(cls)
-            self._registry.register(cls, is_module=False, meta=svc_meta)
+            self._registry.register(cls, meta=svc_meta)
             entry = self._registry.get_by_class(cls)
             entry.parent_entry = parent_entry
             self._inherit_config(entry, parent_entry)
@@ -325,28 +325,6 @@ class Canary:
         这是模块系统最核心的能力之一——避免在每个子服务中重复配置声明。"""
         if entry.config_cls is None and parent_entry is not None:
             entry.config_cls = parent_entry.config_cls
-
-    # ==================================================================
-    # Context 树 (Context tree construction)
-    # ==================================================================
-
-    def _build_context_tree(
-        self,
-        cls: type,
-        parent_ctx: Context | None,
-    ) -> None:
-        """Build the :class:`Context` parent chain for the module tree.
-
-        按模块树的层级关系构建 Context 父子链。
-        Context 的 ``get_config()`` 和 ``get_service()`` 都依赖向上查找。
-        """
-        entry = self._registry.get_by_class(cls)
-        ctx = Context(entry=entry, parent=parent_ctx, registry=self._registry)
-        entry.context = ctx
-
-        if entry.is_module:
-            for sub_cls in entry.sub_services:
-                self._build_context_tree(sub_cls, parent_ctx=ctx)
 
     # ==================================================================
     # 依赖校验 (Dependency validation)

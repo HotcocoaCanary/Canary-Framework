@@ -14,13 +14,37 @@
 
 ### `@module(name, *, config=None, services=None)`
 
-将类声明为 CF 框架的模块（服务的组合容器）。模块本身也是服务。
+将类声明为 CF 框架的模块（服务的组合容器）。`@module` 内部调用 `@service` —— 模块也是服务。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | `str` | ✓ | 全局唯一名称 |
 | `config` | `type \| None` | | 模块的配置类（子服务未声明时继承） |
 | `services` | `list[type] \| None` | | 子服务和子模块类列表 |
+
+### `@router(prefix, *, name=None, config=None, deps=None, tags=None)`
+
+将类声明为路由。`@router` 内部调用 `@service` —— 路由也是服务。由 `WebCanary` 自动发现。
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `prefix` | `str` | ✓ | 应用于该组所有路由的 URL 前缀 |
+| `name` | `str` | | 服务名称（省略时通过 `to_snake` 自动生成） |
+| `config` | `type \| None` | | `@config` 装饰的配置类 |
+| `deps` | `list[type] \| None` | | 通过 DI 注入的依赖列表 |
+| `tags` | `list[str] \| None` | | 应用于所有路由的 OpenAPI 标签 |
+
+### HTTP 方法装饰器
+
+| 装饰器 | 签名 | HTTP 方法 |
+|--------|------|-----------|
+| `@get(path, **kwargs)` | `(path, *, response_model=None, status_code=None, ...)` | GET |
+| `@post(path, **kwargs)` | 同上 | POST |
+| `@put(path, **kwargs)` | 同上 | PUT |
+| `@delete(path, **kwargs)` | 同上 | DELETE |
+| `@patch(path, **kwargs)` | 同上 | PATCH |
+
+关键字参数直接传递到 FastAPI 的 `app.add_api_route()`。
 
 ### `@config`
 
@@ -38,7 +62,7 @@ class MyConfig:
 
 | 装饰器 | 签名 | 执行顺序 | 说明 |
 |--------|------|----------|------|
-| `@on_init` | `(ctx: Context)` | 拓扑序 | 依赖已注入、配置已加载 |
+| `@on_init` | `()` | 拓扑序 | 依赖已注入、配置已加载，无需 `ctx` 参数 |
 | `@on_start` | `()` | 拓扑序 | 无参数 |
 | `@on_end` | `()` | 逆序 | 无参数 |
 
@@ -56,17 +80,55 @@ LifecycleHook.END    # "on_end"
 
 ---
 
+## 类型系统
+
+### 元数据类型
+
+框架将元数据以 dataclass 存储于 `__cf_service_meta__`：
+
+```python
+@dataclass
+class ServiceMeta:
+    name: str
+    deps: list[type]
+    config_cls: type | None
+
+@dataclass
+class ModuleMeta(ServiceMeta):
+    services: list[type]
+
+@dataclass
+class RouterMeta(ServiceMeta):
+    prefix: str
+    tags: list[str]
+```
+
+`isinstance(meta, RouterMeta)` / `isinstance(meta, ModuleMeta)` 用于区分不同元数据类型。
+
+### `ServiceEntry`
+
+```python
+@dataclass
+class ServiceEntry:
+    cls: type
+    meta: ServiceMeta
+    instance: Any | None
+    parent_entry: ServiceEntry | None
+```
+
+---
+
 ## 引擎类
 
 ### `Canary(target: type)`
 
-核心引擎，生命周期编排。
+核心引擎，生命周期编排器。
 
 | 属性/方法 | 说明 |
 |-----------|------|
 | `.registry` | 全局 `Registry` 注册中心 |
 | `.startup_order` | 拓扑排序后的启动顺序列表 |
-| `await .init()` | 收集 → 校验 → 拓扑排序 → Context 树 → DI → 配置加载 → on_init |
+| `await .init()` | 收集 → 校验 → 拓扑排序 → DI → 配置加载 → on_init |
 | `await .start()` | 拓扑序调用 on_start |
 | `await .stop()` | 逆序调用 on_end |
 
@@ -88,15 +150,6 @@ await app.init()
 await app.start()
 ```
 
-### `Context`
-
-统一运行时上下文。通过 parent 链向上委托配置和依赖解析。
-
-| 方法 | 返回类型 | 说明 |
-|------|----------|------|
-| `.get_config(type[T])` | `T` | **类型安全**的配置访问，沿 parent 链查找 |
-| `.get_service(type[T])` | `T` | **类型安全**的服务实例访问，在模块树中定位并返回 |
-
 ---
 
 ## 异常体系
@@ -116,8 +169,8 @@ from canary_framework import (
 
 | 异常 | 触发场景 |
 |------|----------|
-| `ConfigurationError` | `ctx.get_config()` 未找到配置实例 |
-| `ServiceNotFoundError` | `Registry.get_by_name/class()` 未找到，`ctx.get_service()` 未找到 |
+| `ConfigurationError` | 配置加载或查找失败 |
+| `ServiceNotFoundError` | `Registry.get_by_name/class()` 未找到指定服务 |
 | `CircularDependencyError` | 拓扑排序检测到环 |
 | `DependencyInjectionError` | `inject_deps()` 时依赖实例为 None |
 | `LifecycleHookError` | `on_init/start/end` 钩子抛出异常 |
@@ -131,26 +184,26 @@ src/canary_framework/
 ├── __init__.py
 ├── common/
 │   ├── __init__.py
-│   ├── _types.py            # ServiceEntry, ServiceMeta, ModuleMeta
+│   ├── _types.py            # ServiceEntry、ServiceMeta、ModuleMeta、RouterMeta
 │   ├── enums.py             # LifecycleHook
-│   └── exceptions.py        # CanaryFrameworkError & 子类
+│   └── exceptions.py        # CanaryFrameworkError 及子类
 ├── core/
 │   ├── __init__.py
 │   ├── decorators/
 │   │   ├── __init__.py
 │   │   ├── config.py        # @config（内置 env_file=".env"）
-│   │   ├── lifecycle.py     # @on_init, @on_start, @on_end
+│   │   ├── lifecycle.py     # @on_init、@on_start、@on_end
 │   │   ├── module.py        # @module
-│   │   └── service.py       # @service
+│   │   ├── service.py       # @service
+
 │   ├── conductor/
 │   │   ├── __init__.py
-│   │   ├── canary.py        # Canary 引擎
-│   │   └── context.py       # Context
+│   │   └── canary.py        # Canary 引擎
 │   ├── algorithms/
 │   │   ├── __init__.py
 │   │   ├── injector.py      # 依赖注入
 │   │   ├── sorter.py        # 拓扑排序
-│   │   └── naming.py        # 命名工具
+│   │   └── naming.py        # 命名工具 (to_snake)
 │   └── container/
 │       ├── __init__.py
 │       └── registry.py      # 注册中心
@@ -162,7 +215,7 @@ src/canary_framework/
         │   └── web_canary.py # WebCanary 引擎
         └── decorators/
             ├── __init__.py
-            ├── router.py    # @router, @get, @post, ...
+            ├── router.py    # @router、@get、@post……
 ```
 
 ## 初始化流程
@@ -177,12 +230,10 @@ Canary.init()
     │
     ├── _validate()              阶段1：校验依赖完整性
     │
-    ├── topological_sort()       阶段2：Kahn 拓扑排序（O(V+E)）
+    ├── topological_sort()       阶段2：Kahn 拓扑排序 (O(V+E))
     │
-    ├── _build_context_tree()    阶段3：按模块树构建 Context parent 链
-    │
-    └── for each in startup_order:   阶段4：按拓扑序初始化
+    └── for each in startup_order:   阶段3：按拓扑序初始化
         ├── inject_deps()            setattr 注入依赖
         ├── config_cls()             直接实例化（pydantic-settings 自动读 .env）
-        └── on_init(entry.context)   钩子回调
+        └── on_init()                钩子回调
 ```

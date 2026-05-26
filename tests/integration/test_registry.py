@@ -21,12 +21,10 @@ class TestServiceEntry:
         assert entry.name == "test"
         assert entry.deps == []
         assert entry.config_cls is None
-        assert entry.is_module is False
         assert entry.sub_services == []
         assert entry.dep_names == []
         assert entry.config_instance is None
         assert entry.parent_entry is None
-        assert entry.context is None
         assert entry._hooks is None
 
     def test_slots_no_dict(self) -> None:
@@ -167,12 +165,6 @@ class TestRegistry:
 
         reg = Registry()
         meta = ModuleMeta(name="root", services=[Child])
-        reg.register(
-            Root,
-            is_module=True,
-            sub_services=[Child],
-            meta=meta,
-        )
+        reg.register(Root, meta=meta)
         entry = reg.get_by_class(Root)
-        assert entry.is_module is True
         assert entry.sub_services == [Child]

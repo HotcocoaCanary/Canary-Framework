@@ -1,6 +1,8 @@
 # Configuration
 
-## Minimal: env vars override defaults
+Configuration uses `@config` to convert plain Python classes into **pydantic-settings** models with automatic `.env` loading. Config instances are injected as DI attributes (snake_case of the class name) before `on_init`.
+
+## Minimal
 
 ```python
 from canary_framework import config
@@ -11,31 +13,37 @@ class DBConfig:
     pool_size: int = 10
 ```
 
-pydantic-settings reads with priority: **environment variable > .env file > default value**.
+**Priority**: environment variable > `.env` file > class default value.
 
-`@config` has built-in `env_file=".env"` — no extra setup needed:
+`@config` includes `env_file=".env"` by default — no extra setup needed:
 
 ```bash
-# .env file
+# .env
 DB_URL=postgres://prod:5432/app
 DB_POOL_SIZE=20
 ```
 
+## Accessing Config
+
+Config is injected as an attribute using the snake_case of the config class name:
+
 ```python
-@on_init
-def init(self, ctx: Context) -> None:
-    cfg = ctx.get_config(DBConfig)   # type-safe config access
-    cfg.url        # → postgres://prod:5432/app
-    cfg.pool_size  # → 20
+@service(name="db", config=DBConfig)
+class DBService:
+    db_config: DBConfig
+
+    @on_init
+    def init(self) -> None:
+        self.pool = create_pool(self.db_config.url)
 ```
 
-## Server & FastAPI params via config
+## Server and FastAPI Parameters via Prefix Routing
 
-Root module's `@config` class uses **prefixes** to route parameters:
+The root module's `@config` class uses field-name **prefixes** to route parameters to the correct consumer:
 
-- `uvicorn_*` → uvicorn.Config / uvicorn.Server
-- `fastapi_*` → FastAPI() constructor
-- No prefix → business config (untouched by framework)
+- `uvicorn_*` → `uvicorn.Config`
+- `fastapi_*` → `FastAPI()` constructor
+- No prefix → business config (untouched by the framework)
 
 ```python
 @config
@@ -49,7 +57,7 @@ class AppConfig:
     db_url: str = "..."                 # business config (no prefix)
 ```
 
-WebCanary automatically splits by prefix, strips prefixes, and distributes to respective consumers.
+`WebCanary` automatically splits fields by prefix, strips the prefix, and distributes values to their respective consumers.
 
 ## Config Inheritance
 
@@ -62,12 +70,20 @@ class DBModule:
 
 @service(name="DBService")         # no config declared → inherits DBConfig
 class DBService:
+    db_config: DBConfig
+
     @on_init
-    def init(self, ctx: Context) -> None:
-        cfg = ctx.get_config(DBConfig)
-        print(cfg.url)  # available
+    def init(self) -> None:
+        print(self.db_config.url)  # available via inherited config
 ```
 
-## Security: Log Sanitization
+## Log Sanitization
 
-Framework logs automatically sanitize sensitive fields. Fields containing `password`, `secret`, `token`, `key`, `auth`, `credential`, or `private` are replaced with `***` in log output.
+Framework logs automatically sanitize sensitive fields. Any field name containing `password`, `secret`, `token`, `key`, `auth`, `credential`, or `private` is replaced with `***` in log output.
+
+```python
+@config
+class AppConfig:
+    db_password: str = "supersecret"    # logged as db_password='***'
+    db_url: str = "postgres://..."       # logged normally
+```

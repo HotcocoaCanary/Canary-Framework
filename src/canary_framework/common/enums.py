@@ -27,11 +27,10 @@ class LifecycleHook(StrEnum):
     """
 
     INIT = "on_init"
-    """Called after DI and config loading.  Receives the service's
-    :class:`~canary_framework.core.conductor.context.Context` as argument.
+    """Called after DI and config loading.  No arguments — dependencies
+    and config are injected as instance attributes before the hook runs.
 
-    初始化钩子：此时依赖已注入、配置已加载，是所有钩子中唯一接收
-    Context 参数的钩子."""
+    初始化钩子：此时依赖和配置已通过 DI 注入为实例属性。无参数。"""
 
     START = "on_start"
     """Called in topological order during application start.  No arguments.
