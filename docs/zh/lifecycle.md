@@ -15,7 +15,7 @@ Canary.stop()  ← on_end() ← ...       （逆序）
 ```python
 @on_init
 def init(self, ctx: Context) -> None:
-    cfg = ctx.config_as(AppConfig)
+    cfg = ctx.get_config(AppConfig)
     self.pool = create_pool(cfg.db_url)
 ```
 

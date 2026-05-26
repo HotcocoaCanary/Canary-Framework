@@ -18,12 +18,9 @@
         这是一种「责任链」模式的简化实现：每个节点要么自己处理请求，
         要么委托给父节点。
 
-    为什么需要两套访问方法（``config()`` 和 ``config_as()``）？
-    （Why two sets of accessors — ``config()`` and ``config_as()``?）
-
-    Python 的类型系统要求返回值类型在编译时确定，但 config 的实际类型
-    只有在运行时才知道。``config_as(Type)`` 通过泛型参数让 IDE 能推断类型，
-    而 ``config()`` 保留向后兼容。过渡期后 ``config()`` 将被移除。
+    类型安全访问 (Type-safe access):
+        ``get_config(Type)`` 通过泛型参数让 IDE 能推断返回值的类型，
+        在编译时即可发现类型错误，无需等到运行时。
 """
 
 from __future__ import annotations
@@ -40,10 +37,10 @@ if TYPE_CHECKING:
     from canary_framework.core.container.registry import Registry
 
 _C = TypeVar("_C")
-"""Config type for :meth:`config_as`."""
+"""Config type for :meth:`get_config`."""
 
 _S = TypeVar("_S")
-"""Service type for :meth:`service_as` and :meth:`resolve`."""
+"""Service type for :meth:`get_service` and :meth:`resolve`."""
 
 
 class Context:
@@ -54,6 +51,7 @@ class Context:
     提供给 ``@on_init`` 钩子和 ``@router`` 构造函数。"""
 
     __slots__ = ("_entry", "_parent", "_registry")
+
     # __slots__ 禁止动态属性添加，同时节省内存
     # Prevents dynamic attribute assignment and saves memory
 
@@ -71,7 +69,7 @@ class Context:
     # 类型安全的访问器 (Typed accessors — preferred API)
     # ==================================================================
 
-    def config_as(self, _cls: type[_C]) -> _C:
+    def get_config(self, _cls: type[_C]) -> _C:
         """Return the config instance with full type safety.
 
         返回类型安全的配置实例。
@@ -95,7 +93,7 @@ class Context:
 
             @on_init
             def init(self, ctx: Context) -> None:
-                cfg = ctx.config_as(AppConfig)
+                cfg = ctx.get_config(AppConfig)
                 print(cfg.host)  # IDE 能推断 host 的类型为 str
         """
         cur: Context | None = self
@@ -109,17 +107,7 @@ class Context:
             "Ensure the root module declares a @config class."
         )
 
-    def config(self) -> object:
-        """Return the **untyped** config instance.
-
-        返回无类型的配置实例（向后兼容）。
-
-        .. deprecated:: 0.2
-            Prefer :meth:`config_as` for type-safe access.
-            推荐使用 :meth:`config_as` 获取类型安全的配置。"""
-        return self.config_as(object)
-
-    def service_as(self, _cls: type[_S]) -> _S:
+    def get_service(self, _cls: type[_S]) -> _S:
         """Return the service instance with full type safety.
 
         返回类型安全的当前服务/模块实例。
@@ -133,15 +121,6 @@ class Context:
         Returns:
             运行时实例，类型为 *_cls*。"""
         return self.resolve(_cls)
-
-    def service(self) -> object:
-        """Return the **untyped** current service/module instance.
-
-        返回无类型的当前服务/模块实例（向后兼容）。
-
-        .. deprecated:: 0.2
-            Prefer :meth:`service_as` for type-safe access."""
-        return self._entry.instance
 
     # ==================================================================
     # 依赖解析 (Dependency resolution)

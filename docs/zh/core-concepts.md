@@ -4,7 +4,7 @@
 |------|------|----------|--------|
 | **服务 (Service)** | 最小运行单元 | `@service(name="X")` | `@service` |
 | **模块 (Module)** | 服务的组合容器，本身也是服务 | `@module(name="X", services=[...])` | `@module` |
-| **上下文 (Context)** | 统一运行时句柄：`config_as` / `service_as` / `resolve` | 框架自动传入 | — |
+| **上下文 (Context)** | 统一运行时句柄：`get_config` / `get_service` / `resolve` | 框架自动传入 | — |
 | **配置 (Config)** | pydantic-settings 子类，自动读 .env | 需要时才声明 | `@config` |
 | **生命周期 (Lifecycle)** | `on_init` / `on_start` / `on_end`，通过 `LifecycleHook` 枚举管理 | 需要时才声明 | `@on_init` 等 |
 
@@ -15,12 +15,12 @@ Context 提供了类型安全的访问方法：
 ```python
 @on_init
 def init(self, ctx: Context) -> None:
-    cfg = ctx.config_as(AppConfig)      # 类型安全，返回 AppConfig
-    db = ctx.resolve(DBService)          # 类型安全，返回 DBService 实例
-    svc = ctx.service_as(MyService)      # 类型安全，返回 MyService 实例
+    cfg = ctx.get_config(AppConfig)      # 类型安全，返回 AppConfig
+    db  = ctx.resolve(DBService)        # 服务查找
+    svc = ctx.get_service(MyService)      # 类型安全，返回 MyService 实例
 ```
 
-旧式 `ctx.config` 和 `ctx.service` 属性已被标记为过时，返回 `object` 类型，推荐使用新的类型安全方法。
+
 
 ## Context 链
 

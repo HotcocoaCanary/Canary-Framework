@@ -21,7 +21,7 @@ Canary Framework is a **decorator-driven** service framework. Core philosophy: *
 - **Lifecycle Hooks** — `@on_init` / `@on_start` / `@on_end`, sync/async adaptive
 - **Web Integration** — `WebCanary` for one-click FastAPI + Uvicorn
 - **Context System** — parent chain delegates config and dependency resolution upward
-- **Type Safety** — `ctx.config_as(Type)` / `ctx.service_as(Type)` with full IDE inference
+- **Type Safety** — `ctx.get_config(Type)` / `ctx.get_service(Type)` with full IDE inference
 - **Log Sanitization** — sensitive config fields (password, secret, token) automatically masked
 
 ## Installation

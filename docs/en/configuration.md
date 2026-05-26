@@ -24,7 +24,7 @@ DB_POOL_SIZE=20
 ```python
 @on_init
 def init(self, ctx: Context) -> None:
-    cfg = ctx.config_as(DBConfig)   # type-safe config access
+    cfg = ctx.get_config(DBConfig)   # type-safe config access
     cfg.url        # → postgres://prod:5432/app
     cfg.pool_size  # → 20
 ```
@@ -64,7 +64,7 @@ class DBModule:
 class DBService:
     @on_init
     def init(self, ctx: Context) -> None:
-        cfg = ctx.config_as(DBConfig)
+        cfg = ctx.get_config(DBConfig)
         print(cfg.url)  # available
 ```
 

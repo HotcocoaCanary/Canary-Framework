@@ -12,7 +12,7 @@ class HealthRouter:
     """Root-level health and info endpoints (prefix: /api)."""
 
     def __init__(self, ctx: Context) -> None:
-        cfg = ctx.config_as(object)
+        cfg = ctx.get_config(object)
         self._app_name = getattr(cfg, "app_name", "unknown")
 
     @get("/health")

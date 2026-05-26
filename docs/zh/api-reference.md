@@ -94,11 +94,9 @@ await app.start()
 
 | 方法 | 返回类型 | 说明 |
 |------|----------|------|
-| `.config_as(type[T])` | `T` | **类型安全**的配置访问，沿 parent 链查找 |
-| `.service_as(type[T])` | `T` | **类型安全**的服务实例访问 |
-| `.resolve(cls)` | `T` | 沿 parent 链查找已注册到父模块的服务实例 |
-| `.config()` | `object` | *(已过时)* 无类型配置访问 |
-| `.service()` | `object` | *(已过时)* 无类型服务访问 |
+| `.get_config(type[T])` | `T` | **类型安全**的配置访问，沿 parent 链查找 |
+| `.get_service(type[T])` | `T` | **类型安全**的服务实例访问 |
+| `.resolve(type[T])` | `T` | 在模块树中定位并返回服务实例 |
 
 ---
 
@@ -119,7 +117,7 @@ from canary_framework import (
 
 | 异常 | 触发场景 |
 |------|----------|
-| `ConfigurationError` | `ctx.config_as()` 未找到配置实例 |
+| `ConfigurationError` | `ctx.get_config()` 未找到配置实例 |
 | `ServiceNotFoundError` | `Registry.get_by_name/class()` 未找到，`ctx.resolve()` 未找到 |
 | `CircularDependencyError` | 拓扑排序检测到环 |
 | `DependencyInjectionError` | `inject_deps()` 时依赖实例为 None |

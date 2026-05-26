@@ -19,13 +19,13 @@
 
 from __future__ import annotations
 
-import logging
 from collections import defaultdict, deque
 
+from canary_framework.common._logging import get_logger
 from canary_framework.common.exceptions import CircularDependencyError
 from canary_framework.core.container.registry import Registry
 
-_log = logging.getLogger("cf.sorter")
+_log = get_logger("sorter")
 
 
 def topological_sort(registry: Registry) -> list[str]:

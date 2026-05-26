@@ -16,7 +16,7 @@ class UserService:
 
     @on_init
     def init(self, ctx: Context) -> None:
-        cfg = ctx.config_as(UserModuleConfig)
+        cfg = ctx.get_config(UserModuleConfig)
         self._users = {
             "1": {"name": "Alice", "role": "admin"},
             "2": {"name": "Bob", "role": cfg.default_role},
