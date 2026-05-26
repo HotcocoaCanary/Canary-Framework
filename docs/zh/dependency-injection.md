@@ -22,10 +22,24 @@ class B:
 ## 注入时机
 
 ```
-实例化 → 依赖注入 → 配置加载 → on_init(ctx)
+实例化 → 依赖注入 → 配置加载 → on_init()
 ```
 
 在 `on_init` 中已可访问所有注入的依赖。
+
+## Config 作为 DI
+
+`@service(config=AppConfig)` 声明的配置类同样通过 DI 注入为实例属性，属性名由配置类名经 `to_snake` 转换而来：
+
+```python
+@service(name="db", config=AppConfig)
+class DBService:
+    app_config: AppConfig          # AppConfig → app_config
+
+@service(name="user", config=UserServiceConfig)
+class UserService:
+    user_service_config: UserServiceConfig  # UserServiceConfig → user_service_config
+```
 
 ## 启动顺序
 
@@ -37,18 +51,29 @@ from canary_framework import CircularDependencyError
 try:
     await app.init()
 except CircularDependencyError as e:
-    print(f"Cycle detected: {e}")
+    print(f"检测到循环依赖: {e}")
 ```
 
-## 类型安全解析
+如果依赖的服务未找到，抛出 `ServiceNotFoundError`。
 
-除了依赖注入，还可以通过 Context 手动获取服务：
+## 跨模块依赖
+
+依赖解析在模块树中进行，服务可以依赖同一模块或其他模块中的服务：
 
 ```python
-@on_init
-def init(self, ctx: Context) -> None:
-    db = ctx.get_service(DBService)      # 沿模块树向上查找 DBService
-    db.execute("SELECT 1")
-```
+@module(name="ModuleA", services=[SvcA])
+class ModuleA:
+    pass
 
-如果服务未找到，抛出 `ServiceNotFoundError`。
+@module(name="ModuleB", services=[SvcB])
+class ModuleB:
+    pass
+
+@service(name="SvcB", deps=[SvcA])  # 跨模块依赖，只要 SvcA 在全局已注册即可
+class SvcB:
+    svc_a: SvcA
+
+@module(name="Root", services=[ModuleA, ModuleB])
+class Root:
+    pass
+```

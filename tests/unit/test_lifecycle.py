@@ -35,7 +35,7 @@ class TestFindHooks:
     def test_all_hooks_decorated(self) -> None:
         class MyService:
             @on_init
-            def init(self, ctx: object) -> None:
+            def init(self) -> None:
                 pass
 
             @on_start
@@ -67,7 +67,7 @@ class TestFindHooks:
         must NOT be found (no implicit fallback)."""
 
         class Accidental:
-            def on_init(self, ctx: object) -> None:
+            def on_init(self) -> None:
                 pass
 
             def on_start(self) -> None:
@@ -89,7 +89,7 @@ class TestFindHooks:
             def start(self) -> None:
                 pass
 
-            def on_init(self, ctx: object) -> None:
+            def on_init(self) -> None:
                 pass
 
         hooks = find_hooks(Partial())
@@ -101,7 +101,7 @@ class TestFindHooks:
         """The decorator must return the same function (for introspection)."""
 
         @on_init
-        def my_init(self, ctx: object) -> None:  # type: ignore[no-untyped-def]
+        def my_init(self) -> None:  # type: ignore[no-untyped-def]
             pass
 
         assert callable(my_init)
@@ -112,7 +112,7 @@ class TestFindHooks:
 
         class Svc:
             @on_init
-            def init(self, ctx: object) -> None:
+            def init(self) -> None:
                 pass
 
         hooks = find_hooks(Svc())
@@ -128,7 +128,7 @@ class TestFindHooks:
 
         class Troublemaker:
             @on_init
-            def init(self, ctx: object) -> None:
+            def init(self) -> None:
                 pass
 
             @property

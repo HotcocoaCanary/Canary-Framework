@@ -22,11 +22,15 @@ DB_POOL_SIZE=20
 ```
 
 ```python
-@on_init
-def init(self, ctx: Context) -> None:
-    cfg = ctx.get_config(DBConfig)   # 类型安全的配置访问
-    cfg.url        # → postgres://prod:5432/app
-    cfg.pool_size  # → 20
+@service(name="db", config=DBConfig)
+class DBService:
+    db_config: DBConfig
+
+    @on_init
+    def init(self) -> None:
+        cfg = self.db_config          # 配置通过 DI 属性直接访问
+        cfg.url        # → postgres://prod:5432/app
+        cfg.pool_size  # → 20
 ```
 
 ## 服务器、FastAPI 参数也走配置
@@ -60,12 +64,13 @@ WebCanary 自动按前缀拆分、去前缀后分发给对应消费者。
 class DBModule:
     pass
 
-@service(name="DBService")         # 未声明 config → 继承 DBConfig
+@service(name="DBService", config=DBConfig)         # 声明 config → 直接使用 DBConfig
 class DBService:
+    db_config: DBConfig
+
     @on_init
-    def init(self, ctx: Context) -> None:
-        cfg = ctx.get_config(DBConfig)
-        print(cfg.url)  # 可用
+    def init(self) -> None:
+        print(self.db_config.url)  # 可用
 ```
 
 ## 安全：日志脱敏

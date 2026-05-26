@@ -39,7 +39,7 @@ asyncio.run(main())
 
 ```python
 import asyncio
-from canary_framework import service, module, on_init, Context, config
+from canary_framework import service, module, on_init, config
 from canary_framework.web.fastapi import get, router, WebCanary
 
 # 配置
@@ -61,8 +61,10 @@ class APIRouter:
 # 服务
 @service(name="HelloService", config=AppConfig)
 class HelloService:
+    app_config: AppConfig
+
     @on_init
-    async def init(self, ctx: Context) -> None:
+    def init(self) -> None:
         pass
 
     @on_start

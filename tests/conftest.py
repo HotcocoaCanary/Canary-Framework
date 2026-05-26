@@ -8,7 +8,6 @@ from canary_framework.core import config as _config_decorator
 from canary_framework.core import module as _module_decorator
 from canary_framework.core import service as _service_decorator
 from canary_framework.core.conductor.canary import Canary
-from canary_framework.core.conductor.context import Context
 from canary_framework.core.decorators.lifecycle import on_end, on_init, on_start
 
 # ---------------------------------------------------------------------------
@@ -24,7 +23,7 @@ class ServiceA:
         self.calls = []
 
     @on_init
-    def init(self, ctx: Context) -> None:
+    def init(self) -> None:
         self.calls.append("a:init")
 
     @on_start
@@ -47,7 +46,7 @@ class ServiceB:
         self.calls = []
 
     @on_init
-    def init(self, ctx: Context) -> None:
+    def init(self) -> None:
         self.calls.append("b:init")
 
     @on_start
@@ -67,7 +66,7 @@ class ServiceC:
         self.calls = []
 
     @on_init
-    def init(self, ctx: Context) -> None:
+    def init(self) -> None:
         self.calls.append("c:init")
 
     @on_start
@@ -83,7 +82,7 @@ class ModuleM:
         self.calls = []
 
     @on_init
-    def init(self, ctx: Context) -> None:
+    def init(self) -> None:
         self.calls.append("m:init")
 
 
@@ -96,7 +95,7 @@ class TestConfig:
 @_service_decorator("with-config", config=TestConfig)
 class ServiceWithConfig:
     @on_init
-    def init(self, ctx: Context) -> None:
+    def init(self) -> None:
         pass
 
 

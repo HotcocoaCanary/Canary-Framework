@@ -1,19 +1,19 @@
-"""Tests for :mod:`canary_framework.core.conductor.context`."""
+"""Tests for config and service resolution via dependency injection."""
 
 from __future__ import annotations
 
 import pytest
 
-from canary_framework.common.exceptions import ConfigurationError, ServiceNotFoundError
 from canary_framework.core.conductor.canary import Canary
 from canary_framework.core.decorators.config import config
+from canary_framework.core.decorators.lifecycle import on_init
 from canary_framework.core.decorators.module import module
 from canary_framework.core.decorators.service import service
 
 
 @pytest.mark.integration
-class TestContextGetConfig:
-    """Verify typed config access via get_config()."""
+class TestDIConfigInjection:
+    """Verify typed config access via dependency injection."""
 
     async def test_get_config_returns_typed_config(self) -> None:
         @config
@@ -22,16 +22,17 @@ class TestContextGetConfig:
 
         @service("s", config=MyCfg)
         class Svc:
-            pass
+            my_cfg: MyCfg
+
+            @on_init
+            def init(self) -> None:
+                pass
 
         app = Canary(Svc)
         await app.init()
 
-        entry = app.registry.get_by_class(Svc)
-        ctx = entry.context
-        assert ctx is not None
-        cfg = ctx.get_config(MyCfg)
-        assert cfg.key == "val"
+        inst: Svc = app.registry.get_instance(Svc)  # type: ignore[assignment]
+        assert inst.my_cfg.key == "val"
 
     async def test_config_chain_upward(self) -> None:
         @config
@@ -40,7 +41,11 @@ class TestContextGetConfig:
 
         @service("child")
         class ChildSvc:
-            pass
+            root_cfg: RootCfg
+
+            @on_init
+            def init(self) -> None:
+                pass
 
         @module("root", config=RootCfg, services=[ChildSvc])
         class Root:
@@ -49,13 +54,14 @@ class TestContextGetConfig:
         app = Canary(Root)
         await app.init()
 
-        child_entry = app.registry.get_by_name("child")
-        ctx = child_entry.context
-        assert ctx is not None
-        cfg = ctx.get_config(RootCfg)
-        assert cfg.env == "prod"
+        inst: ChildSvc = app.registry.get_instance(ChildSvc)  # type: ignore[assignment]
+        assert inst.root_cfg.env == "prod"
 
     async def test_no_config_raises(self) -> None:
+        @config
+        class UnboundCfg:
+            x: int = 1
+
         @service("orphan")
         class Orphan:
             pass
@@ -63,16 +69,14 @@ class TestContextGetConfig:
         app = Canary(Orphan)
         await app.init()
 
-        entry = app.registry.get_by_class(Orphan)
-        ctx = entry.context
-        assert ctx is not None
-        with pytest.raises(ConfigurationError, match="No config instance"):
-            ctx.get_config(object)
+        inst: Orphan = app.registry.get_instance(Orphan)  # type: ignore[assignment]
+        with pytest.raises(AttributeError):
+            _ = inst.unbound_cfg  # type: ignore[attr-defined]
 
 
 @pytest.mark.integration
-class TestContextGetService:
-    """Verify typed service resolution via get_service()."""
+class TestDIServiceInjection:
+    """Verify typed service resolution via dependency injection."""
 
     async def test_get_service_finds_in_module_tree(self) -> None:
         @service("db")
@@ -81,7 +85,11 @@ class TestContextGetService:
 
         @service("user", deps=[DBService])
         class UserService:
-            pass
+            db_service: DBService
+
+            @on_init
+            def init(self) -> None:
+                pass
 
         @module("app", services=[DBService, UserService])
         class App:
@@ -90,28 +98,20 @@ class TestContextGetService:
         app = Canary(App)
         await app.init()
 
-        user_entry = app.registry.get_by_name("user")
-        ctx = user_entry.context
-        assert ctx is not None
-        db = ctx.get_service(DBService)
-        assert isinstance(db, DBService)
+        inst: UserService = app.registry.get_instance(UserService)  # type: ignore[assignment]
+        assert isinstance(inst.db_service, DBService)
 
     async def test_get_service_not_found_raises(self) -> None:
-        @service("orphan")
-        class Orphan:
-            pass
-
         class Unknown:
             pass
 
-        app = Canary(Orphan)
-        await app.init()
+        @service("orphan", deps=[Unknown])
+        class Orphan:
+            pass
 
-        entry = app.registry.get_by_class(Orphan)
-        ctx = entry.context
-        assert ctx is not None
-        with pytest.raises(ServiceNotFoundError, match="not found"):
-            ctx.get_service(Unknown)
+        app = Canary(Orphan)
+        with pytest.raises(TypeError, match="not decorated"):
+            await app.init()
 
     async def test_get_service_across_module_boundaries(self) -> None:
         @service("a-svc")
@@ -137,22 +137,25 @@ class TestContextGetService:
         app = Canary(Root)
         await app.init()
 
-        a_entry = app.registry.get_by_name("a-svc")
-        ctx = a_entry.context
-        assert ctx is not None
-        with pytest.raises(ServiceNotFoundError):
-            ctx.get_service(BSvc)
+        a_inst: ASvc = app.registry.get_instance(ASvc)  # type: ignore[assignment]
+        with pytest.raises(AttributeError):
+            _ = a_inst.bsvc  # type: ignore[attr-defined]
 
     async def test_get_service_returns_typed_instance(self) -> None:
         @service("mysvc")
         class MySvc:
             pass
 
-        app = Canary(MySvc)
+        @service("consumer", deps=[MySvc])
+        class Consumer:
+            my_svc: MySvc
+
+            @on_init
+            def init(self) -> None:
+                pass
+
+        app = Canary(Consumer)
         await app.init()
 
-        entry = app.registry.get_by_class(MySvc)
-        ctx = entry.context
-        assert ctx is not None
-        inst = ctx.get_service(MySvc)
-        assert isinstance(inst, MySvc)
+        inst: Consumer = app.registry.get_instance(Consumer)  # type: ignore[assignment]
+        assert isinstance(inst.my_svc, MySvc)

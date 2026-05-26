@@ -75,7 +75,7 @@ def config[ConfigT: type](cls: ConfigT) -> type:
             **{
                 k: v
                 for k, v in vars(cls).items()
-                if not k.startswith("__") and k != "__annotations__"
+                if not k.startswith(("__", "_")) and k != "__annotations__"
             },
         },
     )

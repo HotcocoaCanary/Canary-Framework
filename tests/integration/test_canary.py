@@ -14,7 +14,6 @@ from canary_framework.core import (
     on_start,
     service,
 )
-from canary_framework.core.conductor.context import Context
 from canary_framework.core.container.registry import Registry
 
 
@@ -28,7 +27,7 @@ class TestCanaryLifecycle:
         @service("hello")
         class Hello:
             @on_init
-            def init(self, ctx: Context) -> None:
+            def init(self) -> None:
                 calls.append("init")
 
             @on_start
@@ -52,7 +51,7 @@ class TestCanaryLifecycle:
         @service("a")
         class A:
             @on_init
-            def init(self, ctx: Context) -> None:
+            def init(self) -> None:
                 calls.append("a:init")
 
             @on_start
@@ -62,7 +61,7 @@ class TestCanaryLifecycle:
         @service("b", deps=[A])
         class B:
             @on_init
-            def init(self, ctx: Context) -> None:
+            def init(self) -> None:
                 calls.append("b:init")
 
             @on_start
@@ -122,7 +121,7 @@ class TestCanaryLifecycle:
             ok: str = ""
 
             @on_init
-            def init(self, ctx: Context) -> None:
+            def init(self) -> None:
                 self.ok = self.a.do()  # type: ignore[attr-defined]
 
         @module("m", services=[A, B])
@@ -144,9 +143,11 @@ class TestCanaryLifecycle:
 
         @service("configured", config=MyCfg)
         class Configured:
+            my_cfg: MyCfg
+
             @on_init
-            def init(self, ctx: Context) -> None:
-                captured["name"] = ctx.get_config(MyCfg).name
+            def init(self) -> None:
+                captured["name"] = self.my_cfg.name
 
         app = Canary(Configured)
         await app.init()
@@ -161,10 +162,11 @@ class TestCanaryLifecycle:
         @service("child")
         class Child:
             got: str = ""
+            root_cfg: RootCfg
 
             @on_init
-            def init(self, ctx: Context) -> None:
-                self.got = ctx.get_config(RootCfg).env
+            def init(self) -> None:
+                self.got = self.root_cfg.env
 
         @module("root", config=RootCfg, services=[Child])
         class Root:
@@ -290,7 +292,7 @@ class TestCanaryAsyncHooks:
         @service("async-init")
         class AsyncInit:
             @on_init
-            async def init(self, ctx: Context) -> None:
+            async def init(self) -> None:
                 nonlocal called
                 called = True
 
@@ -335,7 +337,7 @@ class TestCanaryAsyncHooks:
         @service("mixed")
         class Mixed:
             @on_init
-            async def init(self, ctx: Context) -> None:
+            async def init(self) -> None:
                 log.append("init:async")
 
             @on_start
@@ -361,7 +363,7 @@ class TestCanaryEdgeCases:
         @service("broken")
         class Broken:
             @on_init
-            def init(self, ctx: Context) -> None:
+            def init(self) -> None:
                 raise RuntimeError("crash")
 
         app = Canary(Broken)

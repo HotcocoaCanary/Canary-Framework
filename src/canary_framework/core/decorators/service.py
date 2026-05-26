@@ -73,10 +73,11 @@ def service(
 
         @service(name="database", config=DBConfig)
         class DBService:
+            db_config: DBConfig
+
             @on_init
-            def init(self, ctx: Context) -> None:
-                cfg = ctx.get_config(DBConfig)
-                self.pool = create_pool(cfg.dsn)
+            def init(self) -> None:
+                self.pool = create_pool(self.db_config.dsn)
     """
     _config = config
     _deps = list(deps or ())

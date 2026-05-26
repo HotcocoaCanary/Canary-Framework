@@ -10,11 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from canary_framework.core.conductor.context import Context
-
+from typing import Any
 
 # ============================================================================
 # 元数据 dataclass — 装饰器在类上设置的元数据
@@ -105,9 +101,6 @@ class ServiceEntry:
     """``@config`` 装饰的类，``None`` 时从父模块继承
     (The ``@config``-decorated class, or ``None`` to inherit from parent)."""
 
-    is_module: bool = False
-    """是否为模块 (``True`` for ``@module``, ``False`` for ``@service``)."""
-
     sub_services: list[type] = field(default_factory=list)
     """子服务列表，仅模块有效 (Child classes declared in ``services=[]``)."""
 
@@ -124,14 +117,8 @@ class ServiceEntry:
 
     parent_entry: ServiceEntry | None = field(default=None, repr=False, compare=False)
     """父模块的 ServiceEntry，根模块为 ``None``。
-    在 ``_collect`` 递归时记录，用于向上查找配置和构建 Context 链。
+    在 ``_collect`` 递归时记录，用于向上查找配置。
     Parent module's entry; ``None`` for root.  Set during ``_collect``."""
-
-    context: Context | None = field(default=None, repr=False, compare=False)
-    """关联的 Context，在 ``_build_context_tree`` 时绑定。
-    每个 ServiceEntry 拥有独立的 Context，通过 parent 链串联。
-    Assigned during ``_build_context_tree``.  Each entry gets its own
-    :class:`Context`, linked via the parent chain."""
 
     _hooks: dict[str, Callable[..., Any]] | None = field(default=None, repr=False, compare=False)
     """缓存: ``find_hooks`` 的结果。

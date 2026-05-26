@@ -1,7 +1,7 @@
-"""Functional (end-to-end) tests for Canary Framework — real user scenarios.
+"""Functional (end-to-end) tests for Canary Framework.
 
 Tests the complete application lifecycle from the user's perspective:
-@config → @service/@module → Canary.init/start/stop → Context API
+@config → @service/@module → Canary.init/start/stop
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ class TestFullApplicationLifecycle:
     async def test_full_init_start_stop_with_config_and_deps(self) -> None:
         from canary_framework import (
             Canary,
-            Context,
             config,
             module,
             on_end,
@@ -43,14 +42,14 @@ class TestFullApplicationLifecycle:
         @service("db", config=AppConfig)
         class DBService:
             connected: bool
+            app_config: AppConfig
 
             def __init__(self) -> None:
                 self.connected = False
 
             @on_init
-            def init(self, ctx: Context) -> None:
-                cfg = ctx.get_config(AppConfig)
-                self.name = cfg.app_name
+            def init(self) -> None:
+                self.name = self.app_config.app_name
                 self.connected = True
 
             @on_end
@@ -61,11 +60,11 @@ class TestFullApplicationLifecycle:
         class WorkerService:
             logger_service: LoggerService
             db_service: DBService
+            app_config: AppConfig
 
             @on_init
-            def init(self, ctx: Context) -> None:
-                cfg = ctx.get_config(AppConfig)
-                self.logger_service.log(f"worker init: {cfg.app_name}")
+            def init(self) -> None:
+                self.logger_service.log(f"worker init: {self.app_config.app_name}")
 
             @on_start
             def start(self) -> None:
@@ -97,7 +96,6 @@ class TestFullApplicationLifecycle:
     async def test_nested_modules_with_config_inheritance(self) -> None:
         from canary_framework import (
             Canary,
-            Context,
             config,
             module,
             on_init,
@@ -112,10 +110,11 @@ class TestFullApplicationLifecycle:
         @service("inner-svc")
         class InnerService:
             cfg_env: str = ""
+            root_cfg: RootCfg
 
             @on_init
-            def init(self, ctx: Context) -> None:
-                self.cfg_env = ctx.get_config(RootCfg).env
+            def init(self) -> None:
+                self.cfg_env = self.root_cfg.env
 
         @module("inner", services=[InnerService])
         class InnerModule:
@@ -134,7 +133,6 @@ class TestFullApplicationLifecycle:
     async def test_multiple_modules_cross_dependency(self) -> None:
         from canary_framework import (
             Canary,
-            Context,
             module,
             on_init,
             service,
@@ -151,7 +149,7 @@ class TestFullApplicationLifecycle:
             result: int = 0
 
             @on_init
-            def init(self, ctx: Context) -> None:
+            def init(self) -> None:
                 self.result = self.calc_service.add(3, 4)
 
         @module("math", services=[CalcService])
@@ -185,7 +183,7 @@ class TestErrorScenarios:
         @service("broken")
         class BrokenService:
             @on_init
-            def init(self, ctx: object) -> None:
+            def init(self) -> None:
                 raise RuntimeError("init failed")
 
         app = Canary(BrokenService)

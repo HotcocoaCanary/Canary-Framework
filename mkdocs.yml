@@ -65,13 +65,16 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quick Start: quickstart.md
-  - Core Concepts: core-concepts.md
-  - Services: services.md
-  - Modules: modules.md
-  - Configuration: configuration.md
-  - Lifecycle: lifecycle.md
-  - Dependency Injection: dependency-injection.md
-  - Web Integration: web-integration.md
+  - Core Package:
+      - Overview: core.md
+      - Services: services.md
+      - Modules: modules.md
+      - Configuration: configuration.md
+      - Lifecycle: lifecycle.md
+      - Dependency Injection: dependency-injection.md
+  - Web Package:
+      - Overview: web.md
+      - FastAPI Integration: fastapi.md
   - API Reference: api-reference.md
 
 extra:
