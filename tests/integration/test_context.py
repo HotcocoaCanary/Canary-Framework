@@ -11,6 +11,7 @@ from canary_framework.core.decorators.module import module
 from canary_framework.core.decorators.service import service
 
 
+@pytest.mark.integration
 class TestContextGetConfig:
     """Verify typed config access via get_config()."""
 
@@ -69,6 +70,7 @@ class TestContextGetConfig:
             ctx.get_config(object)
 
 
+@pytest.mark.integration
 class TestContextGetService:
     """Verify typed service resolution via get_service()."""
 

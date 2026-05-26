@@ -10,6 +10,7 @@ from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.service import service
 
 
+@pytest.mark.integration
 class TestServiceEntry:
     """Verify ServiceEntry dataclass construction and defaults."""
 
@@ -35,6 +36,7 @@ class TestServiceEntry:
             _ = entry.__dict__
 
 
+@pytest.mark.integration
 class TestRegistry:
     """Integration tests for the Registry container."""
 

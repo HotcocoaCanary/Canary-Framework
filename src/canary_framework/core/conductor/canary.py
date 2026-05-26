@@ -186,9 +186,7 @@ class Canary:
         if entry.config_cls is not None:
             entry.config_instance = entry.config_cls()
             raw_cfg = {
-                k: v
-                for k, v in vars(entry.config_instance).items()
-                if not k.startswith("_")
+                k: v for k, v in vars(entry.config_instance).items() if not k.startswith("_")
             }
             config_log.info(
                 "  %s config loaded: %s",
@@ -308,6 +306,10 @@ class Canary:
                 entry.config_cls.__name__ if entry.config_cls else "inherit",
                 len(entry.deps),
             )
+            # 递归收集依赖，使 deps 中的 @router 等也能被注册
+            # Recurse into deps so @router classes listed in deps are also collected
+            for dep_cls in entry.deps:
+                self._collect(dep_cls, parent_entry=parent_entry)
             return
 
         raise TypeError(f"'{cls.__name__}' is not decorated with @service or @module.")

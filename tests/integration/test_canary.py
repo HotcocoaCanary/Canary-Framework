@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from canary_framework.common.exceptions import CanaryFrameworkError, LifecycleHookError
 from canary_framework.core import (
     Canary,
     config,
@@ -17,6 +18,7 @@ from canary_framework.core.conductor.context import Context
 from canary_framework.core.container.registry import Registry
 
 
+@pytest.mark.integration
 class TestCanaryLifecycle:
     """End-to-end life-cycle tests."""
 
@@ -218,6 +220,7 @@ class TestCanaryLifecycle:
         assert isinstance(app.registry, Registry)
 
 
+@pytest.mark.integration
 class TestCanaryNoHooks:
     """Services without hooks should work without errors."""
 
@@ -246,6 +249,7 @@ class TestCanaryNoHooks:
         await app.stop()
 
 
+@pytest.mark.integration
 class TestCanaryCollections:
     """Verify that nested modules collect all services."""
 
@@ -276,6 +280,7 @@ class TestCanaryCollections:
         assert "leaf-b" in names
 
 
+@pytest.mark.integration
 class TestCanaryAsyncHooks:
     """Verify that async lifecycle hooks are properly awaited."""
 
@@ -346,3 +351,49 @@ class TestCanaryAsyncHooks:
         await app.start()
         await app.stop()
         assert log == ["init:async", "start:sync", "end:async"]
+
+
+@pytest.mark.integration
+class TestCanaryEdgeCases:
+    """Edge cases to achieve full branch coverage."""
+
+    async def test_hook_raises_produces_lifecycle_error(self) -> None:
+        @service("broken")
+        class Broken:
+            @on_init
+            def init(self, ctx: Context) -> None:
+                raise RuntimeError("crash")
+
+        app = Canary(Broken)
+        with pytest.raises(LifecycleHookError, match="crash"):
+            await app.init()
+
+    def test_collect_non_decorated_class_raises(self) -> None:
+        class NotDecorated:
+            pass
+
+        @service("dummy")
+        class Dummy:
+            pass
+
+        app = Canary(Dummy)
+        with pytest.raises(TypeError, match="not decorated"):
+            app._collect(NotDecorated)
+
+    async def test_collect_duplicate_entry_is_idempotent(self) -> None:
+        """Collecting the same class twice skips registration (line 273)."""
+
+        @service("dup")
+        class Duplicate:
+            pass
+
+        @module("dup-mod", services=[Duplicate, Duplicate])
+        class DupMod:
+            pass
+
+        app = Canary(DupMod)
+        await app.init()
+        assert len(app.registry) == 2  # DupMod + Duplicate (only one Duplicate)
+
+    def test_lifecycle_error_is_framework_error(self) -> None:
+        assert issubclass(LifecycleHookError, CanaryFrameworkError)

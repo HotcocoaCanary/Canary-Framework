@@ -10,6 +10,7 @@ from canary_framework.core.container.registry import Registry
 from canary_framework.core.decorators.service import service
 
 
+@pytest.mark.integration
 class TestTopologicalSort:
     """Verify Kahn-based topological sorting."""
 

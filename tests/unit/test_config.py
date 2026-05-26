@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from canary_framework.core.decorators.config import config
 
 
+@pytest.mark.unit
 class TestConfigDecorator:
     """Verify that @config creates valid BaseSettings subclasses."""
 
