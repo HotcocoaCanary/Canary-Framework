@@ -61,7 +61,7 @@ testpaths = ["tests"]
 markers = [
     "unit: Unit tests — isolated, no framework engine needed.",
     "integration: Integration tests — multiple components working together.",
-    "function: Functional tests — end-to-end user scenarios.",
+    "functional: Functional tests — end-to-end user scenarios.",
 ]
 
 [tool.ruff]

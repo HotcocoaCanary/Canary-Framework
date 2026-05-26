@@ -20,12 +20,12 @@ class UserRouter:
         return self.user_service.list_users()
 
     @get("/{user_id}")
-    async def get_user(self, user_id: str) -> dict[str, str | None]:
+    async def get_user(self, user_id: str) -> dict[str, object]:
         """GET /api/users/{user_id} — get a single user."""
         user = self.user_service.get_user(user_id)
         if user is None:
             return {"detail": "not found"}
-        return user
+        return user  # type: ignore[return-value]
 
     @post("/")
     async def create_user(self, body: dict[str, Any]) -> dict[str, str]:
@@ -36,6 +36,6 @@ class UserRouter:
         )
 
     @delete("/{user_id}")
-    async def delete_user(self, user_id: str) -> dict[str, str]:
+    async def delete_user(self, user_id: str) -> dict[str, object]:
         """DELETE /api/users/{user_id} — delete a user."""
         return {"id": user_id, "deleted": True}

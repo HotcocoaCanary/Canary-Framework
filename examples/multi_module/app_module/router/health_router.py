@@ -10,6 +10,7 @@ from canary_framework.web.fastapi import get, router
 @router(prefix="/api")
 class HealthRouter:
     """Root-level health and info endpoints (prefix: /api)."""
+
     @on_init
     def init(self, ctx: Context) -> None:
         cfg = ctx.get_config(object)

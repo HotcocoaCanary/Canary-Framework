@@ -148,9 +148,7 @@ class TestTraceClassDecorator:
 class TestTraceMethodDecorator:
     """Verify method-level @trace only wraps the decorated method."""
 
-    def test_only_decorated_method_is_traced(
-        self, trace_caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_only_decorated_method_is_traced(self, trace_caplog: pytest.LogCaptureFixture) -> None:
         class Svc:
             @trace
             def tracked(self, x: int) -> str:
@@ -201,7 +199,7 @@ class TestTraceMethodDecorator:
     def test_keyword_args_explicitly_passed(self, trace_caplog: pytest.LogCaptureFixture) -> None:
         class Svc:
             @trace
-            def configure(self, **kwargs: object) -> None:  # type: ignore[no-untyped-def]
+            def configure(self, **kwargs: object) -> None:
                 pass
 
         svc = Svc()
@@ -265,7 +263,9 @@ class TestTraceEdgeCases:
         svc = Svc()
         assert svc.run() == "ok"
 
-    def test_trace_logs_include_call_and_return(self, trace_caplog: pytest.LogCaptureFixture) -> None:
+    def test_trace_logs_include_call_and_return(
+        self, trace_caplog: pytest.LogCaptureFixture
+    ) -> None:
         @trace
         class Svc:
             def calc(self, n: int) -> int:
