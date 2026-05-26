@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "canary-framework"
-version = "0.2.0"
+version = "0.2.1"
 description = "Canary Framework — lightweight decorator-driven Python service framework"
 requires-python = ">=3.12"
 dependencies = [
