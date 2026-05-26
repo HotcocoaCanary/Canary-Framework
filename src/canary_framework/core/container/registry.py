@@ -19,9 +19,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
 
-from canary_framework.common._types import ServiceEntry
+from canary_framework.common._types import ModuleMeta, ServiceEntry, ServiceMeta
 from canary_framework.common.exceptions import ServiceNotFoundError
 
 
@@ -47,7 +46,7 @@ class Registry:
         *,
         is_module: bool = False,
         sub_services: list[type] | None = None,
-        meta: dict[str, Any] | None = None,
+        meta: ServiceMeta | None = None,
     ) -> None:
         """Register a ``@service`` or ``@module`` class.
 
@@ -60,55 +59,39 @@ class Registry:
             cls: 被 ``@service`` 或 ``@module`` 装饰的类。
             is_module: 是否为模块。
             sub_services: 子服务列表（仅模块）。
-            meta: 预解析的元数据字典，为 ``None`` 时从类的装饰器属性读取。
-
-        Raises:
-            ValueError: 如果名称已被其他类注册。
+            meta: 预解析的元数据实例，为 ``None`` 时从类的装饰器属性读取。
         """
         if cls in self._by_class:
-            return  # 幂等
+            return
 
         # 解析元数据：未提供时从类的装饰器属性读取
-        # Resolve metadata: read from decorator attrs if not provided
         if meta is None:
-            if is_module:
-                from canary_framework.core.decorators.module import (
-                    get_module_meta,
-                )
+            from canary_framework.core.decorators.service import get_service_meta
 
-                raw: object = get_module_meta(cls)
-            else:
-                from canary_framework.core.decorators.service import (
-                    get_service_meta,
-                )
+            meta = get_service_meta(cls)
 
-                raw = get_service_meta(cls)
-            assert isinstance(raw, dict)
-            meta = raw
-
-        name: str = meta["name"]
+        name: str = meta.name
         if name in self._by_name:
             raise ValueError(
                 f"Service/Module '{name}' is already registered. "
                 f"Each @service and @module must have a globally unique name."
             )
 
-        # cls() 无参构造——框架默认不向 __init__ 传参
-        # cls() called with no args — framework convention
         instance = cls()
 
         entry = ServiceEntry(
             cls=cls,
             instance=instance,
             name=name,
-            deps=list(meta.get("deps", ())),
-            config_cls=meta.get("config_cls"),
+            deps=list(meta.deps),
+            config_cls=meta.config_cls,
             is_module=is_module,
-            sub_services=list(meta.get("services", ())) if is_module else [],
+            sub_services=list(
+                meta.services if isinstance(meta, ModuleMeta) else (sub_services or ())
+            ),
         )
 
         # 将 deps 中的类引用解析为字符串名称，供拓扑排序使用
-        # Resolve class references in deps to string names for the sorter
         entry.dep_names = [
             d if isinstance(d, str) else getattr(d, "__cf_name__", d.__name__) for d in entry.deps
         ]

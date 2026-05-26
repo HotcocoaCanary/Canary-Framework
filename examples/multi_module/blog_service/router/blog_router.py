@@ -1,6 +1,6 @@
 """BlogRouter — HTTP routes for blog operations.
 
-Demonstrates ``@router(prefix=...)`` with ``@get``, ``@post``, ``@put``, ``@patch``.
+Routes are auto-discovered — no ``@web`` needed.
 """
 
 from __future__ import annotations
@@ -8,26 +8,24 @@ from __future__ import annotations
 from typing import Any
 
 from blog_service.service.blog import BlogService
-from canary_framework import Context
 from canary_framework.web.fastapi import get, patch, post, put, router
 
 
-@router(prefix="/api/blog")
+@router(prefix="/api/blog", deps=[BlogService])
 class BlogRouter:
     """Route handler for blog endpoints (prefix: /api/blog)."""
 
-    def __init__(self, ctx: Context) -> None:
-        self._svc = ctx.resolve(BlogService)
+    blog_service: BlogService
 
     @get("/")
     async def list_posts(self) -> list[dict[str, object]]:
         """GET /api/blog/ — list all blog posts."""
-        return self._svc.list_posts()
+        return self.blog_service.list_posts()
 
     @get("/{post_id}")
     async def get_post(self, post_id: str) -> dict[str, str | object] | None:
         """GET /api/blog/{post_id} — get a single post."""
-        post = self._svc.get_post(post_id)
+        post = self.blog_service.get_post(post_id)
         if post is None:
             return {"detail": "not found"}
         return post
@@ -35,7 +33,7 @@ class BlogRouter:
     @post("/")
     async def create_post(self, body: dict[str, Any]) -> dict[str, str]:
         """POST /api/blog/ — create a new post."""
-        pid = self._svc.create_post(
+        pid = self.blog_service.create_post(
             title=str(body.get("title", "untitled")),
             content=str(body.get("content", "")),
             author=str(body.get("author", "anonymous")),
@@ -45,7 +43,7 @@ class BlogRouter:
     @put("/{post_id}")
     async def update_post(self, post_id: str, body: dict[str, Any]) -> dict[str, str]:
         """PUT /api/blog/{post_id} — update an existing post."""
-        post = self._svc.get_post(post_id)
+        post = self.blog_service.get_post(post_id)
         if post is None:
             return {"detail": "not found"}
         post["title"] = body.get("title", post["title"])
@@ -55,7 +53,7 @@ class BlogRouter:
     @patch("/{post_id}")
     async def patch_post(self, post_id: str, body: dict[str, Any]) -> dict[str, str]:
         """PATCH /api/blog/{post_id} — partially update a post."""
-        post = self._svc.get_post(post_id)
+        post = self.blog_service.get_post(post_id)
         if post is None:
             return {"detail": "not found"}
         if "title" in body:

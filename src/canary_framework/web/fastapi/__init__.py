@@ -1,7 +1,7 @@
 """Web FastAPI module — HTTP routing and server integration.
 
 Public API:
-    - Decorators:  :func:`web`, :func:`router`, :func:`get`, :func:`post`,
+    - Decorators:  :func:`router`, :func:`get`, :func:`post`,
       :func:`put`, :func:`delete`, :func:`patch`
     - Engine:      :class:`WebCanary`
 
@@ -17,7 +17,6 @@ from canary_framework.web.fastapi.decorators.router import (
     put,
     router,
 )
-from canary_framework.web.fastapi.decorators.web import web
 
 __all__ = [
     "WebCanary",
@@ -27,5 +26,4 @@ __all__ = [
     "post",
     "put",
     "router",
-    "web",
 ]

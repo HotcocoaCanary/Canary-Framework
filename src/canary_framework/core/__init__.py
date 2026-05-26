@@ -2,7 +2,7 @@
 
 Public API:
     - Decorators:  :func:`config`, :func:`service`, :func:`module`,
-      :func:`on_init`, :func:`on_start`, :func:`on_end`
+      :func:`trace`, :func:`on_init`, :func:`on_start`, :func:`on_end`
     - Conductor:   :class:`Canary`, :class:`Context`
 """
 
@@ -15,6 +15,7 @@ from canary_framework.core.decorators.lifecycle import (
 )
 from canary_framework.core.decorators.module import module
 from canary_framework.core.decorators.service import service
+from canary_framework.core.decorators.trace import trace
 
 __all__ = [
     "Canary",
@@ -25,4 +26,5 @@ __all__ = [
     "on_init",
     "on_start",
     "service",
+    "trace",
 ]

@@ -3,9 +3,8 @@
 Usage:
     uv run python run_standalone_web.py
 
-Demonstrates:
-    A single ``@service`` decorated with ``@web(routers=[...])`` can be
-    passed directly to ``WebCanary()`` — no ``@module`` wrapper needed.
+A single ``@service`` with a ``@router``-decorated class in ``deps=`` can
+be passed directly to ``WebCanary()`` — no ``@module`` wrapper needed.
 
 This is the simplest possible web entry point in the Canary Framework.
 

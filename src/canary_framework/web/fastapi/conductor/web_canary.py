@@ -40,21 +40,45 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 from canary_framework.common._logging import get_logger
+from canary_framework.common._types import RouterMeta
 from canary_framework.core.conductor.canary import Canary
 from canary_framework.core.container.registry import Registry
-from canary_framework.core.decorators.module import is_cf_module
-from canary_framework.core.decorators.service import is_cf_service
+from canary_framework.core.decorators.service import get_service_meta
 from canary_framework.web.fastapi.decorators.router import (
     get_route_info,
-    get_router_prefix,
     is_route_method,
 )
-from canary_framework.web.fastapi.decorators.web import get_web_routers, is_web
 
 _UVICORN_PREFIX = "uvicorn_"
 _FASTAPI_PREFIX = "fastapi_"
 
 _log = get_logger("web")
+
+
+# uvicorn 访问日志配置 — 使用 CF 风格格式，零中间件开销
+_CF_ACCESS_LOG_CONFIG: dict[str, Any] = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "cf_access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": '[CF] [%(levelname)-5s] [cf.web] %(client_addr)s - "%(request_line)s" %(status_code)s',
+        },
+    },
+    "handlers": {
+        "cf_access": {
+            "class": "logging.StreamHandler",
+            "formatter": "cf_access",
+        },
+    },
+    "loggers": {
+        "uvicorn.access": {
+            "handlers": ["cf_access"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
 
 
 class WebCanary(Canary):
@@ -70,7 +94,6 @@ class WebCanary(Canary):
             uvicorn_port: int = 8000
             fastapi_title: str = "My API"
 
-        @web()
         @module(name="AppModule", config=AppConfig, services=[...])
         class AppModule:
             ...
@@ -85,7 +108,7 @@ class WebCanary(Canary):
 
         1. 从根模块 config 按前缀拆分参数
         2. 构建 FastAPI lifespan 绑定框架的 on_start / on_end
-        3. 注册所有 @web 路由
+        3. 注册所有 @router 路由（使用 APIRouter + include_router）
         4. 启动 uvicorn.Server.serve()（阻塞直到收到停止信号）
 
         Raises:
@@ -108,21 +131,18 @@ class WebCanary(Canary):
         root_entry = self.registry.get_by_class(self._target)
         root_config = root_entry.config_instance
 
-        # 按前缀拆分参数
-        # Split config fields by prefix
         uvicorn_kwargs: dict[str, Any] = {}
         fastapi_kwargs: dict[str, Any] = {}
 
         if root_config is not None:
             for key, value in vars(root_config).items():
                 if key.startswith("_"):
-                    continue  # 跳过私有字段
+                    continue
                 if key.startswith(_UVICORN_PREFIX):
                     uvicorn_kwargs[key[len(_UVICORN_PREFIX) :]] = value
                 elif key.startswith(_FASTAPI_PREFIX):
                     fastapi_kwargs[key[len(_FASTAPI_PREFIX) :]] = value
 
-        # 安全默认值：绑定 localhost
         host: str = uvicorn_kwargs.pop("host", "127.0.0.1")
         port: int = uvicorn_kwargs.pop("port", 8000)
 
@@ -139,7 +159,14 @@ class WebCanary(Canary):
 
         fastapi_app = FastAPI(lifespan=lifespan, **fastapi_kwargs)
 
-        config = uvicorn.Config(fastapi_app, host=host, port=port, **uvicorn_kwargs)
+        config = uvicorn.Config(
+            fastapi_app,
+            host=host,
+            port=port,
+            access_log=True,
+            log_config=_CF_ACCESS_LOG_CONFIG,
+            **uvicorn_kwargs,
+        )
         server = uvicorn.Server(config)
         await server.serve()
 
@@ -150,76 +177,31 @@ class WebCanary(Canary):
 
 
 def _register_routes(app: FastAPI, registry: Registry) -> None:
-    """Scan all ``@web``-marked entries and register their HTTP routes.
+    """Scan all ``@router``-decorated entries and register their HTTP routes.
 
-    扫描所有 @web 标记的服务/模块，将其路由注册到 FastAPI。
-
-    三种注册场景 (Three scenarios):
-        1. 外部路由类: ``@web(routers=[UserRouter])`` → 注册每个 Router 的方法
-        2. 自身方法: 无 routers 但类自身有 ``@get``/``@post`` 方法
-        3. 混合: 既有 routers 又是 @module → 同时注册
+    遍历 registry 中所有 entry，筛选 ``RouterMeta``，为每个 router 创建
+    FastAPI 原生 ``APIRouter``，通过 ``include_router`` 注册。
+    prefix 拼接和 tags 合并由 FastAPI 处理，无需手动操作。
     """
+    from fastapi import APIRouter
+
     for entry in registry.all_entries():
-        cls = entry.cls
-        if not is_web(cls):
+        meta = get_service_meta(entry.cls)
+        if not isinstance(meta, RouterMeta):
             continue
 
-        routers = get_web_routers(cls)
+        api_router = APIRouter(prefix=meta.prefix, tags=meta.tags)  # type: ignore[arg-type]
 
-        # 1. 外部路由类
-        for router_cls in routers:
-            prefix = get_router_prefix(router_cls)
-            ctx = entry.context
-            if ctx is None:
-                _log.warning(
-                    "Context is None for '%s' — skipping router '%s'",
-                    entry.name,
-                    router_cls.__name__,
-                )
+        for _, method in inspect.getmembers(entry.cls, inspect.isfunction):
+            if not is_route_method(method):
                 continue
-            router_instance = router_cls(ctx)
-            _register_instance_routes(app, router_instance, prefix)
+            http_method, path, kwargs = get_route_info(method)
+            bound = getattr(entry.instance, method.__name__)
+            api_router.add_api_route(
+                path=path,
+                endpoint=bound,
+                methods=[http_method],
+                **kwargs,
+            )
 
-        owns_routers = bool(routers)
-        is_container = is_cf_module(cls) or is_cf_service(cls)
-
-        # 2. 自身方法（无外部 routers）
-        if not owns_routers and is_container:
-            _register_instance_routes(app, entry.instance, "")
-
-        # 3. 混合：有 routers 的模块同时注册自身方法
-        if owns_routers and is_cf_module(cls):
-            _register_instance_routes(app, entry.instance, "")
-
-
-def _register_instance_routes(
-    app: FastAPI,
-    instance: object,
-    prefix: str,
-) -> None:
-    """Scan *instance* for ``@get`` / ``@post`` / … methods and register them.
-
-    扫描实例类的 @get/@post/@put/@delete/@patch 方法，注册到 FastAPI。
-
-    Args:
-        app: FastAPI 应用实例。
-        instance: 包含路由方法的类实例。
-        prefix: URL 前缀，拼接到每个方法的路径前。
-    """
-    for _, method in inspect.getmembers(instance.__class__, inspect.isfunction):
-        if not is_route_method(method):
-            continue
-
-        http_method, path, kwargs = get_route_info(method)
-        # 拼接 prefix + path，去除末尾多余斜杠
-        full_path = prefix.rstrip("/") + "/" + path.lstrip("/")
-        if full_path.endswith("/") and full_path != "/":
-            full_path = full_path.rstrip("/")
-
-        bound = getattr(instance, method.__name__)
-        app.add_api_route(
-            path=full_path,
-            endpoint=bound,
-            methods=[http_method],
-            **kwargs,
-        )
+        app.include_router(api_router)

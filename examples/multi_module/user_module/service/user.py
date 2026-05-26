@@ -11,6 +11,8 @@ from user_module.service.auth import AuthService
 class UserService:
     """User management service — depends on AuthService for token handling."""
 
+    auth_service: AuthService
+
     def __init__(self) -> None:
         self._users: dict[str, dict[str, str]] = {}
 
@@ -21,9 +23,7 @@ class UserService:
             "1": {"name": "Alice", "role": "admin"},
             "2": {"name": "Bob", "role": cfg.default_role},
         }
-        # ctx.resolve() to find sibling AuthService
-        auth_svc = ctx.resolve(AuthService)
-        auth_svc.issue("alice")
+        self.auth_service.issue("alice")
 
     def list_users(self) -> list[dict[str, str]]:
         return [{"id": uid, **info} for uid, info in self._users.items()]  # type: ignore[misc]

@@ -47,7 +47,7 @@ In addition to dependency injection, you can manually resolve services via Conte
 ```python
 @on_init
 def init(self, ctx: Context) -> None:
-    db = ctx.resolve(DBService)       # look up DBService via parent module chain
+    db = ctx.get_service(DBService)   # type-safe service lookup
     db.execute("SELECT 1")
 ```
 

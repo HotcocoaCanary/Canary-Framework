@@ -14,12 +14,10 @@
        Config inheritance: child services inherit their parent module's
        config class when they don't declare their own.
 
-    模块本身也是服务（``is_cf_service(module_cls)`` 在 verify 阶段通过），
-    因此模块可以嵌套，也支持生命周期钩子。
-
-    装饰顺序 (Decorator stacking order):
-        ``@web()`` 必须放在 ``@module`` 下面（更接近类定义），因为 Python
-        装饰器从下往上执行：最底层的装饰器最先包装类。
+    ``@module`` 内部调用 ``@service``，因此模块也是合法的框架服务
+    （``is_cf_service(module_cls)`` 返回 ``True``）。元数据通过
+    :class:`ModuleMeta`（继承 :class:`ServiceMeta`）存储在同一
+    ``__cf_service_meta__`` 属性上。
 """
 
 from __future__ import annotations
@@ -27,17 +25,19 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from canary_framework.common._types import ModuleMeta
-from canary_framework.core.decorators.service import is_cf_service
+from canary_framework.core.decorators.service import (
+    _SERVICE_META,
+    is_cf_service,
+    service,
+)
 
 # ---------------------------------------------------------------------------
 # 标记属性 (Marker attributes)
 # ---------------------------------------------------------------------------
 
 _MODULE_ATTR = "_cf_module__"
-"""Set to ``True`` on classes decorated with ``@module``."""
-
-_MODULE_META = "_cf_module_meta__"
-"""Stores a :class:`ModuleMeta` dict on decorated classes."""
+"""Set to ``True`` on classes decorated with ``@module``.
+用于 ``is_cf_module()`` 快速判断，与 ``__cf_service__`` 正交。"""
 
 
 # ---------------------------------------------------------------------------
@@ -49,11 +49,13 @@ def module(
     name: str,
     *,
     config: type | None = None,
+    deps: list[type] | None = None,
     services: list[type] | None = None,
 ) -> Callable[[type], type]:
     """Declare a class as a Canary Framework module.
 
     将类声明为框架模块（服务的组合容器）。
+    内部调用 ``@service`` 设置基础标记，然后覆盖元数据为 :class:`ModuleMeta`。
 
     Args:
         name: 全局唯一模块名称。
@@ -61,6 +63,9 @@ def module(
         config: 可选的 ``@config`` 装饰的配置类。子服务未声明 ``config``
                 时自动继承此配置。
                 Optional ``@config``-decorated class shared by child services.
+        deps: 依赖的 ``@service`` / ``@module`` 类列表。模块本身也可以
+              声明依赖。
+              Modules can declare their own dependencies.
         services: 直接子节点（``@service`` 或 ``@module`` 类）列表。
                   List of child ``@service`` / ``@module`` classes.
 
@@ -78,11 +83,10 @@ def module(
             pass
     """
     _config = config
+    _deps = list(deps or ())
     _services = list(services or ())
 
     def decorator(cls: type) -> type:
-        # 装饰时校验：确保所有子节点都是合法的框架类
-        # Validate at decoration time: all children must be framework classes
         for svc_cls in _services:
             if not is_cf_service(svc_cls) and not is_cf_module(svc_cls):
                 raise TypeError(
@@ -90,14 +94,18 @@ def module(
                     f"decorated with @service or @module."
                 )
 
-        meta: ModuleMeta = {
-            "name": name,
-            "config_cls": _config,
-            "services": _services,
-        }
+        # 1. 应用 @service 基础标记
+        # Apply @service foundation — sets __cf_service__, __cf_service_meta__, __cf_name__
+        service(name=name, config=_config, deps=_deps)(cls)
+
+        # 2. 覆盖元数据为 ModuleMeta（继承 ServiceMeta 全部字段 + services）
+        # Upgrade metadata to ModuleMeta — carries all ServiceMeta fields plus services
+        meta = ModuleMeta(name=name, deps=_deps, config_cls=_config, services=_services)
+        setattr(cls, _SERVICE_META, meta)
+
+        # 3. 模块标记
+        # Module marker — orthogonal to __cf_service__, used by is_cf_module()
         setattr(cls, _MODULE_ATTR, True)
-        setattr(cls, _MODULE_META, meta)
-        cls.__cf_name__ = name  # type: ignore[attr-defined]
         return cls
 
     return decorator
@@ -111,16 +119,17 @@ def module(
 def is_cf_module(cls: type) -> bool:
     """Return ``True`` if *cls* was decorated with ``@module``.
 
-    判断一个类是否被 ``@module`` 装饰过。"""
+    判断一个类是否被 ``@module`` 装饰过。
+    注意：模块也满足 ``is_cf_service()``，因为内部调用了 ``@service``。"""
     return bool(getattr(cls, _MODULE_ATTR, False))
 
 
 def get_module_meta(cls: type) -> ModuleMeta:
-    """Return the :class:`ModuleMeta` dictionary attached by ``@module``.
+    """Return the :class:`ModuleMeta` instance attached by ``@module``.
 
-    获取 ``@module`` 装饰器设置的元数据字典。
-    如果类未被装饰，返回空的 :class:`ModuleMeta`。"""
-    raw: object = getattr(cls, _MODULE_META, {})
-    if isinstance(raw, dict):
-        return raw  # type: ignore[return-value]
-    return {}
+    获取 ``@module`` 装饰器设置的元数据实例。
+    如果类未被 ``@module`` 装饰，返回默认的空 :class:`ModuleMeta`。"""
+    raw: object = getattr(cls, _SERVICE_META, None)
+    if isinstance(raw, ModuleMeta):
+        return raw
+    return ModuleMeta(name="")
