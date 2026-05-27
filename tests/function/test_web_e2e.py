@@ -11,6 +11,7 @@ Tests:
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 
 import pytest
 
@@ -59,10 +60,8 @@ class TestWebCanaryE2EBasic:
                 assert resp.json() == {"status": "ok"}
         finally:
             server_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await server_task
-            except asyncio.CancelledError:
-                pass
             await asyncio.sleep(0.1)
 
     async def test_multiple_routes(self) -> None:
@@ -120,10 +119,8 @@ class TestWebCanaryE2EBasic:
                 assert r3.json() == {"item": "42"}
         finally:
             server_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await server_task
-            except asyncio.CancelledError:
-                pass
             await asyncio.sleep(0.1)
 
     async def test_404_on_unknown_route(self) -> None:
@@ -162,10 +159,8 @@ class TestWebCanaryE2EBasic:
                 assert resp.status_code == 404
         finally:
             server_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await server_task
-            except asyncio.CancelledError:
-                pass
             await asyncio.sleep(0.1)
 
 
@@ -230,10 +225,8 @@ class TestWebCanaryLifecycle:
                 assert resp.json() == {"hooks": "['config', 'init', 'start']"}
         finally:
             server_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await server_task
-            except asyncio.CancelledError:
-                pass
             await asyncio.sleep(0.1)
 
     async def test_config_injection_in_web_service(self) -> None:
@@ -288,10 +281,8 @@ class TestWebCanaryLifecycle:
                 assert resp.json() == {"conn": "postgresql://test/db"}
         finally:
             server_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await server_task
-            except asyncio.CancelledError:
-                pass
             await asyncio.sleep(0.1)
 
 
@@ -336,8 +327,6 @@ class TestWebCanaryPrefixValidation:
                 assert resp.json() == {"msg": "ok"}
         finally:
             server_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await server_task
-            except asyncio.CancelledError:
-                pass
             await asyncio.sleep(0.1)

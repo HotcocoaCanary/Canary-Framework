@@ -201,7 +201,6 @@ class TestChainTopology:
         app = Canary(root)
         t0 = time.monotonic()
         await app.config()
-        t_config = time.monotonic() - t0
         await app.init()
         t_total = time.monotonic() - t0
 
@@ -257,7 +256,6 @@ class TestWideTree:
         app = Canary(root)
         t0 = time.monotonic()
         await app.config()
-        t_config = time.monotonic() - t0
         await app.init()
         t_total = time.monotonic() - t0
 
@@ -270,7 +268,6 @@ class TestWideTree:
         app = Canary(root)
         t0 = time.monotonic()
         await app.config()
-        t_config = time.monotonic() - t0
         await app.init()
         t_total = time.monotonic() - t0
 
@@ -287,7 +284,6 @@ class TestDeepModules:
         app = Canary(root)
         t0 = time.monotonic()
         await app.config()
-        t_config = time.monotonic() - t0
         await app.init()
         t_total = time.monotonic() - t0
 
@@ -343,13 +339,13 @@ class TestConfigAtScale:
         from pydantic import BaseModel
 
         svcs: list[type] = []
-        AppConfig = type("AppConfig", (BaseModel,), {})
+        app_config = type("AppConfig", (BaseModel,), {})
 
         for i in range(100):
             svc_cls: type
             cfg_cls: type
             svc_cls, cfg_cls = _make_service_with_value(i)
-            setattr(AppConfig, f"svc-{i}", cfg_cls(value=i))
+            setattr(app_config, f"svc-{i}", cfg_cls(value=i))
             svcs.append(svc_cls)
 
         @module("Root", services=svcs)
@@ -358,7 +354,7 @@ class TestConfigAtScale:
 
         Root.__name__ = "Root"
         app = Canary(Root)
-        await app.config(config=AppConfig())
+        await app.config(config=app_config())
         # All 100 on_config hooks passed assertions — no LifecycleHookError raised
 
 

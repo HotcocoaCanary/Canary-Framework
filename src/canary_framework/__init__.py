@@ -10,7 +10,7 @@ Core exports:
 
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 from canary_framework.common.enums import LifecycleHook
 from canary_framework.common.exceptions import (
