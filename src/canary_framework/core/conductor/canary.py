@@ -85,15 +85,15 @@ class Canary:
         """Collect, validate, wire, and call ``on_config`` on every entry.
 
         Args:
-            config: A pydantic ``BaseModel`` whose field names match service/module names.
-                    Each field is either a nested ``BaseModel`` (injected as attributes)
-                    or a raw dict.
+            config: Any config instance (e.g. a pydantic ``BaseModel`` or plain class).
+                    This instance is propagated as ``self.config`` to **every**
+                    service and module in the tree.
 
         Phases:
             0. ``_collect``       — recursive discovery
             1. ``_validate``      — dependency integrity check
             2. ``topological_sort`` — Kahn BFS
-            3. ``_wire_entry``    — DI + config injection + sub-service injection (per entry)
+            3. ``_wire_entry``    — DI + config propagation + sub-service injection (per entry)
             4. ``on_config``      — user hook (topological order)
         """
         init_logging()
@@ -191,34 +191,44 @@ class Canary:
     # ==================================================================
 
     def _wire_entry(self, entry: ServiceEntry) -> None:
-        """Inject deps, load config from model, inject sub-services.
+        """Inject deps, propagate config, inject sub-services.
 
         Pure framework wiring — no user hooks.
-        Config is looked up by ``entry.name`` in the config model.
-        Nested ``BaseModel`` fields are injected as individual attributes.
+        Config is propagated as ``self.config`` to every service in the tree.
+        Modules with a per-module ``config_cls`` get their own config instance;
+        descendants inherit the nearest ancestor's config.
         """
         engine = get_logger("engine")
         engine.info("  wire %s", entry.name)
 
         inject_deps(entry.instance, entry, self._registry)
 
-        if self._config is not None:
-            service_config = getattr(self._config, entry.name, None)
-            if service_config is not None:
-                from pydantic import BaseModel
+        if entry.config_cls is not None:
+            entry._config_instance = entry.config_cls()
 
-                if isinstance(service_config, BaseModel):
-                    for key, value in service_config.model_dump().items():
-                        setattr(entry.instance, key, value)
-                elif isinstance(service_config, dict):
-                    for key, value in service_config.items():
-                        setattr(entry.instance, key, value)
+        if self._config is not None:
+            module_config = self._resolve_config(entry)
+            if module_config is not None:
+                entry.instance.config = module_config  # type: ignore[attr-defined]
 
         if entry.sub_services:
             for sub_cls in entry.sub_services:
                 sub_entry = self._registry.get_by_class(sub_cls)
                 attr_name = to_snake(sub_cls.__name__)
                 setattr(entry.instance, attr_name, sub_entry.instance)
+
+    def _resolve_config(self, entry: ServiceEntry) -> Any:
+        """Walk up the parent_entry chain to find the nearest config.
+        Starts from *entry* itself (which may have just been set by
+        ``_wire_entry`` for modules with ``config_cls``), then walks
+        up ancestors.  Falls back to the root config ``self._config``.
+        """
+        current: ServiceEntry | None = entry
+        while current is not None:
+            if current._config_instance is not None:
+                return current._config_instance
+            current = current.parent_entry
+        return self._config
 
     # ==================================================================
     # 钩子调度 (Hook dispatch)

@@ -39,19 +39,23 @@ Instantiation → Dependency Injection → Config Loading → on_init()
 
 All injected dependencies **and** config are available in `on_init`. The hook receives no arguments — everything is already on `self`.
 
-## Config as Dependency Injection
+## Config Access
 
-Config classes are injected the same way — using `to_snake` of the config class name:
+The config instance passed to `app.config(config=...)` is available as `self.config` on every service and module in the tree:
 
 ```python
-@service(name="db", config=AppConfig)
-class DBService:
-    app_config: AppConfig          # injected before on_init
+from canary_framework import config
 
+@config
+class AppConfig:
+    dsn: str = "postgres://localhost"
+    pool_size: int = 10
+
+@service(name="db")
+class DBService:
     @on_init
     def init(self) -> None:
-        self.pool = connect(self.app_config.dsn)
-```
+        self.pool = connect(self.config.dsn)
 
 ## Cross-Module Dependencies
 

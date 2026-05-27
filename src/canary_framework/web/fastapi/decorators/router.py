@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -79,11 +80,20 @@ def router(
     def decorator(cls: type) -> type:
         svc_name = _name or to_snake(cls.__name__)
         service(name=svc_name, deps=_deps)(cls)
+
+        # Scan methods already decorated with @get / @post / … at definition time.
+        # Analogous to how @module stores services=[] upfront in ModuleMeta.services.
+        _route_methods: list[Callable[..., Any]] = []
+        for _, method in inspect.getmembers(cls, inspect.isfunction):
+            if is_route_method(method):
+                _route_methods.append(method)
+
         meta = RouterMeta(
             name=svc_name,
             deps=_deps,
             prefix=_prefix,
             tags=_tags,
+            routes=_route_methods,
         )
         setattr(cls, _SERVICE_META, meta)
         setattr(cls, _RT_ATTR, True)

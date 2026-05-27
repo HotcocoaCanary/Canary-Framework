@@ -27,21 +27,23 @@ app.config()→ wiring + on_config() → app.init()→ 依赖注入 → on_init(
 
 在 `on_config` 中可访问 config 属性，在 `on_init` 中可访问所有注入的依赖。
 
-## Config 属性注入
+## Config 属性访问
 
-Config 通过字段名匹配注入为实例属性，不再使用 `@service(config=...)` 参数：
+通过 `self.config` 访问传入 `app.config(config=...)` 的配置实例，树中所有服务和模块均可用：
 
 ```python
-from pydantic import BaseModel
+from canary_framework import config
 
-class AppConfig(BaseModel):
-    db: dict = {"url": "localhost"}
+@config
+class AppConfig:
+    url: str = "localhost"
+    pool_size: int = 10
 
 @service(name="db")
 class DBService:
     @on_config
     def setup(self) -> None:
-        self.pool = connect(self.url)  # config 字段直接可用
+        self.pool = connect(self.config.url)
 ```
 
 ## 启动顺序

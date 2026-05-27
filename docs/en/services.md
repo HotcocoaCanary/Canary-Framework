@@ -31,7 +31,7 @@ class UserService:
 
     @on_config
     def setup(self) -> None:
-        self.pool = create_pool(self.dsn)  # config fields injected by wiring
+        self.pool = create_pool(self.config.dsn)  # config accessible via self.config
 
     @on_end
     async def stop(self) -> None:
@@ -53,7 +53,7 @@ Dependencies are injected as instance attributes using the **snake_case** versio
 | `CacheService` | `self.cache_service` |
 | `DataSetAdminService` | `self.data_set_admin_service` |
 
-Config fields are injected directly by wiring (via `app.config(config=Model())`), where the config model's field names match service names. See [Configuration](./configuration.md).
+The config instance passed to `app.config(config=...)` is available as `self.config` on every service and module in the tree. See [Configuration](./configuration.md).
 
 ## Lifecycle Hooks
 

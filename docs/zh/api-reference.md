@@ -114,7 +114,7 @@ class ServiceEntry:
 |-----------|------|
 | `.registry` | 全局 `Registry` 注册中心 |
 | `.startup_order` | 拓扑排序后的启动顺序列表 |
-| `await .config(config=Model())` | wiring + on_config 钩子 |
+| `await .config(config=Model())` | wiring + config 传播 + on_config 钩子 |
 | `await .init()` | on_init 钩子 |
 | `await .start()` | 拓扑序调用 on_start |
 | `await .stop()` | 逆序调用 on_end |
@@ -123,7 +123,7 @@ class ServiceEntry:
 
 继承自 Canary，仅重写 `start()` 接入 FastAPI + Uvicorn。
 
-按前缀从根模块配置分发参数：`uvicorn_*` → uvicorn，`fastapi_*` → FastAPI()，无前缀为业务配置。
+按前缀从根模块配置分发参数：`uvicorn_*` → uvicorn，`fastapi_*` → FastAPI()，无前缀为业务配置。服务通过 `self.config` 访问配置。
 
 ```python
 from pydantic import BaseModel

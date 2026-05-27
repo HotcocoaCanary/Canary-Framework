@@ -14,7 +14,7 @@
        Separation of concerns: core handles lifecycle, web handles HTTP.
 
 配置前缀约定 (Config prefix convention):
-    根模块的 ``@config`` 类通过前缀区分参数归属:
+    根模块的 config 实例通过 ``self.config`` 访问，部分字段按前缀路由：
 
         =================  ===========================  =========================
         Prefix             Consumer                     Example field
@@ -31,7 +31,6 @@
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -40,14 +39,8 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
 from canary_framework.common._logging import get_logger
-from canary_framework.common._types import RouterMeta
 from canary_framework.core.conductor.canary import Canary
-from canary_framework.core.container.registry import Registry
-from canary_framework.core.decorators.service import get_service_meta
-from canary_framework.web.fastapi.decorators.router import (
-    get_route_info,
-    is_route_method,
-)
+from canary_framework.web.fastapi.container import register_routes
 
 _UVICORN_PREFIX = "uvicorn_"
 _FASTAPI_PREFIX = "fastapi_"
@@ -123,18 +116,43 @@ class WebCanary(Canary):
         再按 ``uvicorn_*`` / ``fastapi_*`` 前缀从根配置中拆分 web 参数。
         """
         await super().config(config=config)
-        self._parse_web_config()
+        root_config = self.config_model
+        if root_config is None:
+            return
+
+        for key, value in vars(root_config).items():
+            if key.startswith("_"):
+                continue
+            if key.startswith(_UVICORN_PREFIX):
+                self._uvicorn_kwargs[key[len(_UVICORN_PREFIX) :]] = value
+            elif key.startswith(_FASTAPI_PREFIX):
+                self._fastapi_kwargs[key[len(_FASTAPI_PREFIX) :]] = value
+
+        self._host = self._uvicorn_kwargs.pop("host", "127.0.0.1")
+        self._port = self._uvicorn_kwargs.pop("port", 8000)
 
     async def init(self) -> None:
         """Core on_init hooks + FastAPI app construction + route registration.
 
         先执行核心 on_init 钩子（连接池等初始化），
         再构建 FastAPI 应用并注册所有 @router 路由。"""
-        self._ensure_web_deps()
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "WebCanary requires FastAPI. Install it with: pip install canary-framework[web]"
+            ) from None
+        try:
+            import uvicorn  # noqa: F401
+        except ImportError:
+            raise ImportError(
+                "WebCanary requires Uvicorn. Install it with: pip install canary-framework[web]"
+            ) from None
+
         await super().init()
         self._build_fastapi()
         # 路由注册须在实例 wiring 完成之后（init 阶段实例已就绪）
-        _register_routes(self._fastapi_app, self.registry)  # type: ignore[arg-type]
+        register_routes(self._fastapi_app, self.registry)  # type: ignore[arg-type]
 
     async def start(self) -> None:
         """Start the FastAPI + Uvicorn server (blocking).
@@ -160,44 +178,6 @@ class WebCanary(Canary):
     # ==================================================================
     # Web wiring (framework-only)
     # ==================================================================
-
-    @staticmethod
-    def _ensure_web_deps() -> None:
-        """Validate that FastAPI and Uvicorn are importable."""
-        try:
-            import fastapi  # noqa: F401
-        except ImportError:
-            raise ImportError(
-                "WebCanary requires FastAPI. Install it with: pip install canary-framework[web]"
-            ) from None
-        try:
-            import uvicorn  # noqa: F401
-        except ImportError:
-            raise ImportError(
-                "WebCanary requires Uvicorn. Install it with: pip install canary-framework[web]"
-            ) from None
-
-    def _parse_web_config(self) -> None:
-        """Split root config model into uvicorn / fastapi kwargs (stored on self).
-
-        从根模块配置中按 ``uvicorn_*`` / ``fastapi_*`` 前缀拆分，
-        结果存入 ``_host``, ``_port``, ``_fastapi_kwargs``, ``_uvicorn_kwargs``。
-        """
-        root_config = self.config_model
-        if root_config is None:
-            return
-
-        for key, value in vars(root_config).items():
-            if key.startswith("_"):
-                continue
-            if key.startswith(_UVICORN_PREFIX):
-                self._uvicorn_kwargs[key[len(_UVICORN_PREFIX) :]] = value
-            elif key.startswith(_FASTAPI_PREFIX):
-                self._fastapi_kwargs[key[len(_FASTAPI_PREFIX) :]] = value
-
-        self._host = self._uvicorn_kwargs.pop("host", "127.0.0.1")
-        self._port = self._uvicorn_kwargs.pop("port", 8000)
-
     def _build_fastapi(self) -> None:
         """Build a FastAPI application with lifespan, store on ``_fastapi_app``.
 
@@ -220,39 +200,3 @@ class WebCanary(Canary):
             await _self.stop()
 
         self._fastapi_app = FastAPI(lifespan=lifespan, **self._fastapi_kwargs)
-
-
-# ============================================================================
-# 内部路由注册 (Internal route registration)
-# ============================================================================
-
-
-def _register_routes(app: FastAPI, registry: Registry) -> None:
-    """Scan all ``@router``-decorated entries and register their HTTP routes.
-
-    遍历 registry 中所有 entry，筛选 ``RouterMeta``，为每个 router 创建
-    FastAPI 原生 ``APIRouter``，通过 ``include_router`` 注册。
-    prefix 拼接和 tags 合并由 FastAPI 处理，无需手动操作。
-    """
-    from fastapi import APIRouter
-
-    for entry in registry.all_entries():
-        meta = get_service_meta(entry.cls)
-        if not isinstance(meta, RouterMeta):
-            continue
-
-        api_router = APIRouter(prefix=meta.prefix, tags=meta.tags)  # type: ignore[arg-type]
-
-        for _, method in inspect.getmembers(entry.cls, inspect.isfunction):
-            if not is_route_method(method):
-                continue
-            http_method, path, kwargs = get_route_info(method)
-            bound = getattr(entry.instance, method.__name__)
-            api_router.add_api_route(
-                path=path,
-                endpoint=bound,
-                methods=[http_method],
-                **kwargs,
-            )
-
-        app.include_router(api_router)

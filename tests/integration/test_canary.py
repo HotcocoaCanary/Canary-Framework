@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
 
+from canary_framework import config
 from canary_framework.common.exceptions import CanaryFrameworkError, LifecycleHookError
 from canary_framework.core import (
     Canary,
@@ -139,11 +139,9 @@ class TestCanaryLifecycle:
         assert app.registry.get_by_name("b").instance.ok == "a"  # type: ignore[attr-defined]
 
     async def test_config_loaded_before_init(self) -> None:
-        class MyCfg(BaseModel):
+        @config
+        class AppConfig:
             name: str = "canary"
-
-        class AppConfig(BaseModel):
-            configured: MyCfg = MyCfg()
 
         captured: dict[str, object] = {}
 
@@ -151,7 +149,7 @@ class TestCanaryLifecycle:
         class Configured:
             @on_init
             def init(self) -> None:
-                captured["name"] = self.name  # type: ignore[attr-defined]
+                captured["name"] = self.config.name  # type: ignore[attr-defined]
 
         app = Canary(Configured)
         await app.config(config=AppConfig())
@@ -160,11 +158,9 @@ class TestCanaryLifecycle:
         assert captured.get("name") == "canary"
 
     async def test_config_inheritance(self) -> None:
-        class CfgModel(BaseModel):
+        @config
+        class AppConfig:
             env: str = "test"
-
-        class AppConfig(BaseModel):
-            child: CfgModel = CfgModel()
 
         @service("child")
         class Child:
@@ -172,7 +168,7 @@ class TestCanaryLifecycle:
 
             @on_init
             def init(self) -> None:
-                self.got = self.env  # type: ignore[attr-defined]
+                self.got = self.config.env  # type: ignore[attr-defined]
 
         @module("root", services=[Child])
         class Root:

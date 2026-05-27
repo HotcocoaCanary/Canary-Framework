@@ -44,6 +44,10 @@ class ModuleMeta(ServiceMeta):
     services: list[type] = field(default_factory=list)
     """List of direct child ``@service`` / ``@module`` classes."""
 
+    config_cls: type | None = field(default=None)
+    """Optional per-module config class.
+    可选的模块级配置类。为 ``None`` 时继承父模块的配置。"""
+
 
 @dataclass(slots=True)
 class RouterMeta(ServiceMeta):
@@ -58,6 +62,11 @@ class RouterMeta(ServiceMeta):
 
     tags: list[str] = field(default_factory=list)
     """OpenAPI tags applied to all routes in this group as default."""
+
+    routes: list[Callable[..., Any]] = field(default_factory=list)
+    """Methods decorated with ``@get`` / ``@post`` / … on this router.
+    Scanned and stored at decoration time by ``@router``; consumed by
+    ``_register_routes`` at init time.  Analogous to ``ModuleMeta.services```."""
 
 
 # ============================================================================
@@ -105,10 +114,14 @@ class ServiceEntry:
     Resolved dependency names for the topological sorter.
     Derived from *deps* during registration, not taken directly from user input."""
 
-    config_instance: object | None = field(default=None, repr=False)
-    """配置实例，在 ``_init_entry`` 中通过 ``config_cls()`` 构造。
-    Pydantic-settings 会自动在此时读取 ``.env`` 和环境变量。
-    Constructed in ``_init_entry`` via ``config_cls()``."""
+    config_cls: type | None = field(default=None, repr=False)
+    """Optional per-module config class.
+    可选的模块级配置类。在 ``_wire_entry`` 中通过 ``config_cls()`` 实例化后存入 ``_config_instance``。"""
+
+    _config_instance: object | None = field(default=None, repr=False)
+    """Per-module config instance, instantiated from ``config_cls`` during ``_wire_entry``.
+    模块级配置实例，在 ``_wire_entry`` 阶段由 ``config_cls()`` 创建。
+    ``None`` 表示该模块未声明独立配置类。"""
 
     parent_entry: ServiceEntry | None = field(default=None, repr=False, compare=False)
     """父模块的 ServiceEntry，根模块为 ``None``。

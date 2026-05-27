@@ -9,10 +9,9 @@
        它的 ``services`` 参数定义了该 namespace 下的成员
        Composition: modules organise services into a tree.  Each module
        is a namespace whose ``services`` list defines its members.
-    2. **配置继承**：子服务不声明 ``config`` 时自动继承父模块的配置类，
-       避免为每个子服务重复声明相同配置
-       Config inheritance: child services inherit their parent module's
-       config class when they don't declare their own.
+    2. **配置继承**：子服务通过 ``self.config`` 访问所在模块的配置
+       Config inheritance: child services access their module's config
+       via ``self.config`` attribute.
 
     ``@module`` 内部调用 ``@service``，因此模块也是合法的框架服务
     （``is_cf_service(module_cls)`` 返回 ``True``）。元数据通过
@@ -50,6 +49,7 @@ def module(
     *,
     deps: list[type] | None = None,
     services: list[type] | None = None,
+    config: type | None = None,
 ) -> Callable[[type], type]:
     """Declare a class as a Canary Framework module.
 
@@ -60,6 +60,9 @@ def module(
         name: 全局唯一模块名称。
         deps: 依赖的 ``@service`` / ``@module`` 类列表。
         services: 直接子节点（``@service`` 或 ``@module`` 类）列表。
+        config: 可选的模块级配置类。设置后，该模块及其所有子服务
+                可通过 ``self.config`` 访问该配置实例。
+                为 ``None`` 时继承父模块的配置。
 
     Returns:
         一个类装饰器。A class decorator.
@@ -86,7 +89,12 @@ def module(
                 )
 
         service(name=name, deps=_deps)(cls)
-        meta = ModuleMeta(name=name, deps=_deps, services=_services)
+        meta = ModuleMeta(
+            name=name,
+            deps=_deps,
+            services=_services,
+            config_cls=config,
+        )
         setattr(cls, _SERVICE_META, meta)
         setattr(cls, _MODULE_ATTR, True)
         return cls

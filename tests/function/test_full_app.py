@@ -7,7 +7,6 @@ config model → @service/@module → Canary.init/start/stop
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
 
 
 @pytest.mark.functional
@@ -17,6 +16,7 @@ class TestFullApplicationLifecycle:
     async def test_full_init_start_stop_with_config_and_deps(self) -> None:
         from canary_framework import (
             Canary,
+            config,
             module,
             on_end,
             on_init,
@@ -24,17 +24,10 @@ class TestFullApplicationLifecycle:
             service,
         )
 
-        class DBConfig(BaseModel):
+        @config
+        class AppConfig:
             app_name: str = "myapp"
             debug: bool = False
-
-        class WorkerConfig(BaseModel):
-            app_name: str = "myapp"
-            debug: bool = False
-
-        class AppConfig(BaseModel):
-            db: DBConfig = DBConfig()
-            worker: WorkerConfig = WorkerConfig()
 
         @service("logger")
         class LoggerService:
@@ -55,7 +48,7 @@ class TestFullApplicationLifecycle:
 
             @on_init
             def init(self) -> None:
-                self.name = self.app_name  # type: ignore[attr-defined]
+                self.name = self.config.app_name  # type: ignore[attr-defined]
                 self.connected = True
 
             @on_end
@@ -69,7 +62,7 @@ class TestFullApplicationLifecycle:
 
             @on_init
             def init(self) -> None:
-                self.logger_service.log(f"worker init: {self.app_name}")  # type: ignore[attr-defined]
+                self.logger_service.log(f"worker init: {self.config.app_name}")  # type: ignore[attr-defined]
 
             @on_start
             def start(self) -> None:
@@ -102,17 +95,16 @@ class TestFullApplicationLifecycle:
     async def test_nested_modules_with_config_inheritance(self) -> None:
         from canary_framework import (
             Canary,
+            config,
             module,
             on_init,
             service,
         )
 
-        class InnerSvcCfg(BaseModel):
+        @config
+        class AppConfig:
             env: str = "production"
             secret: str = "s3cret"
-
-        class AppConfig(BaseModel):
-            inner_svc: InnerSvcCfg = InnerSvcCfg()
 
         @service("inner_svc")
         class InnerService:
@@ -120,7 +112,7 @@ class TestFullApplicationLifecycle:
 
             @on_init
             def init(self) -> None:
-                self.cfg_env = self.env  # type: ignore[attr-defined]
+                self.cfg_env = self.config.env  # type: ignore[attr-defined]
 
         @module("inner", services=[InnerService])
         class InnerModule:
