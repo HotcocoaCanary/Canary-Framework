@@ -1,7 +1,7 @@
 """Canary Framework — lightweight decorator-driven Python service framework.
 
 Core exports:
-    - Decorators: :func:`service`, :func:`module`
+    - Decorators: :func:`service`, :func:`module`, :func:`config`
     - Lifecycle:  :func:`on_config`, :func:`on_init`, :func:`on_start`, :func:`on_end`,
       :class:`LifecycleHook`
     - Engine:     :class:`Canary`
@@ -10,7 +10,7 @@ Core exports:
 
 from __future__ import annotations
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 from canary_framework.common.enums import LifecycleHook
 from canary_framework.common.exceptions import (
@@ -22,6 +22,7 @@ from canary_framework.common.exceptions import (
     ServiceNotFoundError,
 )
 from canary_framework.core.conductor import Canary
+from canary_framework.core.decorators.config import config
 from canary_framework.core.decorators.lifecycle import on_config, on_end, on_init, on_start
 from canary_framework.core.decorators.module import module
 from canary_framework.core.decorators.service import service
@@ -36,6 +37,7 @@ __all__ = [
     "LifecycleHookError",
     "ServiceNotFoundError",
     "__version__",
+    "config",
     "module",
     "on_config",
     "on_end",

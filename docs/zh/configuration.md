@@ -1,100 +1,106 @@
 # 配置
 
-配置通过 pydantic `BaseModel` 传入 `app.config()`。不再使用 `@config` 装饰器或 `config=` 参数。
+配置通过 `@config` 装饰器和 `self.config` 访问模式。传入 `app.config(config=...)` 的配置实例会自动传播到模块树中的**每个**服务和模块，作为 `self.config`。
 
-## 最小写法
+## 定义配置类
 
-```python
-from pydantic import BaseModel
-
-class DBConfig(BaseModel):
-    url: str = "postgres://localhost:5432"
-    pool_size: int = 10
-```
-
-使用环境变量覆盖默认值：
-
-```bash
-# .env 文件
-DB_URL=postgres://prod:5432/app
-DB_POOL_SIZE=20
-```
+使用 `@config` 装饰器标记任何类为配置类。可以是普通 Python 类，也可以是 `pydantic.BaseModel`：
 
 ```python
-from canary_framework import Canary
+from canary_framework import config
 
-app = Canary(RootModule)
-await app.config(config=DBConfig())
-```
-
-## 字段名匹配
-
-Config 模型的字段名用于匹配 service/module 的 `name`，将对应字段注入为实例属性：
-
-```python
-from pydantic import BaseModel
-from canary_framework import service, on_config
-
-class DBConfig(BaseModel):
+@config
+class AppConfig:
     pool_size: int = 10
     timeout: int = 30
+    app_name: str = "myapp"
+```
 
+也可使用 `pydantic.BaseModel` 进行数据校验：
+
+```python
+from pydantic import BaseModel
+from canary_framework import config
+
+@config
 class AppConfig(BaseModel):
-    db: DBConfig = DBConfig()          # 字段名 = service name → 注入到 DBService
-    user: dict = {"max_items": 100}    # 也可以传 dict
+    pool_size: int = 10
+    timeout: int = 30
+    app_name: str = "myapp"
+```
 
+## 在服务中访问配置
+
+树中每个服务和模块通过 `self.config` 访问配置：
+
+```python
 @service(name="db")
 class DBService:
     @on_config
     def setup(self) -> None:
-        self.pool = create_pool(self.pool_size)    # pool_size 通过字段名匹配注入
-        self.conn = connect(timeout=self.timeout)
+        self.pool = create_pool(self.config.pool_size, self.config.timeout)
 ```
 
-## 完整示例
+## 传入配置
 
 ```python
-from pydantic import BaseModel
-from canary_framework import Canary, service, module, on_config
+app = Canary(MyRootModule)
+await app.config(config=AppConfig())  # wiring + on_config 钩子
+await app.init()                       # on_init 钩子
+await app.start()
+await app.stop()
+```
 
-class DBConfig(BaseModel):
-    pool_size: int = 10
-    timeout: int = 30
+`app.config()` 执行 wiring（依赖注入）、传播配置实例，然后按拓扑序调用所有 `@on_config` 钩子。此时 `self.config` 已可用。
 
+## 服务端和 FastAPI 参数的前缀路由
+
+对 `WebCanary`，根配置模型中以 `uvicorn_` 或 `fastapi_` 开头的字段会自动路由：
+
+- `uvicorn_*` → `uvicorn.Config`
+- `fastapi_*` → `FastAPI()` 构造器
+- 无前缀 → 业务配置（通过 `self.config` 访问）
+
+```python
+@config
 class AppConfig(BaseModel):
-    uvicorn_host: str = "127.0.0.1"
-    uvicorn_port: int = 8000
-    db: DBConfig = DBConfig()
-    user: dict = {"max_items": 100}
+    uvicorn_host: str = "127.0.0.1"     # → uvicorn(host="127.0.0.1")
+    uvicorn_port: int = 8000             # → uvicorn(port=8000)
+    uvicorn_workers: int = 1             # → uvicorn(workers=1)
+    fastapi_title: str = "My API"        # → FastAPI(title="My API")
+    fastapi_version: str = "1.0.0"       # → FastAPI(version="1.0.0")
+    fastapi_docs_url: str | None = None  # → 禁用 docs
+    pool_size: int = 10                  # 业务配置字段
+```
 
-@service(name="db")
-class DBService:
-    @on_config
-    def setup(self) -> None:
-        self.pool = create_pool(self.pool_size)
+`WebCanary` 自动按前缀拆分字段，去除前缀后分发给对应消费者。
 
-@service(name="user")
-class UserService:
-    @on_config
-    def setup(self) -> None:
-        self.max_items = self.max_items
+## 模块级配置
 
-@module(name="app", services=[DBService, UserService])
-class AppModule:
+模块可通过 `config=` 参数声明自己的配置类。该模块中的所有服务（以及未声明自身配置的子模块）都接收该模块的配置实例：
+
+```python
+@config
+class DBModuleConfig:
+    dsn: str = "postgres://localhost/test"
+    pool_size: int = 5
+
+@module(name="db_module", services=[DBService], config=DBModuleConfig)
+class DBModule:
     pass
 
-app = Canary(AppModule)
-await app.config(config=AppConfig())
-await app.init()
+# DBService.config 为 DBModuleConfig()
 ```
 
-## 属性注入规则
-
-- Config 模型中的每个字段，框架根据字段名匹配 service/module 的 `name`
-- 匹配成功后，config 字段被直接注入到服务实例上（字段名 = 属性名）
-- 服务可以直接通过 `self.<field>` 访问，无需通过嵌套模型属性
-- 字段值可以是 `BaseModel` 子类（递归展开）或普通 `dict`
+如果模块未声明 `config=`，则继承最近祖先模块的配置。根配置是最终的兜底。
 
 ## 安全：日志脱敏
 
 框架日志自动对敏感字段脱敏。包含 `password`、`secret`、`token`、`key`、`auth`、`credential`、`private` 的字段值在日志中会被替换为 `***`。
+
+```python
+@config
+class AppConfig(BaseModel):
+    db_password: str = "supersecret"     # 日志输出为 db_password='***'
+    db_url: str = "postgres://..."       # 正常输出
+```

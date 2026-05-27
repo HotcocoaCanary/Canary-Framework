@@ -27,9 +27,10 @@ class TestWebCanaryE2EBasic:
         """Start a WebCanary server, make a GET request, verify response."""
         from pydantic import BaseModel
 
-        from canary_framework import module
+        from canary_framework import config, module
         from canary_framework.web.fastapi import WebCanary, get, router
 
+        @config
         class AppConfig(BaseModel):
             uvicorn_host: str = "127.0.0.1"
             uvicorn_port: int = 18800
@@ -68,9 +69,10 @@ class TestWebCanaryE2EBasic:
         """Multiple GET/POST routes on different prefixes."""
         from pydantic import BaseModel
 
-        from canary_framework import module
+        from canary_framework import config, module
         from canary_framework.web.fastapi import WebCanary, get, post, router
 
+        @config
         class AppConfig(BaseModel):
             uvicorn_host: str = "127.0.0.1"
             uvicorn_port: int = 18801
@@ -127,9 +129,10 @@ class TestWebCanaryE2EBasic:
         """Unknown routes return 404."""
         from pydantic import BaseModel
 
-        from canary_framework import module
+        from canary_framework import config, module
         from canary_framework.web.fastapi import WebCanary, get, router
 
+        @config
         class AppConfig(BaseModel):
             uvicorn_host: str = "127.0.0.1"
             uvicorn_port: int = 18802
@@ -172,11 +175,12 @@ class TestWebCanaryLifecycle:
         """Router services should support lifecycle hooks like any service."""
         from pydantic import BaseModel
 
-        from canary_framework import module, on_config, on_init, on_start
+        from canary_framework import config, module, on_config, on_init, on_start
         from canary_framework.web.fastapi import WebCanary, get, router
 
         hooks_fired: list[str] = []
 
+        @config
         class AppConfig(BaseModel):
             uvicorn_host: str = "127.0.0.1"
             uvicorn_port: int = 18803
@@ -230,19 +234,17 @@ class TestWebCanaryLifecycle:
             await asyncio.sleep(0.1)
 
     async def test_config_injection_in_web_service(self) -> None:
-        """Config fields matching service name should be injected."""
+        """Config fields should be accessible via self.config on services."""
         from pydantic import BaseModel
 
-        from canary_framework import module, on_config, service
+        from canary_framework import config, module, on_config, service
         from canary_framework.web.fastapi import WebCanary, get, router
 
-        class DBCfg(BaseModel):
-            conn: str = "postgresql://test/db"
-
+        @config
         class AppConfig(BaseModel):
             uvicorn_host: str = "127.0.0.1"
             uvicorn_port: int = 18804
-            dbservice: DBCfg = DBCfg()
+            conn: str = "postgresql://test/db"
 
         @service("dbservice")
         class DBService:
@@ -251,7 +253,7 @@ class TestWebCanaryLifecycle:
                 pass
 
             def get_conn(self) -> str:
-                return self.conn  # type: ignore[attr-defined,no-any-return]
+                return self.config.conn  # type: ignore[attr-defined,no-any-return]
 
         @router(prefix="/api", name="cf-router", deps=[DBService])
         class CFRouter:
@@ -294,9 +296,10 @@ class TestWebCanaryPrefixValidation:
         """A prefix ending with '/' should be trimmed (FastAPI rejects trailing slashes)."""
         from pydantic import BaseModel
 
-        from canary_framework import module
+        from canary_framework import config, module
         from canary_framework.web.fastapi import WebCanary, get, router
 
+        @config
         class AppConfig(BaseModel):
             uvicorn_host: str = "127.0.0.1"
             uvicorn_port: int = 18805

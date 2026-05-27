@@ -22,9 +22,7 @@ class TestRegisterRoutes:
         from fastapi import FastAPI
 
         from canary_framework.core.container.registry import Registry
-        from canary_framework.web.fastapi.conductor.web_canary import (
-            _register_routes,
-        )
+        from canary_framework.web.fastapi.container import register_routes
         from canary_framework.web.fastapi.decorators.router import get, router
 
         @router(prefix="/test", name="reg-router")
@@ -38,7 +36,7 @@ class TestRegisterRoutes:
         reg.get_by_class(RegRouter).instance = RegRouter()
 
         app = FastAPI()
-        _register_routes(app, reg)
+        register_routes(app, reg)
 
         routes = [r for r in app.routes if hasattr(r, "path")]
         assert any("/test/hello" in str(r.path) for r in routes)
@@ -47,9 +45,7 @@ class TestRegisterRoutes:
         from fastapi import FastAPI
 
         from canary_framework.core.container.registry import Registry
-        from canary_framework.web.fastapi.conductor.web_canary import (
-            _register_routes,
-        )
+        from canary_framework.web.fastapi.container import register_routes
         from canary_framework.web.fastapi.decorators.router import get, router
 
         @router(prefix="/api/v2", tags=["v2", "beta"], name="tagged")
@@ -62,7 +58,7 @@ class TestRegisterRoutes:
         reg.register(TaggedRouter)
         reg.get_by_class(TaggedRouter).instance = TaggedRouter()
         app = FastAPI()
-        _register_routes(app, reg)
+        register_routes(app, reg)
 
         routes = [r for r in app.routes if hasattr(r, "path")]
         assert any("/api/v2/items" in str(r.path) for r in routes)
@@ -72,9 +68,7 @@ class TestRegisterRoutes:
 
         from canary_framework.core.container.registry import Registry
         from canary_framework.core.decorators.service import service
-        from canary_framework.web.fastapi.conductor.web_canary import (
-            _register_routes,
-        )
+        from canary_framework.web.fastapi.container import register_routes
 
         @service("plain-service")
         class PlainService:
@@ -83,7 +77,7 @@ class TestRegisterRoutes:
         reg = Registry()
         reg.register(PlainService)
         app = FastAPI()
-        _register_routes(app, reg)
+        register_routes(app, reg)
 
         routes = [r for r in app.routes if hasattr(r, "path")]
         assert not any("plain" in str(r.path) for r in routes)
@@ -92,9 +86,7 @@ class TestRegisterRoutes:
         from fastapi import FastAPI
 
         from canary_framework.core.container.registry import Registry
-        from canary_framework.web.fastapi.conductor.web_canary import (
-            _register_routes,
-        )
+        from canary_framework.web.fastapi.container import register_routes
         from canary_framework.web.fastapi.decorators.router import delete, get, post, router
 
         @router(prefix="/users", name="user-r")
@@ -119,7 +111,7 @@ class TestRegisterRoutes:
         reg.get_by_class(UserR).instance = UserR()
         reg.get_by_class(PostR).instance = PostR()
         app = FastAPI()
-        _register_routes(app, reg)
+        register_routes(app, reg)
 
         routes = [r for r in app.routes if hasattr(r, "path")]
         paths = [str(r.path) for r in routes]
@@ -134,18 +126,16 @@ class TestWebCanaryConfigSplitting:
     async def test_uvicorn_fastapi_prefix_splitting(self) -> None:
         from pydantic import BaseModel
 
-        from canary_framework import module
+        from canary_framework import config, module
         from canary_framework.web.fastapi import WebCanary
         from canary_framework.web.fastapi.decorators.router import get, router
 
-        class AppCfg(BaseModel):
+        @config
+        class AppConfig(BaseModel):
             uvicorn_host: str = "0.0.0.0"
             uvicorn_port: int = 9999
             fastapi_title: str = "Test API"
             database_url: str = "sqlite://"
-
-        class AppConfig(BaseModel):
-            root: AppCfg = AppCfg()
 
         @router(prefix="/", name="root-router")
         class RootRouter:
@@ -162,7 +152,8 @@ class TestWebCanaryConfigSplitting:
 
         root_entry = app.registry.get_by_name("root")
         inst = root_entry.instance
-        assert getattr(inst, "uvicorn_host", None) == "0.0.0.0"
-        assert getattr(inst, "uvicorn_port", None) == 9999
-        assert getattr(inst, "fastapi_title", None) == "Test API"
-        assert getattr(inst, "database_url", None) == "sqlite://"
+        cfg = inst.config  # type: ignore[attr-defined]
+        assert cfg.uvicorn_host == "0.0.0.0"
+        assert cfg.uvicorn_port == 9999
+        assert cfg.fastapi_title == "Test API"
+        assert cfg.database_url == "sqlite://"

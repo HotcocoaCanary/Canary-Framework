@@ -19,9 +19,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import TypeVar
 
 from canary_framework.common._types import ModuleMeta, ServiceEntry, ServiceMeta
 from canary_framework.common.exceptions import ServiceNotFoundError
+
+_M = TypeVar("_M", bound=ServiceMeta)
 
 
 class Registry:
@@ -78,6 +81,7 @@ class Registry:
             name=name,
             deps=list(meta.deps),
             sub_services=list(meta.services if isinstance(meta, ModuleMeta) else []),
+            config_cls=meta.config_cls if isinstance(meta, ModuleMeta) else None,
         )
 
         # 将 deps 中的类引用解析为字符串名称，供拓扑排序使用
@@ -140,6 +144,31 @@ class Registry:
 
         返回所有注册项列表。无顺序保证。"""
         return list(self._by_name.values())
+
+    def entries_with_meta(self, meta_type: type[_M]) -> Iterator[tuple[ServiceEntry, _M]]:
+        """Iterate entries whose meta is an instance of *meta_type*.
+
+        按 meta 类型筛选迭代已注册条目。 遍历所有 ``ServiceEntry``，
+        只返回 meta 类型匹配的条目，直接给出 ``(entry, meta)`` 对，
+        避免消费方重复调用 ``get_service_meta`` + ``isinstance``。
+
+        Args:
+            meta_type: 目标 meta 类型，如 ``RouterMeta``、``ModuleMeta``。
+
+        Yields:
+            ``(ServiceEntry, meta)`` — meta 已类型窄化为 ``meta_type``。
+
+        Example::
+
+            for entry, meta in registry.entries_with_meta(RouterMeta):
+                # meta.prefix, meta.tags 直接可用，无需 isinstance
+                api_router = APIRouter(prefix=meta.prefix, tags=meta.tags)
+        """
+        _meta_attr = "__cf_service_meta__"
+        for entry in self._by_name.values():
+            raw = getattr(entry.cls, _meta_attr, None)
+            if isinstance(raw, meta_type):
+                yield entry, raw
 
     def names(self) -> list[str]:
         """Return the names of all registered entries.

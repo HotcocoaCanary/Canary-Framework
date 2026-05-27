@@ -92,7 +92,7 @@ Core engine — lifecycle orchestrator for the service graph.
 |--------------------|-------------|
 | `.registry` | Global `Registry` (read-only after init) |
 | `.startup_order` | Topologically sorted startup order (copy) |
-| `await .config(config=Model())` | Collect → validate → sort → DI → config injection → `on_config` |
+| `await .config(config=Model())` | Collect → validate → sort → DI → config propagation → `on_config` |
 | `await .init()` | Call `on_init` in topological order |
 | `await .start()` | Call `on_start` in topological order |
 | `await .stop()` | Call `on_end` in reverse topological order |
@@ -108,7 +108,7 @@ await app.stop()
 
 ### `WebCanary(target: type)`
 
-Extends `Canary`, overrides `start()` for FastAPI + Uvicorn integration. Distributes root config model fields by prefix: `uvicorn_*` → uvicorn, `fastapi_*` → FastAPI(), no prefix → business config.
+Extends `Canary`, overrides `start()` for FastAPI + Uvicorn integration. Distributes root config model fields by prefix: `uvicorn_*` → uvicorn, `fastapi_*` → FastAPI(), no prefix → business config. Services access config via `self.config`.
 
 ```python
 from pydantic import BaseModel

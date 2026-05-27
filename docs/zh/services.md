@@ -18,10 +18,10 @@ class HelloService:
 ## 完整写法
 
 ```python
-from pydantic import BaseModel
-from canary_framework import service, on_config, on_init, on_end
+from canary_framework import config, service, on_config, on_init, on_end
 
-class UserConfig(BaseModel):
+@config
+class AppConfig:
     max_items: int = 100
 
 @service(
@@ -33,7 +33,7 @@ class UserService:
 
     @on_config
     def setup(self) -> None:
-        self.max_items = self.user_config.max_items  # config 属性已注入
+        self.max_items = self.config.max_items  # config 通过 self.config 访问
 
     @on_init
     def init(self) -> None:
@@ -65,12 +65,13 @@ from canary_framework import LifecycleHook
 
 ## Config 和 Deps 作为属性
 
-依赖通过 DI 注入为实例属性，config 属性在 `@on_config` 中可用。属性名由类名通过 `to_snake` 转换而来：
+依赖通过 DI 注入为实例属性。Config 通过 `self.config` 访问，在所有服务和模块中自动可用：
 
 ```python
-from pydantic import BaseModel
+from canary_framework import config
 
-class AppConfig(BaseModel):
+@config
+class AppConfig:
     dsn: str = "sqlite://"
 
 @service(name="db", deps=[CacheService])
@@ -79,7 +80,7 @@ class DBService:
 
     @on_config
     def setup(self) -> None:
-        self.pool = connect(self.app_config.dsn)
+        self.pool = connect(self.config.dsn)
 ```
 
 

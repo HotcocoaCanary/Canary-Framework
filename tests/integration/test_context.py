@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
 
+from canary_framework import config
 from canary_framework.core.conductor.canary import Canary
 from canary_framework.core.decorators.lifecycle import on_init
 from canary_framework.core.decorators.module import module
@@ -16,11 +16,9 @@ class TestDIConfigInjection:
     """Verify typed config access via dependency injection."""
 
     async def test_get_config_returns_typed_config(self) -> None:
-        class MyCfg(BaseModel):
+        @config
+        class AppConfig:
             key: str = "val"
-
-        class AppConfig(BaseModel):
-            s: MyCfg = MyCfg()
 
         @service("s")
         class Svc:
@@ -33,15 +31,12 @@ class TestDIConfigInjection:
         await app.init()
 
         inst: Svc = app.registry.get_instance(Svc)  # type: ignore[assignment]
-        assert inst.key == "val"  # type: ignore[attr-defined]
+        assert inst.config.key == "val"  # type: ignore[attr-defined]
 
     async def test_config_chain_upward(self) -> None:
-        class SvcCfg(BaseModel):
+        @config
+        class AppConfig:
             env: str = "prod"
-
-        class AppConfig(BaseModel):
-            root: SvcCfg = SvcCfg()
-            child: SvcCfg = SvcCfg()
 
         @service("child")
         class ChildSvc:
@@ -58,7 +53,7 @@ class TestDIConfigInjection:
         await app.init()
 
         inst: ChildSvc = app.registry.get_instance(ChildSvc)  # type: ignore[assignment]
-        assert inst.env == "prod"  # type: ignore[attr-defined]
+        assert inst.config.env == "prod"  # type: ignore[attr-defined]
 
     async def test_no_config_raises(self) -> None:
         @service("orphan")
@@ -70,7 +65,7 @@ class TestDIConfigInjection:
 
         inst: Orphan = app.registry.get_instance(Orphan)  # type: ignore[assignment]
         with pytest.raises(AttributeError):
-            _ = inst.unbound_cfg  # type: ignore[attr-defined]
+            _ = inst.config  # type: ignore[attr-defined]
 
 
 @pytest.mark.integration

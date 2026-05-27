@@ -46,7 +46,7 @@ def on_config[FnT: Callable[..., object]](fn: FnT) -> FnT:
     """Mark a method as the ``on_config`` lifecycle hook.
 
     标记方法为配置钩子。框架在 DI 和 config 注入后立即调用——是 wiring 完成后
-    第一个用户钩子。此时 ``self.app_config`` 和 ``self.db_service`` 等 DI 属性已就绪。
+    第一个用户钩子。此时 ``self.config`` 和 ``self.db_service`` 等 DI 属性已就绪。
 
     Args:
         fn: 要标记的方法。A method to mark.
@@ -56,14 +56,13 @@ def on_config[FnT: Callable[..., object]](fn: FnT) -> FnT:
 
     Example::
 
-        @service(name="db", config=DBConfig, deps=[CacheService])
+        @service(name="db", deps=[CacheService])
         class DBService:
-            db_config: DBConfig
             cache_service: CacheService
 
             @on_config
             def setup(self) -> None:
-                if self.db_config.debug:
+                if self.config.debug:
                     self.enable_debug_mode()
     """
     setattr(fn, _MARKER_MAP[LifecycleHook.CONFIG], True)
@@ -84,14 +83,13 @@ def on_init[FnT: Callable[..., object]](fn: FnT) -> FnT:
 
     Example::
 
-        @service(name="db", config=DBConfig, deps=[CacheService])
+        @service(name="db", deps=[CacheService])
         class DBService:
-            db_config: DBConfig
             cache_service: CacheService
 
             @on_init
             def init(self) -> None:
-                self.pool = create_pool(self.db_config.dsn)
+                self.pool = create_pool(self.config.dsn)
     """
     setattr(fn, _MARKER_MAP[LifecycleHook.INIT], True)
     return fn

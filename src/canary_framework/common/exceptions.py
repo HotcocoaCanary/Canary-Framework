@@ -36,7 +36,7 @@ class ConfigurationError(CanaryFrameworkError):
     """Raised when configuration loading or validation fails.
 
     触发场景 (When raised):
-        - ``@config`` 类缺少必要的字段声明
+        - config 类在使用时校验失败
         - pydantic 在构造时校验失败
     """
 

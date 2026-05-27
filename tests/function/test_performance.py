@@ -314,21 +314,17 @@ class TestDeepModules:
         assert len(app.registry) == 502
 
 
-def _make_service_with_value(expect: int) -> tuple[type, type]:
+def _make_service_with_config(idx: int, value: int) -> type:
     """Factory to avoid Python closure capture of loop variable."""
-    from pydantic import BaseModel
 
-    class SvcCfg(BaseModel):
-        value: int = 42
-
-    @service(f"svc-{expect}")
+    @service(f"svc-{idx}")
     class Svc:
         @on_config
         def setup(self) -> None:
-            assert self.value == expect, f"Expected value={expect}, got {self.value}"  # type: ignore[attr-defined]
+            assert self.config.value == value, f"Expected value={value}, got {self.config.value}"  # type: ignore[attr-defined]
 
-    Svc.__name__ = f"Svc{expect}"
-    return Svc, SvcCfg
+    Svc.__name__ = f"Svc{idx}"
+    return Svc
 
 
 @pytest.mark.functional
@@ -336,16 +332,15 @@ class TestConfigAtScale:
     """Config injection at scale."""
 
     async def test_config_injection_on_wide_graph(self) -> None:
-        from pydantic import BaseModel
+        from canary_framework import config
+
+        @config
+        class AppConfig:
+            value: int = 42
 
         svcs: list[type] = []
-        app_config = type("AppConfig", (BaseModel,), {})
-
         for i in range(100):
-            svc_cls: type
-            cfg_cls: type
-            svc_cls, cfg_cls = _make_service_with_value(i)
-            setattr(app_config, f"svc-{i}", cfg_cls(value=i))
+            svc_cls = _make_service_with_config(i, 42)
             svcs.append(svc_cls)
 
         @module("Root", services=svcs)
@@ -354,8 +349,7 @@ class TestConfigAtScale:
 
         Root.__name__ = "Root"
         app = Canary(Root)
-        await app.config(config=app_config())
-        # All 100 on_config hooks passed assertions — no LifecycleHookError raised
+        await app.config(config=AppConfig())
 
 
 @pytest.mark.functional
