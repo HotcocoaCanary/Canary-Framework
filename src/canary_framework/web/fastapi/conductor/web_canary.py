@@ -102,7 +102,7 @@ class WebCanary(Canary):
         await app.start()  # 阻塞直到服务器停止
     """
 
-    __slots__ = ("_fastapi_kwargs", "_uvicorn_kwargs", "_host", "_port", "_fastapi_app")
+    __slots__ = ("_fastapi_app", "_fastapi_kwargs", "_host", "_port", "_uvicorn_kwargs")
 
     def __init__(self, target: type) -> None:
         super().__init__(target)
