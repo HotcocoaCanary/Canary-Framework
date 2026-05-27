@@ -73,11 +73,8 @@ class Registry:
                 f"Each @service and @module must have a globally unique name."
             )
 
-        instance = cls()
-
         entry = ServiceEntry(
             cls=cls,
-            instance=instance,
             name=name,
             deps=list(meta.deps),
             sub_services=list(meta.services if isinstance(meta, ModuleMeta) else []),

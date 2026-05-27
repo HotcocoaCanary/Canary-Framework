@@ -6,7 +6,7 @@ on:
       - "releases/v*"
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
 
 permissions:
   contents: write
@@ -20,7 +20,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
-
+        with:
+          cache-dependency-glob: "pyproject.toml"
       - name: Set up Python
         run: uv python install 3.12
 
@@ -47,7 +48,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
-
+        with:
+          cache-dependency-glob: "pyproject.toml"
       - name: Extract version from branch
         id: version
         run: |

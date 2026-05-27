@@ -14,14 +14,12 @@ Canary Framework is a **decorator-driven** service framework. Core philosophy: *
 
 ## Features
 
-- **Decorator API** — `@service` / `@module` / `@config`, no base class inheritance needed
+- **Decorator API** — `@service` / `@module`, no base class inheritance needed
 - **Topological Startup** — Kahn's algorithm ensures dependencies start first
 - **Dependency Injection** — `deps=[DBService]` auto-injected as `self.db_service`
-- **Config Management** — `@config` + pydantic-settings, auto-reads `.env` and env vars
-- **Lifecycle Hooks** — `@on_init` / `@on_start` / `@on_end`, sync/async adaptive
+- **Config Management** — pydantic-settings + `app.config(config=...)`, auto-reads `.env` and env vars
+- **Lifecycle Hooks** — `@on_config` / `@on_init` / `@on_start` / `@on_end`, sync/async adaptive
 - **Web Integration** — `WebCanary` for one-click FastAPI + Uvicorn
-- **Context System** — parent chain delegates config and dependency resolution upward
-- **Type Safety** — `ctx.get_config(Type)` / `ctx.get_service(Type)` with full IDE inference
 - **Log Sanitization** — sensitive config fields (password, secret, token) automatically masked
 
 ## Installation
@@ -47,38 +45,52 @@ class HelloService:
 class App:
     pass
 
-if __name__ == "__main__":
-    async def main() -> None:
-        app = Canary(App)
-        await app.init()
-        await app.start()
+async def main() -> None:
+    app = Canary(App)
+    await app.config()
+    await app.init()
+    await app.start()
 
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
 ## Web Example
 
 ```python
 import asyncio
-from canary_framework import config, module
-from canary_framework.web.fastapi import web, get, WebCanary
+from pydantic import BaseModel
+from canary_framework import service, module, on_config, on_start, Canary
+from canary_framework.web.fastapi import router, get, WebCanary
 
-@config
-class AppConfig:
+class DBConfig(BaseModel):
+    connection_string: str = "postgresql://localhost/mydb"
+    pool_size: int = 10
+
+class AppConfig(BaseModel):
     uvicorn_host: str = "127.0.0.1"
     uvicorn_port: int = 8000
     fastapi_title: str = "My API"
+    dbservice: DBConfig = DBConfig()
 
-@web()
-@module(name="AppModule", config=AppConfig, services=[])
+@service(name="dbservice")
+class DBService:
+    @on_config
+    def setup(self) -> None:
+        print(f"DB ready at {self.connection_string}")
+
+@router(prefix="/api", tags=["api"])
+class APIRouter:
+    @get("/hello")
+    async def hello(self) -> dict:
+        return {"message": "Hello, world!"}
+
+@module(name="AppModule", services=[APIRouter, DBService])
 class AppModule:
-    @get("/health")
-    async def health(self) -> dict:
-        return {"status": "ok"}
-
+    pass
 
 async def main() -> None:
     app = WebCanary(AppModule)
+    await app.config(config=AppConfig())
     await app.init()
     await app.start()
 
@@ -95,22 +107,26 @@ asyncio.run(main())
 
 ```
 src/canary_framework/
+├── common/                  # Shared types, enums, exceptions, logging
 ├── core/
-│   ├── decorators/          # @config, @service, @module, @on_init/start/end
-│   ├── engine/              # Canary, Context, Injector, Sorter
-│   ├── registry/            # Registry (dataclass ServiceEntry)
-│   └── utils/               # Naming utilities
+│   ├── decorators/          # @service, @module, lifecycle hooks
+│   ├── conductor/           # Canary engine (lifecycle orchestrator)
+│   ├── container/           # Registry (service storage/lookup)
+│   └── algorithms/          # Topological sort, DI injector, naming
 └── web/
-    └── fastapi/             # WebCanary engine, @web, @router, @get/@post/...
+    └── fastapi/             # WebCanary engine, @router, @get/@post/...
 ```
 
 ```
-Canary.init()
+Canary.config()
   ├── _collect()            recursively discover @service/@module
   ├── _validate()           validate dependency integrity
   ├── topological_sort()    Kahn topological sort
-  ├── _build_context_tree() build Context parent chain
-  └── per topology: DI → config loading → on_init(ctx)
+  ├── instantiate()         create all service instances
+  ├── _wire_entry()         DI + config injection + sub-service injection
+  └── on_config hooks       (topological order)
+Canary.init()
+  └── per topology: on_init()
 Canary.start()
   └── per topology: on_start()
 Canary.stop()

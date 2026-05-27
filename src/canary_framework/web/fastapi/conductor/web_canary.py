@@ -84,91 +84,142 @@ _CF_ACCESS_LOG_CONFIG: dict[str, Any] = {
 class WebCanary(Canary):
     """Canary variant that boots a FastAPI application via Uvicorn.
 
-    继承 Canary，仅重写 ``start()`` 以启动 FastAPI + Uvicorn 服务器。
+    继承 Canary，分三阶段扩展核心生命周期：
+
+    - ``config()`` — 核心 wiring + 按前缀拆分 uvicorn / fastapi 配置
+    - ``init()``   — 核心 on_init 钩子 + 构建 FastAPI app + 注册路由
+    - ``start()``  — 核心 on_start 钩子（lifespan）+ 启动 uvicorn，阻塞直到停止
 
     Usage::
 
-        @config
-        class AppConfig:
-            uvicorn_host: str = "127.0.0.1"
-            uvicorn_port: int = 8000
-            fastapi_title: str = "My API"
-
-        @module(name="AppModule", config=AppConfig, services=[...])
+        @module(name="AppModule", services=[...])
         class AppModule:
             ...
 
         app = WebCanary(AppModule)
+        await app.config(config=AppConfig())
         await app.init()
         await app.start()  # 阻塞直到服务器停止
     """
 
-    async def start(self) -> None:
-        """Start the FastAPI + Uvicorn server.
+    __slots__ = ("_fastapi_kwargs", "_uvicorn_kwargs", "_host", "_port", "_fastapi_app")
 
-        1. 从根模块 config 按前缀拆分参数
-        2. 构建 FastAPI lifespan 绑定 config → init → start → stop 生命周期
-        3. 注册所有 @router 路由（使用 APIRouter + include_router）
-        4. 启动 uvicorn.Server.serve()（阻塞直到收到停止信号）
+    def __init__(self, target: type) -> None:
+        super().__init__(target)
+        self._fastapi_kwargs: dict[str, Any] = {}
+        self._uvicorn_kwargs: dict[str, Any] = {}
+        self._host: str = "127.0.0.1"
+        self._port: int = 8000
+        self._fastapi_app: FastAPI | None = None
 
-        Raises:
-            ImportError: 未安装 fastapi/uvicorn。
-                ``pip install canary-framework[web]``
+    # ==================================================================
+    # 公开生命周期 (Public lifecycle)
+    # ==================================================================
+
+    async def config(self, *, config: Any = None) -> None:
+        """Core wiring + web-config parsing.
+
+        先执行 Canary 核心的收集 / 校验 / 排序 / wiring / on_config，
+        再按 ``uvicorn_*`` / ``fastapi_*`` 前缀从根配置中拆分 web 参数。
         """
+        await super().config(config=config)
+        self._parse_web_config()
+
+    async def init(self) -> None:
+        """Core on_init hooks + FastAPI app construction + route registration.
+
+        先执行核心 on_init 钩子（连接池等初始化），
+        再构建 FastAPI 应用并注册所有 @router 路由。"""
+        self._ensure_web_deps()
+        await super().init()
+        self._build_fastapi()
+        # 路由注册须在实例 wiring 完成之后（init 阶段实例已就绪）
+        _register_routes(self._fastapi_app, self.registry)  # type: ignore[arg-type]
+
+    async def start(self) -> None:
+        """Start the FastAPI + Uvicorn server (blocking).
+
+        启动 HTTP 服务器，阻塞直到收到停止信号。
+        FastAPI lifespan 会在服务器启动 / 关闭时自动触发 on_start / on_end 钩子。
+        """
+        import uvicorn
+
+        app = self._fastapi_app
+        assert app is not None, "init() must be called before start()"
+        config = uvicorn.Config(
+            app,
+            host=self._host,
+            port=self._port,
+            access_log=True,
+            log_config=_CF_ACCESS_LOG_CONFIG,
+            **self._uvicorn_kwargs,
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    # ==================================================================
+    # Web wiring (framework-only)
+    # ==================================================================
+
+    @staticmethod
+    def _ensure_web_deps() -> None:
+        """Validate that FastAPI and Uvicorn are importable."""
         try:
-            from fastapi import FastAPI
+            import fastapi  # noqa: F401
         except ImportError:
             raise ImportError(
                 "WebCanary requires FastAPI. Install it with: pip install canary-framework[web]"
             ) from None
         try:
-            import uvicorn
+            import uvicorn  # noqa: F401
         except ImportError:
             raise ImportError(
                 "WebCanary requires Uvicorn. Install it with: pip install canary-framework[web]"
             ) from None
 
+    def _parse_web_config(self) -> None:
+        """Split root config model into uvicorn / fastapi kwargs (stored on self).
+
+        从根模块配置中按 ``uvicorn_*`` / ``fastapi_*`` 前缀拆分，
+        结果存入 ``_host``, ``_port``, ``_fastapi_kwargs``, ``_uvicorn_kwargs``。
+        """
         root_config = self.config_model
+        if root_config is None:
+            return
 
-        uvicorn_kwargs: dict[str, Any] = {}
-        fastapi_kwargs: dict[str, Any] = {}
+        for key, value in vars(root_config).items():
+            if key.startswith("_"):
+                continue
+            if key.startswith(_UVICORN_PREFIX):
+                self._uvicorn_kwargs[key[len(_UVICORN_PREFIX) :]] = value
+            elif key.startswith(_FASTAPI_PREFIX):
+                self._fastapi_kwargs[key[len(_FASTAPI_PREFIX) :]] = value
 
-        if root_config is not None:
-            for key, value in vars(root_config).items():
-                if key.startswith("_"):
-                    continue
-                if key.startswith(_UVICORN_PREFIX):
-                    uvicorn_kwargs[key[len(_UVICORN_PREFIX) :]] = value
-                elif key.startswith(_FASTAPI_PREFIX):
-                    fastapi_kwargs[key[len(_FASTAPI_PREFIX) :]] = value
+        self._host = self._uvicorn_kwargs.pop("host", "127.0.0.1")
+        self._port = self._uvicorn_kwargs.pop("port", 8000)
 
-        host: str = uvicorn_kwargs.pop("host", "127.0.0.1")
-        port: int = uvicorn_kwargs.pop("port", 8000)
+    def _build_fastapi(self) -> None:
+        """Build a FastAPI application with lifespan, store on ``_fastapi_app``.
+
+        构建 FastAPI 应用，注入 lifespan 将框架生命周期绑定到 HTTP 服务器生命周期。
+        lifespan 在服务器启动时调用 ``Canary.start(self)``（on_start 钩子），
+        在服务器关闭时调用 ``self.stop()``（on_end 钩子逆序）。
+        """
+        from fastapi import FastAPI
+
+        _self = self
 
         @asynccontextmanager
         async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-            """FastAPI lifespan: 绑定框架生命周期到 HTTP 服务器生命周期。"""
-            await self.init()
-            await Canary.start(self)
-            app.state.cf_registry = self.registry
-            _register_routes(app, self.registry)
-            _log.info("FastAPI ready — listening on %s:%d", host, port)
+            """Lifespan — bridges Canary lifecycle hooks to HTTP server lifecycle."""
+            await Canary.start(_self)
+            app.state.cf_registry = _self.registry
+            _log.info("FastAPI ready — listening on %s:%d", _self._host, _self._port)
             yield
             _log.info("Shutting down…")
-            await self.stop()
+            await _self.stop()
 
-        fastapi_app = FastAPI(lifespan=lifespan, **fastapi_kwargs)
-
-        config = uvicorn.Config(
-            fastapi_app,
-            host=host,
-            port=port,
-            access_log=True,
-            log_config=_CF_ACCESS_LOG_CONFIG,
-            **uvicorn_kwargs,
-        )
-        server = uvicorn.Server(config)
-        await server.serve()
+        self._fastapi_app = FastAPI(lifespan=lifespan, **self._fastapi_kwargs)
 
 
 # ============================================================================
