@@ -35,6 +35,7 @@ class TestRegisterRoutes:
 
         reg = Registry()
         reg.register(RegRouter)
+        reg.get_by_class(RegRouter).instance = RegRouter()
 
         app = FastAPI()
         _register_routes(app, reg)
@@ -59,6 +60,7 @@ class TestRegisterRoutes:
 
         reg = Registry()
         reg.register(TaggedRouter)
+        reg.get_by_class(TaggedRouter).instance = TaggedRouter()
         app = FastAPI()
         _register_routes(app, reg)
 
@@ -114,6 +116,8 @@ class TestRegisterRoutes:
         reg = Registry()
         reg.register(UserR)
         reg.register(PostR)
+        reg.get_by_class(UserR).instance = UserR()
+        reg.get_by_class(PostR).instance = PostR()
         app = FastAPI()
         _register_routes(app, reg)
 

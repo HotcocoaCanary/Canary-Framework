@@ -102,6 +102,7 @@ class TestRegistry:
 
         reg = Registry()
         reg.register(DBService)
+        reg.get_by_class(DBService).instance = DBService()
         inst = reg.get_instance(DBService)
         assert isinstance(inst, DBService)
 

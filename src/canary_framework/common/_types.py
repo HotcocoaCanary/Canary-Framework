@@ -85,11 +85,13 @@ class ServiceEntry:
     cls: type
     """原始用户类 (The original user class decorated with ``@service`` or ``@module``)."""
 
-    instance: object
-    """构造的实例，通过 ``cls()`` 无参构造 (Constructed via ``cls()`` with no args)."""
-
     name: str
     """全局唯一名称 (Globally unique name declared in the decorator)."""
+
+    instance: object | None = field(default=None)
+    """构造的实例，在 wiring 阶段通过 ``cls()`` 无参构造。
+    Constructed via ``cls()`` with no args during the wiring phase.
+    ``None`` before instantiation."""
 
     deps: list[type] = field(default_factory=list)
     """依赖类列表，用于 DI (Dependency class list from ``deps=[]``)."""

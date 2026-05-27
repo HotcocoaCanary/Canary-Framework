@@ -26,6 +26,8 @@ class TestInjectDeps:
         reg = Registry()
         reg.register(DBService)
         reg.register(UserService)
+        for e in reg.all_entries():
+            e.instance = e.cls()
 
         user_entry = reg.get_by_name("user")
         inject_deps(user_entry.instance, user_entry, reg)
@@ -48,6 +50,8 @@ class TestInjectDeps:
         reg = Registry()
         for cls in (DBService, CacheService, AppService):
             reg.register(cls)
+        for e in reg.all_entries():
+            e.instance = e.cls()
 
         app_entry = reg.get_by_name("app")
         inject_deps(app_entry.instance, app_entry, reg)
@@ -67,11 +71,9 @@ class TestInjectDeps:
         reg = Registry()
         reg.register(DBService)
         reg.register(UserService)
-
-        # Manually clear the instance to simulate uninitialised state
+        # Only instantiate the target — dep remains None to trigger the error
         user_entry = reg.get_by_name("user")
-        dep_entry = reg.get_by_name("db")
-        dep_entry.instance = None
+        user_entry.instance = UserService()
 
         with pytest.raises(DependencyInjectionError, match="instance is None"):
             inject_deps(user_entry.instance, user_entry, reg)
@@ -88,6 +90,8 @@ class TestInjectDeps:
         reg = Registry()
         reg.register(DataSetAdminService)
         reg.register(App)
+        for e in reg.all_entries():
+            e.instance = e.cls()
 
         app_entry = reg.get_by_name("app")
         inject_deps(app_entry.instance, app_entry, reg)

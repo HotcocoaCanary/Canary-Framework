@@ -23,7 +23,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 from typing import Any
 
 from canary_framework.common._logging import get_logger, init_logging
@@ -116,6 +116,11 @@ class Canary:
             " → ".join(self._startup_order),
         )
 
+        engine.debug("Phase 2.5: instantiating services")
+        for name in self._startup_order:
+            entry = self._registry.get_by_name(name)
+            entry.instance = entry.cls()
+
         engine.debug("Phase 3: wiring entries")
         for name in self._startup_order:
             entry = self._registry.get_by_name(name)
@@ -134,7 +139,12 @@ class Canary:
 
         按拓扑序触发所有服务的 on_init 钩子。
         必须在 ``config()`` 之后调用。
+
+        Raises:
+            RuntimeError: 如果 ``config()`` 尚未调用。
         """
+        if not self._wired:
+            raise RuntimeError("init() called before config(). Call await app.config() first.")
         engine = get_logger("engine")
         engine.info("── init start ──")
         for name in self._startup_order:
@@ -145,7 +155,13 @@ class Canary:
     async def start(self) -> None:
         """Call ``on_start`` on every entry in topological order.
 
-        按拓扑序触发所有服务的 on_start 钩子。"""
+        按拓扑序触发所有服务的 on_start 钩子。
+
+        Raises:
+            RuntimeError: 如果 ``config()`` 尚未调用。
+        """
+        if not self._wired:
+            raise RuntimeError("start() called before config(). Call await app.config() first.")
         engine = get_logger("engine")
         engine.info("── start ──")
         for name in self._startup_order:
@@ -156,7 +172,13 @@ class Canary:
     async def stop(self) -> None:
         """Call ``on_end`` on every entry in **reverse** topological order.
 
-        按逆序触发所有服务的 on_end 钩子。依赖方先停止，被依赖方后停止。"""
+        按逆序触发所有服务的 on_end 钩子。依赖方先停止，被依赖方后停止。
+
+        Raises:
+            RuntimeError: 如果 ``config()`` 尚未调用。
+        """
+        if not self._wired:
+            raise RuntimeError("stop() called before config(). Call await app.config() first.")
         engine = get_logger("engine")
         engine.info("── stop ──")
         for name in reversed(self._startup_order):
@@ -183,7 +205,9 @@ class Canary:
         if self._config is not None:
             service_config = getattr(self._config, entry.name, None)
             if service_config is not None:
-                if hasattr(service_config, "model_dump"):
+                from pydantic import BaseModel
+
+                if isinstance(service_config, BaseModel):
                     for key, value in service_config.model_dump().items():
                         setattr(entry.instance, key, value)
                 elif isinstance(service_config, dict):
@@ -220,14 +244,14 @@ class Canary:
 
         lifecycle.info("  %s.%s()", entry.name, hook.value)
         try:
-            result = fn_s(*args)
+            if inspect.iscoroutinefunction(fn_s):
+                await fn_s(*args)
+            else:
+                fn_s(*args)
         except Exception as exc:
             raise LifecycleHookError(
                 f"Service '{entry.name}' raised an error in {hook.value} hook: {exc}"
             ) from exc
-
-        if asyncio.iscoroutine(result):
-            await result
 
     # ==================================================================
     # 递归收集 (Recursive collection)

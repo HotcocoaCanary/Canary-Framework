@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
 
 jobs:
   test:
@@ -21,6 +21,8 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
+        with:
+          cache-dependency-glob: "pyproject.toml"
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}

@@ -14,13 +14,13 @@ Canary Framework 是一个**装饰器驱动**的服务框架。核心思想：**
 
 ## 特性
 
-- **装饰器 API** —— `@service` / `@module` / `@config` 声明即用，无需继承基类
-- **拓扑启动** —— 基于 Kahn 算法自动排序，保证被依赖的先启动
-- **依赖注入** —— `deps=[DBService]` 自动注入为 `self.db_service`
-- **配置管理** —— `@config` + pydantic-settings，自动读取 `.env` 和环境变量
-- **生命周期** —— `@on_init` / `@on_start` / `@on_end` 钩子，sync/async 自适应
-- **Web 集成** —— `WebCanary` 一键接入 FastAPI + Uvicorn
-- **Context 系统** —— parent 链向上委托配置和依赖解析
+- **装饰器 API** — `@service` / `@module` 声明即用，无需继承基类
+- **拓扑启动** — 基于 Kahn 算法自动排序，保证被依赖的先启动
+- **依赖注入** — `deps=[DBService]` 自动注入为 `self.db_service`
+- **配置管理** — pydantic-settings + `app.config(config=...)`，自动读取 `.env` 和环境变量
+- **生命周期** — `@on_config` / `@on_init` / `@on_start` / `@on_end` 钩子，sync/async 自适应
+- **Web 集成** — `WebCanary` 一键接入 FastAPI + Uvicorn
+- **日志脱敏** — 敏感字段 (password, secret, token) 自动屏蔽
 
 ## 安装
 
@@ -38,97 +38,106 @@ from canary_framework import service, module, on_start, Canary
 @service(name="hello")
 class HelloService:
     @on_start
-    def start(self):
+    def start(self) -> None:
         print("Hello from Canary!")
 
 @module(name="App", services=[HelloService])
 class App:
     pass
 
-if __name__ == "__main__":
-    async def main():
-        app = Canary(App)
-        await app.init()
-        await app.start()
-
-    asyncio.run(main())
-```
-
-## Web 示例
-
-```python
-import asyncio
-from canary_framework import service, module, on_init, Context, config
-from canary_framework.web.fastapi import web, get, WebCanary
-
-@config
-class AppConfig:
-    uvicorn_host: str = "0.0.0.0"
-    uvicorn_port: int = 8000
-    fastapi_title: str = "My API"
-
-@web()
-@module(name="AppModule", config=AppConfig, services=[])
-class AppModule:
-    @get("/health")
-    async def health(self):
-        return {"status": "ok"}
-
-async def main():
-    app = WebCanary(AppModule)
+async def main() -> None:
+    app = Canary(App)
+    await app.config()
     await app.init()
     await app.start()
 
 asyncio.run(main())
 ```
 
-## 架构概览
+## Web 示例
 
-```
-canary_framework/
-├── core/
-│   ├── decorators/          # @config, @service, @module, @on_init/start/end
-│   ├── engine/              # Canary(编排), Context(上下文), Injector(DI), Sorter(拓扑)
-│   ├── registry/            # 注册中心
-│   └── utils/               # 命名工具
-└── web/
-    └── fastapi/             # WebCanary 引擎, @web, @router, @get/@post/...
-```
+```python
+import asyncio
+from pydantic import BaseModel
+from canary_framework import service, module, on_config, Canary
+from canary_framework.web.fastapi import router, get, WebCanary
 
-```
-Canary.init()
-  ├── _collect()            递归发现 @service/@module
-  ├── _validate()           校验依赖完整性
-  ├── topological_sort()    Kahn 拓扑排序
-  ├── _build_context_tree() 构建 Context parent 链
-  └── 按拓扑序: DI → 配置加载 → on_init(ctx)
-Canary.start()
-  └── 按拓扑序: on_start()
-Canary.stop()
-  └── 按逆序: on_end()
+class DBConfig(BaseModel):
+    connection_string: str = "postgresql://localhost/mydb"
+    pool_size: int = 10
+
+class AppConfig(BaseModel):
+    uvicorn_host: str = "127.0.0.1"
+    uvicorn_port: int = 8000
+    fastapi_title: str = "My API"
+    dbservice: DBConfig = DBConfig()
+
+@service(name="dbservice")
+class DBService:
+    @on_config
+    def setup(self) -> None:
+        print(f"DB ready at {self.connection_string}")
+
+@router(prefix="/api", tags=["api"])
+class APIRouter:
+    @get("/hello")
+    async def hello(self) -> dict:
+        return {"message": "Hello, world!"}
+
+@module(name="AppModule", services=[APIRouter, DBService])
+class AppModule:
+    pass
+
+async def main() -> None:
+    app = WebCanary(AppModule)
+    await app.config(config=AppConfig())
+    await app.init()
+    await app.start()
+
+asyncio.run(main())
 ```
 
 ## 文档
 
 完整文档见 [Wiki](https://github.com/HotcocoaCanary/Canary-Framework/wiki) 或 [docs/](./docs/zh/) 目录。
 
-- [快速开始](./docs/zh/quickstart.md)
-- [核心概念](./docs/zh/core-concepts.md)
-- [服务](./docs/zh/services.md)
-- [模块](./docs/zh/modules.md)
-- [配置](./docs/zh/configuration.md)
-- [生命周期](./docs/zh/lifecycle.md)
-- [依赖注入](./docs/zh/dependency-injection.md)
-- [Web 集成](./docs/zh/web-integration.md)
-- [API 参考](./docs/zh/api-reference.md)
-
 English docs: [docs/en/](./docs/en/)
+
+## 架构概览
+
+```
+src/canary_framework/
+├── common/                  # 共享类型、枚举、异常、日志
+├── core/
+│   ├── decorators/          # @service, @module, 生命周期钩子
+│   ├── conductor/           # Canary 引擎 (生命周期编排)
+│   ├── container/           # 注册中心 (Registry)
+│   └── algorithms/          # 拓扑排序, DI 注入器, 命名工具
+└── web/
+    └── fastapi/             # WebCanary 引擎, @router, @get/@post/...
+```
+
+```
+Canary.config()
+  ├── _collect()            递归发现 @service/@module
+  ├── _validate()           校验依赖完整性
+  ├── topological_sort()    Kahn 拓扑排序
+  ├── instantiate()         创建所有服务实例
+  ├── _wire_entry()         DI + 配置注入 + 子服务注入
+  └── on_config 钩子        (按拓扑序)
+Canary.init()
+  └── 按拓扑序: on_init()
+Canary.start()
+  └── 按拓扑序: on_start()
+Canary.stop()
+  └── 按逆序: on_end()
+```
 
 ## 社区
 
-- 💬 [Discussions](https://github.com/HotcocoaCanary/Canary-Framework/discussions) —— 提问、交流
-- 🐛 [Issues](https://github.com/HotcocoaCanary/Canary-Framework/issues) —— Bug 报告、功能请求
-- 📖 [Wiki](https://github.com/HotcocoaCanary/Canary-Framework/wiki) —— 完整文档
+- 💬 [Discussions](https://github.com/HotcocoaCanary/Canary-Framework/discussions)
+- 🐛 [Issues](https://github.com/HotcocoaCanary/Canary-Framework/issues)
+- 📖 [Wiki](https://github.com/HotcocoaCanary/Canary-Framework/wiki)
 
 ## 贡献
 
