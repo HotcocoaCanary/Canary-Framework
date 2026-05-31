@@ -1,79 +1,169 @@
-# Quick Start
+# Quickstart
 
-## Installation
+This guide will walk you through building a complete application with Canary Framework.
+
+## 1. Project Structure
+
+Let's create a simple blog application:
+
+```
+my_blog/
+├── main.py
+└── services/
+    ├── __init__.py
+    ├── database.py
+    ├── auth.py
+    └── posts.py
+```
+
+## 2. Database Service
+
+First, let's create a database service:
+
+```python
+# services/database.py
+from canary_framework import service, after_config, before_shutdown
+
+@service(name="database")
+class DatabaseService:
+    def __init__(self):
+        self.connection = None
+    
+    @after_config
+    async def connect(self):
+        # Simulate database connection
+        self.connection = "connected"
+        print("Database connected")
+    
+    @before_shutdown
+    async def disconnect(self):
+        self.connection = None
+        print("Database disconnected")
+    
+    async def query(self, sql):
+        # Simulate query execution
+        return f"Executed: {sql}"
+```
+
+## 3. Auth Service
+
+Now, let's create an auth service that depends on the database:
+
+```python
+# services/auth.py
+from canary_framework import service, after_init
+from .database import DatabaseService
+
+@service(name="auth", deps=[DatabaseService])
+class AuthService:
+    def __init__(self):
+        self.users = {}
+    
+    @after_init
+    async def init_default_users(self):
+        # Initialize some default users
+        self.users = {
+            "admin": {"name": "Admin", "role": "admin"},
+            "user": {"name": "User", "role": "user"}
+        }
+    
+    async def verify_user(self, username):
+        return username in self.users
+```
+
+## 4. Posts Router
+
+Let's build a web router for our blog posts:
+
+```python
+# services/posts.py
+from canary_framework import router, get, post, put, delete
+from .auth import AuthService
+from .database import DatabaseService
+
+@router(name="posts", prefix="/api/posts", deps=[AuthService, DatabaseService])
+class PostsRouter:
+    def __init__(self):
+        self.posts = [
+            {"id": 1, "title": "First Post", "content": "Hello World!"}
+        ]
+    
+    @get("/")
+    async def list_posts(self, request):
+        return {"posts": self.posts}
+    
+    @get("/{post_id}")
+    async def get_post(self, request):
+        post_id = int(request.path_params["post_id"])
+        post = next((p for p in self.posts if p["id"] == post_id), None)
+        if post:
+            return post
+        return {"error": "Post not found"}, 404
+    
+    @post("/")
+    async def create_post(self, request):
+        data = await request.json()
+        new_post = {
+            "id": len(self.posts) + 1,
+            "title": data.get("title"),
+            "content": data.get("content")
+        }
+        self.posts.append(new_post)
+        return new_post, 201
+```
+
+## 5. Main Application Module
+
+Now, let's compose everything into our main module:
+
+```python
+# main.py
+from canary_framework import module
+from services.database import DatabaseService
+from services.auth import AuthService
+from services.posts import PostsRouter
+
+@module(name="blog_app", services=[DatabaseService, AuthService, PostsRouter])
+class BlogApp:
+    pass
+
+# Run the application
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:BlogApp", host="0.0.0.0", port=8000, reload=True)
+```
+
+## 6. Run the Application
 
 ```bash
-pip install canary-framework          # core library
-pip install canary-framework[web]     # full install with FastAPI support
+python main.py
 ```
 
-## Minimal Example
+Now you can test your API:
 
-One service, no config, no dependencies — just init and start:
+```bash
+# List all posts
+curl http://localhost:8000/posts/
 
-```python
-import asyncio
-from canary_framework import service, module, on_start, Canary
+# Get a single post
+curl http://localhost:8000/posts/1
 
-@service(name="hello")
-class HelloService:
-    @on_start
-    def start(self) -> None:
-        print("Hello from Canary!")
-
-@module(name="App", services=[HelloService])
-class App:
-    pass
-
-async def main() -> None:
-    app = Canary(App)
-    await app.init()
-    await app.start()
-
-asyncio.run(main())
+# Create a new post
+curl -X POST http://localhost:8000/posts/ \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Second Post", "content": "Another post!"}'
 ```
 
-## Full Example
+## What You've Learned
 
-Service + router + config + WebCanary:
+- How to define services with `@service`
+- How to create routers with `@router` and HTTP method decorators
+- How to declare dependencies between services
+- How to compose everything into a module with `@module`
+- How to use lifecycle hooks for initialization and cleanup
 
-```python
-import asyncio
-from pydantic import BaseModel
-from canary_framework import service, module, on_config
-from canary_framework.web.fastapi import get, router, WebCanary
-
-class DBConfig(BaseModel):
-    connection_string: str = "postgresql://localhost/mydb"
-    pool_size: int = 10
-
-class AppConfig(BaseModel):
-    uvicorn_host: str = "127.0.0.1"
-    uvicorn_port: int = 8000
-    fastapi_title: str = "My API"
-    dbservice: DBConfig = DBConfig()   # field name matches service name
-
-@router(prefix="/api", deps=[], tags=["api"])
-class APIRouter:
-    @get("/hello")
-    async def hello(self) -> dict:
-        return {"message": "Hello, world!"}
-
-@service(name="dbservice")
-class DBService:
-    @on_config
-    def setup(self) -> None:
-        print(f"DB ready at {self.connection_string}")
-
-@module(name="AppModule", services=[APIRouter, DBService])
-class AppModule:
-    pass
-
-async def main() -> None:
-    app = WebCanary(AppModule)
-    await app.config(config=AppConfig())
-    await app.init()
-    await app.start()
-
-asyncio.run(main())
-```
+Next, explore the detailed documentation:
+- [Services](./services.md)
+- [Modules](./modules.md)
+- [Web Routing](./web.md)
+- [Dependency Injection](./dependency-injection.md)

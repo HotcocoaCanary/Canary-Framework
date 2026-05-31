@@ -1,119 +1,319 @@
-# Lifecycle
+# Lifecycle Management
 
-Every service and module supports four lifecycle hooks, all optional. Hooks are defined by the `LifecycleHook` enum and must be explicitly decorated — the framework never auto-detects by method name.
+Canary Framework provides a comprehensive lifecycle management system for services and modules.
+
+## Lifecycle Phases
+
+Every service and module goes through these phases:
 
 ```
-Canary.config() → on_config() → ...   (wiring + config injection, topological order)
-Canary.init()   → on_init()   → ...   (topological order: deps first)
-Canary.start()  → on_start()  → ...   (topological order)
-Canary.stop()   ← on_end()  ← ...     (reverse order: dependants first)
+Instantiation → Configuration → Initialization → Startup → Shutdown
 ```
 
-## Execution Order
+### 1. Instantiation
 
-- **`on_config`**, **`on_init`**, and **`on_start`**: topological order — services with no dependencies run first; dependants follow.
-- **`on_end`**: reverse topological order — dependants stop first, then their dependencies.
-
-## `on_config()`
-
-Called during `Canary.config()`. At this point wiring is complete — dependencies are injected as instance attributes, and config model fields matching the service name are available. The hook receives **no parameters** — everything is on `self`.
+The service instance is created with `__init__()`:
 
 ```python
-@service(name="db", deps=[CacheService])
-class DBService:
-    cache_service: CacheService
-
-    @on_config
-    def setup(self) -> None:
-        self.pool = create_pool(self.pool_size, self.timeout)
-        # pool_size and timeout injected from DBConfig field in the app config model
+@service(name="my_service")
+class MyService:
+    def __init__(self):
+        # Initialize basic attributes
+        self.connected = False
+        self.data = []
 ```
 
-## `on_init()`
+### 2. Configuration
 
-Called during `Canary.init()`. At this point all dependencies are injected as instance attributes. Config fields are already available from the `on_config` phase. The hook receives **no parameters** — everything is on `self`.
+The `configure(config)` method is called, where you can set up connections and access configuration:
 
 ```python
-@service(name="db", deps=[CacheService])
-class DBService:
-    cache_service: CacheService
-
-    @on_init
-    def init(self) -> None:
-        self.pool.ping()
+@service(name="my_service")
+class MyService:
+    async def configure(self, config_instance=None):
+        # Access configuration
+        if config_instance:
+            self.config = config_instance
 ```
 
-## `on_start()`
-
-Called during `Canary.start()` in topological order. Use for opening connections, registering signal handlers, or starting background tasks.
+Use `@after_config` hook to run code after configuration:
 
 ```python
-@on_start
-async def start(self) -> None:
-    await self.pool.connect()
-    self._task = asyncio.create_task(self._loop())
+from canary_framework import after_config
+
+@service(name="database")
+class DatabaseService:
+    @after_config
+    async def connect(self):
+        # Connect to database
+        self.connection = await connect_to_db(self.config.db_url)
 ```
 
-## `on_end()`
+### 3. Initialization
 
-Called during `Canary.stop()` in **reverse** order. Use for graceful cleanup — closing connections, cancelling tasks, flushing buffers.
+The `init()` method is called after all services are configured:
 
 ```python
-@on_end
-async def stop(self) -> None:
-    self._task.cancel()
-    await self.pool.close()
+@service(name="my_service")
+class MyService:
+    async def init(self):
+        # Initialize service after all dependencies are ready
+        pass
 ```
 
-## Sync and Async
-
-Hook methods can be `def` or `async def`. The framework detects coroutines via `asyncio.iscoroutine()` and awaits them automatically. You can mix sync and async hooks within the same class.
-
-## LifecycleHook Enum
+Use `@after_init` hook to run code after initialization:
 
 ```python
-from canary_framework import LifecycleHook
+from canary_framework import after_init
 
-# LifecycleHook.CONFIG == "on_config"
-# LifecycleHook.INIT   == "on_init"
-# LifecycleHook.START  == "on_start"
-# LifecycleHook.END    == "on_end"
+@service(name="user_service")
+class UserService:
+    @after_init
+    async def seed_default_users(self):
+        # Create default users if needed
+        if not await self.db.has_users():
+            await self.db.create_default_users()
+```
+
+### 4. Startup
+
+The `startup()` method is called when the application is ready to start:
+
+```python
+@service(name="my_service")
+class MyService:
+    async def startup(self):
+        # Start background tasks, begin processing, etc.
+        pass
+```
+
+Use `@before_startup` hook to run code before startup:
+
+```python
+from canary_framework import before_startup
+
+@service(name="server")
+class ServerService:
+    @before_startup
+    async def verify_connections(self):
+        # Verify all connections are healthy before serving
+        assert self.db.connection is not None
+        assert self.cache.connection is not None
+```
+
+### 5. Shutdown
+
+The `shutdown()` method is called when the application is stopping:
+
+```python
+@service(name="my_service")
+class MyService:
+    async def shutdown(self):
+        # Cleanup resources
+        pass
+```
+
+Use `@before_shutdown` hook to run code before shutdown:
+
+```python
+from canary_framework import before_shutdown
+
+@service(name="database")
+class DatabaseService:
+    @before_shutdown
+    async def disconnect(self):
+        # Disconnect gracefully
+        await self.connection.close()
+```
+
+## Lifecycle Hooks
+
+Four decorators are available for hooking into the lifecycle:
+
+| Decorator | Phase | Timing |
+|-----------|-------|--------|
+| `@after_config` | Configuration | After `configure()` is called |
+| `@after_init` | Initialization | After `init()` is called |
+| `@before_startup` | Startup | Before `startup()` is called |
+| `@before_shutdown` | Shutdown | Before `shutdown()` is called |
+
+## Hook Methods
+
+Hooks can be either synchronous or asynchronous:
+
+```python
+@service(name="my_service")
+class MyService:
+    @after_config
+    def sync_hook(self):
+        # Synchronous hook
+        print("Configured")
+    
+    @after_init
+    async def async_hook(self):
+        # Asynchronous hook
+        await some_async_operation()
+```
+
+## Module Lifecycle
+
+Modules coordinate the lifecycle of their child services:
+
+```python
+@module(name="app", services=[ServiceA, ServiceB])
+class AppModule:
+    pass
+
+app = AppModule()
+
+# Configure all services in dependency order
+await app.configure(config)
+
+# Initialize all services
+await app.init()
+
+# Start all services
+await app.startup()
+
+# ... run app ...
+
+# Shutdown all services in reverse order
+await app.shutdown()
+```
+
+The execution order follows topological sort:
+- **Configure**: A → B
+- **Init**: A → B
+- **Startup**: A → B
+- **Shutdown**: B → A
+
+## Complete Lifecycle Example
+
+```python
+from canary_framework import (
+    service, module,
+    after_config, after_init, before_startup, before_shutdown
+)
+
+calls = []
+
+@service(name="a")
+class ServiceA:
+    @after_config
+    def config_a(self):
+        calls.append("A: after_config")
+    
+    @after_init
+    def init_a(self):
+        calls.append("A: after_init")
+    
+    @before_startup
+    def startup_a(self):
+        calls.append("A: before_startup")
+    
+    @before_shutdown
+    def shutdown_a(self):
+        calls.append("A: before_shutdown")
+
+@service(name="b", deps=[ServiceA])
+class ServiceB:
+    @after_config
+    def config_b(self):
+        calls.append("B: after_config")
+    
+    @after_init
+    def init_b(self):
+        calls.append("B: after_init")
+    
+    @before_startup
+    def startup_b(self):
+        calls.append("B: before_startup")
+    
+    @before_shutdown
+    def shutdown_b(self):
+        calls.append("B: before_shutdown")
+
+@module(name="app", services=[ServiceA, ServiceB])
+class AppModule:
+    pass
+
+# Run lifecycle
+app = AppModule()
+await app.configure()
+await app.init()
+await app.startup()
+await app.shutdown()
+
+# Resulting order:
+# A: after_config
+# B: after_config
+# A: after_init
+# B: after_init
+# A: before_startup
+# B: before_startup
+# B: before_shutdown
+# A: before_shutdown
+```
+
+## ASGI Lifecycle
+
+When running as an ASGI application, the framework automatically handles the lifecycle:
+
+```python
+import uvicorn
+
+@module(name="app", services=[...])
+class AppModule:
+    pass
+
+# uvicorn handles the lifecycle events
+uvicorn.run("main:AppModule", lifespan="on")
+```
+
+The ASGI lifespan protocol will:
+1. Call `startup()` when the server starts
+2. Call `shutdown()` when the server stops
+
+## Configuration
+
+Pass configuration during the configure phase:
+
+```python
+class AppConfig:
+    def __init__(self):
+        self.database_url = "sqlite:///mydb.db"
+        self.debug = True
+
+@service(name="database")
+class DatabaseService:
+    @after_config
+    async def connect(self):
+        # Access config via self.config
+        url = self.config.database_url
+        self.connection = await connect(url)
+
+app = AppModule()
+await app.configure(AppConfig())
 ```
 
 ## Error Handling
 
-If a hook method raises an exception, the framework wraps it in `LifecycleHookError`:
+If a hook raises an exception, it's wrapped in `LifecycleHookError`:
 
 ```python
-from canary_framework import LifecycleHookError
+from canary_framework.common import LifecycleHookError
 
 try:
-    await app.init()
+    await app.configure()
 except LifecycleHookError as e:
-    print(f"Hook failed: {e}")
+    print(f"Lifecycle error: {e}")
 ```
 
-The original exception is preserved as the `__cause__`, so full tracebacks are available for debugging.
+## Best Practices
 
-## Phase Overview
-
-```
-Canary.config(config=Model())
-    │
-    ├── _collect(target)          Phase 0: recursively discover @service / @module / @router
-    ├── _validate()               Phase 1: check all deps references exist
-    ├── topological_sort()        Phase 2: Kahn BFS — compute safe startup order
-    └── for each in startup_order:    Phase 3: wiring + on_config
-        ├── inject_deps()          setattr dependencies on instance
-        ├── inject_config()         setattr config fields on instance
-        └── @on_config()            hook callback (no arguments)
-
-Canary.init()
-    └── for each in startup_order: @on_init() (topological order)
-
-Canary.start()
-    └── for each in startup_order: @on_start() (topological order)
-
-Canary.stop()
-    └── for each in reversed:       @on_end() (reverse order)
-```
+1. **Use `@after_config` for connections**: Establish connections after configuration
+2. **Use `@after_init` for data setup**: Set up initial data after dependencies are ready
+3. **Use `@before_startup` for validation**: Verify everything is ready before serving
+4. **Use `@before_shutdown` for cleanup**: Gracefully close connections and save state
+5. **Keep hooks focused**: Each hook should do one thing well
+6. **Handle errors gracefully**: Catch and log exceptions in hooks
