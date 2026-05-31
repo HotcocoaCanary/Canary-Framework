@@ -22,9 +22,7 @@ from canary_framework.engine.registry import Registry
 
 _log = get_logger("di")
 
-_CAMEL_SPLIT: re.Pattern[str] = re.compile(
-    r"([A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+)"
-)
+_CAMEL_SPLIT: re.Pattern[str] = re.compile(r"([A-Z]+(?![a-z])|[A-Z][a-z0-9]*|[a-z0-9]+)")
 
 
 def to_snake(name: str) -> str:
@@ -104,9 +102,7 @@ def topological_sort(registry: Registry) -> list[str]:
     if len(result) != len(names):
         cyclic = [n for n in names if n not in result]
         _log.error("Circular dependency detected: %s", cyclic)
-        raise CircularDependencyError(
-            f"Circular dependency detected among: {sorted(cyclic)}"
-        )
+        raise CircularDependencyError(f"Circular dependency detected among: {sorted(cyclic)}")
 
     _log.debug("Topological sort result: %s", " → ".join(result))
     return result

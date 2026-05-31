@@ -19,7 +19,7 @@ from canary_framework.common import (
     RouterMeta,
 )
 from canary_framework.core import RouterBase
-from canary_framework.decorators.service import _make_subclass
+from canary_framework.engine import make_subclass
 
 
 def _http_method(method: str, path: str) -> Callable[[HookFunction], HookFunction]:
@@ -27,6 +27,7 @@ def _http_method(method: str, path: str) -> Callable[[HookFunction], HookFunctio
 
     Creates an HTTP method decorator.
     """
+
     def decorator(fn: HookFunction) -> HookFunction:
         setattr(fn, ROUTE_ATTR, {"method": method, "path": path})
         return fn
@@ -127,7 +128,7 @@ def router(
 
         return cast(
             "type[RouterBase]",
-            _make_subclass(
+            make_subclass(
                 cls, RouterBase, meta, meta.name, extra_marker=CF_ROUTER_MARKER
             ),
         )

@@ -11,9 +11,9 @@ in topological order, and exposes a starlette Router for ASGI mounting.
 
 from __future__ import annotations
 
-from typing import cast
+from typing import cast, override
 
-from starlette.routing import Mount, Router
+from starlette.routing import Mount
 from starlette.routing import Router as StarletteRouter
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -49,11 +49,13 @@ class ModuleBase(ServiceBase):
         Initializes the ModuleBase instance.
         """
         super().__init__()
+        self.config: object = None
         self._cf_parent_registry: Registry | None = None
         self._cf_registry: Registry | None = None
         self._cf_startup_order: list[str] = []
         self._cf_asgi_app: StarletteRouter | None = None
 
+    @override
     async def configure(self, config_instance: object = None) -> None:
         """配置模块及其所有子服务。
 
@@ -102,9 +104,7 @@ class ModuleBase(ServiceBase):
             entry = registry.get_by_name(name)
             inst = entry.instance
             if inst is None:
-                raise DependencyInjectionError(
-                    f"Service '{name}' instance is None during wiring."
-                )
+                raise DependencyInjectionError(f"Service '{name}' instance is None during wiring.")
             inject_deps(inst, entry, registry)
             if isinstance(inst, ModuleBase):
                 inst._cf_parent_registry = registry
@@ -121,6 +121,7 @@ class ModuleBase(ServiceBase):
 
         await self._invoke_hook(LifecycleHook.AFTER_CONFIG)
 
+    @override
     async def init(self) -> None:
         """初始化模块及其所有子服务。
 
@@ -149,7 +150,7 @@ class ModuleBase(ServiceBase):
                 await cast(LifecycleAware, child).init()
 
     @property
-    def asgi_app(self) -> Router | None:
+    def asgi_app(self) -> StarletteRouter:
         """获取ASGI应用。
 
         懒加载创建Starlette路由器，挂载所有具有asgi_app属性的子服务。
@@ -172,12 +173,15 @@ class ModuleBase(ServiceBase):
                 for name in self._cf_startup_order:
                     entry = registry.get_by_name(name)
                     inst = entry.instance
-                    if inst is not None and hasattr(inst, "asgi_app"):
-                        app = cast(ASGIApp, inst.asgi_app)
+                    asgi = getattr(inst, "asgi_app", None)
+                    if asgi is not None:
+                        app = cast(ASGIApp, asgi)
                         routes.append(Mount(f"/{name}", app=app))
             self._cf_asgi_app = StarletteRouter(routes)
+        assert self._cf_asgi_app is not None
         return self._cf_asgi_app
 
+    @override
     async def startup(self) -> None:
         """启动模块及其所有子服务。
 
@@ -205,6 +209,7 @@ class ModuleBase(ServiceBase):
                     )
                 await cast(LifecycleAware, child).startup()
 
+    @override
     async def shutdown(self) -> None:
         """关闭模块及其所有子服务。
 

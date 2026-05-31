@@ -10,12 +10,9 @@ from canary_framework.engine.injector import (
     to_snake,
     topological_sort,
 )
-from canary_framework.engine.logging import (
-    get_logger,
-    init_logging,
-    sanitize_config_values,
-)
+from canary_framework.engine.logging import get_logger
 from canary_framework.engine.registry import Registry
+from canary_framework.engine.utils import make_subclass
 
 __all__ = [
     "HookDict",
@@ -23,9 +20,8 @@ __all__ = [
     "Registry",
     "find_hooks",
     "get_logger",
-    "init_logging",
     "inject_deps",
-    "sanitize_config_values",
+    "make_subclass",
     "to_snake",
     "topological_sort",
 ]

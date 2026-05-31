@@ -18,7 +18,7 @@ from canary_framework.common import (
     is_cf_service,
 )
 from canary_framework.core import ModuleBase
-from canary_framework.decorators.service import _make_subclass
+from canary_framework.engine import make_subclass
 
 
 def module(
@@ -80,7 +80,7 @@ def module(
 
         return cast(
             "type[ModuleBase]",
-            _make_subclass(cls, ModuleBase, meta, name, extra_marker=CF_MODULE_MARKER),
+            make_subclass(cls, ModuleBase, meta, name, extra_marker=CF_MODULE_MARKER),
         )
 
     return decorator
