@@ -1,47 +1,62 @@
-"""Canary Framework — lightweight decorator-driven Python service framework.
+"""Canary Framework — lightweight decorator-driven Python async service framework.
 
 Core exports:
-    - Decorators: :func:`service`, :func:`module`, :func:`config`
-    - Lifecycle:  :func:`on_config`, :func:`on_init`, :func:`on_start`, :func:`on_end`,
-      :class:`LifecycleHook`
-    - Engine:     :class:`Canary`
+    - Decorators: :func:`service`, :func:`module`, :func:`router`,
+      :func:`get`, :func:`post`, :func:`put`, :func:`delete`, :func:`patch`,
+      :func:`after_config`, :func:`after_init`, :func:`before_startup`, :func:`before_shutdown`
+    - Lifecycle:  :class:`LifecycleHook`, :class:`RouterBase`
     - Exceptions: :class:`CanaryFrameworkError` and subclasses
 """
 
 from __future__ import annotations
 
-__version__ = "0.3.2"
+__version__ = "0.4.0"
 
-from canary_framework.common.enums import LifecycleHook
-from canary_framework.common.exceptions import (
+from canary_framework.common import (
     CanaryFrameworkError,
     CircularDependencyError,
     ConfigurationError,
     DependencyInjectionError,
+    LifecycleHook,
     LifecycleHookError,
     ServiceNotFoundError,
 )
-from canary_framework.core.conductor import Canary
-from canary_framework.core.decorators.config import config
-from canary_framework.core.decorators.lifecycle import on_config, on_end, on_init, on_start
-from canary_framework.core.decorators.module import module
-from canary_framework.core.decorators.service import service
+from canary_framework.core import RouterBase
+from canary_framework.decorators import (
+    after_config,
+    after_init,
+    before_shutdown,
+    before_startup,
+    delete,
+    get,
+    module,
+    patch,
+    post,
+    put,
+    router,
+    service,
+)
 
 __all__ = [
-    "Canary",
     "CanaryFrameworkError",
     "CircularDependencyError",
     "ConfigurationError",
     "DependencyInjectionError",
     "LifecycleHook",
     "LifecycleHookError",
+    "RouterBase",
     "ServiceNotFoundError",
     "__version__",
-    "config",
+    "after_config",
+    "after_init",
+    "before_shutdown",
+    "before_startup",
+    "delete",
+    "get",
     "module",
-    "on_config",
-    "on_end",
-    "on_init",
-    "on_start",
+    "patch",
+    "post",
+    "put",
+    "router",
     "service",
 ]

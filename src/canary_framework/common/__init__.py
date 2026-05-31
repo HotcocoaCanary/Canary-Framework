@@ -1,13 +1,6 @@
-"""Framework-wide shared infrastructure.
+"""Framework-wide shared infrastructure — types, errors, and markers."""
 
-Provides the type definitions, enumerations, exception classes,
-and logging utilities used by all other framework modules.
-"""
-
-from canary_framework.common._logging import get_logger, init_logging, sanitize_config_values
-from canary_framework.common._types import ModuleMeta, ServiceEntry, ServiceMeta
-from canary_framework.common.enums import LifecycleHook
-from canary_framework.common.exceptions import (
+from canary_framework.common.errors import (
     CanaryFrameworkError,
     CircularDependencyError,
     ConfigurationError,
@@ -15,19 +8,52 @@ from canary_framework.common.exceptions import (
     LifecycleHookError,
     ServiceNotFoundError,
 )
+from canary_framework.common.markers import (
+    CF_HOOK_MARKER_MAP,
+    CF_MODULE_MARKER,
+    CF_NAME_ATTR,
+    CF_ROUTER_MARKER,
+    CF_SERVICE_MARKER,
+    CF_SERVICE_META,
+    ROUTE_ATTR,
+    get_module_meta,
+    get_service_meta,
+    is_cf_module,
+    is_cf_router,
+    is_cf_service,
+)
+from canary_framework.common.types import (
+    HookFunction,
+    LifecycleHook,
+    ModuleMeta,
+    RouterMeta,
+    ServiceEntry,
+    ServiceMeta,
+)
 
 __all__ = [
+    "CF_HOOK_MARKER_MAP",
+    "CF_MODULE_MARKER",
+    "CF_NAME_ATTR",
+    "CF_ROUTER_MARKER",
+    "CF_SERVICE_MARKER",
+    "CF_SERVICE_META",
+    "ROUTE_ATTR",
     "CanaryFrameworkError",
     "CircularDependencyError",
     "ConfigurationError",
     "DependencyInjectionError",
+    "HookFunction",
     "LifecycleHook",
     "LifecycleHookError",
     "ModuleMeta",
+    "RouterMeta",
     "ServiceEntry",
     "ServiceMeta",
     "ServiceNotFoundError",
-    "get_logger",
-    "init_logging",
-    "sanitize_config_values",
+    "get_module_meta",
+    "get_service_meta",
+    "is_cf_module",
+    "is_cf_router",
+    "is_cf_service",
 ]
