@@ -128,9 +128,7 @@ def router(
 
         return cast(
             "type[RouterBase]",
-            make_subclass(
-                cls, RouterBase, meta, meta.name, extra_marker=CF_ROUTER_MARKER
-            ),
+            make_subclass(cls, RouterBase, meta, meta.name, extra_marker=CF_ROUTER_MARKER),
         )
 
     return decorator
