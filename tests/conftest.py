@@ -1,105 +1,97 @@
-"""Shared test fixtures and helpers for Canary Framework tests."""
+"""Shared test fixtures."""
 
 from __future__ import annotations
 
 import pytest
 
-from canary_framework.core import module as _module_decorator
-from canary_framework.core import service as _service_decorator
-from canary_framework.core.conductor.canary import Canary
-from canary_framework.core.decorators.lifecycle import on_end, on_init, on_start
+from canary_framework.decorators import (
+    after_init,
+    before_shutdown,
+    before_startup,
+    module,
+    service,
+)
 
-# ---------------------------------------------------------------------------
-# Minimal fixture classes
-# ---------------------------------------------------------------------------
 
-
-@_service_decorator("a")
+@service("a")
 class ServiceA:
     calls: list[str]
 
     def __init__(self) -> None:
         self.calls = []
 
-    @on_init
-    def init(self) -> None:
+    @after_init
+    def hook_init(self) -> None:
         self.calls.append("a:init")
 
-    @on_start
-    def start(self) -> None:
+    @before_startup
+    def hook_start(self) -> None:
         self.calls.append("a:start")
 
-    @on_end
-    def end(self) -> None:
+    @before_shutdown
+    def hook_end(self) -> None:
         self.calls.append("a:end")
 
     def do(self) -> str:
         return "a"
 
 
-@_service_decorator("b", deps=[ServiceA])
+@service("b", deps=[ServiceA])
 class ServiceB:
     calls: list[str]
 
     def __init__(self) -> None:
         self.calls = []
 
-    @on_init
-    def init(self) -> None:
+    @after_init
+    def hook_init(self) -> None:
         self.calls.append("b:init")
 
-    @on_start
-    def start(self) -> None:
+    @before_startup
+    def hook_start(self) -> None:
         self.calls.append("b:start")
 
-    @on_end
-    def end(self) -> None:
+    @before_shutdown
+    def hook_end(self) -> None:
         self.calls.append("b:end")
 
 
-@_service_decorator("c", deps=[ServiceB])
+@service("c", deps=[ServiceB])
 class ServiceC:
     calls: list[str]
 
     def __init__(self) -> None:
         self.calls = []
 
-    @on_init
-    def init(self) -> None:
+    @after_init
+    def hook_init(self) -> None:
         self.calls.append("c:init")
 
-    @on_start
-    def start(self) -> None:
+    @before_startup
+    def hook_start(self) -> None:
         self.calls.append("c:start")
 
 
-@_module_decorator("m", services=[ServiceA, ServiceB])
+@module("m", services=[ServiceA, ServiceB])
 class ModuleM:
     calls: list[str]
 
     def __init__(self) -> None:
         self.calls = []
 
-    @on_init
-    def init(self) -> None:
+    @after_init
+    def hook_init(self) -> None:
         self.calls.append("m:init")
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def module_instance() -> ModuleM:
+    return ModuleM()
 
 
 @pytest.fixture
-def clean_canary() -> Canary:
-    """Return a fresh Canary instance with ModuleM as root."""
-    return Canary(ModuleM)
-
-
-@pytest.fixture
-async def init_canary() -> Canary:
-    """Return a Canary instance that has already been initialised."""
-    app = Canary(ModuleM)
-    await app.config()
-    await app.init()
-    return app
+async def init_module() -> ModuleM:
+    inst = ModuleM()
+    await inst.configure()  # type: ignore[attr-defined]
+    await inst.init()  # type: ignore[attr-defined]
+    return inst

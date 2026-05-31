@@ -181,7 +181,7 @@ Metadata stored on `@router`-decorated classes. Extends `ServiceMeta`:
 from canary_framework.core.decorators.service import get_service_meta, is_cf_service
 from canary_framework.core.decorators.module import is_cf_module, get_module_meta
 from canary_framework.web.fastapi.decorators.router import is_router, get_router_meta
-from canary_framework.common._types import ServiceMeta, ModuleMeta, RouterMeta
+from canary_framework.common.types import ServiceMeta, ModuleMeta, RouterMeta
 
 meta = get_service_meta(SomeClass)
 if isinstance(meta, RouterMeta):
