@@ -1,73 +1,133 @@
 # Services
 
-A **service** is the smallest runtime unit in the Canary Framework. Every `@service`-decorated class owns its own lifecycle hooks, dependencies, and optional configuration.
+Services are the building blocks of your Canary Framework application. They encapsulate business logic and can be composed together to form complex systems.
 
-## Minimal
+## Defining a Service
+
+Use the `@service` decorator to define a service:
 
 ```python
-from canary_framework import service, on_start, Canary
+from canary_framework import service
 
-@service(name="HelloService")
-class HelloService:
-    @on_start
-    def start(self) -> None:
-        print("started")
+@service(name="user_repository")
+class UserRepository:
+    def __init__(self):
+        self.users = []
+    
+    async def get_all(self):
+        return self.users
+    
+    async def add(self, user):
+        self.users.append(user)
+        return user
 ```
 
-- `name`: globally unique, **required**
-- Everything else is optional
+### Service Parameters
 
-## Full
+- `name`: (required) A unique identifier for the service
+- `deps`: (optional) A list of service classes this service depends on
+
+## Service Dependencies
+
+Services can depend on other services. Declare dependencies using the `deps` parameter:
 
 ```python
-from canary_framework import service, on_config, on_init, on_end
+@service(name="database")
+class DatabaseService:
+    pass
 
-@service(
-    name="UserService",
-    deps=[DBService],           # optional: dependency list
-)
+@service(name="user_service", deps=[DatabaseService])
 class UserService:
-    db_service: DBService
-
-    @on_config
-    def setup(self) -> None:
-        self.pool = create_pool(self.config.dsn)  # config accessible via self.config
-
-    @on_end
-    async def stop(self) -> None:
-        await self.pool.close()
+    async def get_user(self, user_id):
+        # The database service is automatically injected
+        # as self.database_service
+        return await self.database_service.query(...)
 ```
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `name` | `str` | required | Globally unique service name |
-| `deps` | `list[type] \| None` | `None` | Dependency classes injected as `self.<snake_case>` attributes |
+Dependencies are automatically injected as attributes in snake_case format:
+- `DatabaseService` → `self.database_service`
+- `UserRepository` → `self.user_repository`
 
-## Naming Convention
+## Service Lifecycle
 
-Dependencies are injected as instance attributes using the **snake_case** version of the class name:
+Services go through a well-defined lifecycle:
 
-| Class | Injected As |
-|-------|-------------|
-| `DBService` | `self.db_service` |
-| `CacheService` | `self.cache_service` |
-| `DataSetAdminService` | `self.data_set_admin_service` |
+1. **Instantiation**: Service instance is created
+2. **Configuration**: `configure()` method is called
+3. **Initialization**: `init()` method is called
+4. **Startup**: `startup()` method is called
+5. **Shutdown**: `shutdown()` method is called (when the application stops)
 
-The config instance passed to `app.config(config=...)` is available as `self.config` on every service and module in the tree. See [Configuration](./configuration.md).
+You can hook into these phases using lifecycle decorators. See the [Lifecycle](./lifecycle.md) documentation for details.
 
-## Lifecycle Hooks
+## Service Base Class
 
-Hooks must be explicitly marked with decorators. The framework does **not** auto-detect by method name.
+When you decorate a class with `@service`, it automatically inherits from `ServiceBase`, which provides:
+
+- `config` attribute: Access to configuration passed during configure phase
+- `configure(config)` method: Configures the service
+- `init()` method: Initializes the service
+- `startup()` method: Starts the service
+- `shutdown()` method: Shuts down the service
+
+## Complete Example
 
 ```python
-from canary_framework import LifecycleHook
+from canary_framework import service, after_config, after_init, before_startup, before_shutdown
 
-# LifecycleHook.CONFIG → @on_config  (topological order, after wiring)
-# LifecycleHook.INIT   → @on_init    (topological order, no parameters)
-# LifecycleHook.START  → @on_start   (topological order)
-# LifecycleHook.END    → @on_end     (reverse order)
+@service(name="cache")
+class CacheService:
+    def __init__(self):
+        self.cache = {}
+        self.connection = None
+    
+    @after_config
+    async def connect(self):
+        # Connect to cache server
+        self.connection = "connected"
+        print("Cache connected")
+    
+    @after_init
+    async def warmup(self):
+        # Pre-populate cache with common data
+        self.cache["default"] = {"value": "default"}
+        print("Cache warmed up")
+    
+    @before_startup
+    async def verify(self):
+        # Verify cache is ready
+        assert self.connection is not None
+        print("Cache verified")
+    
+    @before_shutdown
+    async def cleanup(self):
+        # Cleanup resources
+        self.connection = None
+        print("Cache disconnected")
+    
+    async def get(self, key):
+        return self.cache.get(key)
+    
+    async def set(self, key, value):
+        self.cache[key] = value
 ```
 
-Hook methods can be sync (`def`) or async (`async def`) — the framework adapts automatically.
+## Testing Services
 
+Services are easy to test because they're plain Python classes:
 
+```python
+import pytest
+
+@pytest.mark.asyncio
+async def test_cache_service():
+    service = CacheService()
+    await service.configure()
+    await service.init()
+    await service.startup()
+    
+    await service.set("key", "value")
+    assert await service.get("key") == "value"
+    
+    await service.shutdown()
+```

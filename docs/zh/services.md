@@ -1,86 +1,132 @@
 # 服务
 
-## 最小写法
+服务是 Canary 框架应用程序的构建块。它们封装业务逻辑，可以组合在一起形成复杂的系统。
+
+## 定义服务
+
+使用 `@service` 装饰器定义服务：
 
 ```python
-from canary_framework import service, on_start, Canary
+from canary_framework import service
 
-@service(name="HelloService")
-class HelloService:
-    @on_start
-    def start(self) -> None:
-        print("started")
+@service(name="user_repository")
+class UserRepository:
+    def __init__(self):
+        self.users = []
+    
+    async def get_all(self):
+        return self.users
+    
+    async def add(self, user):
+        self.users.append(user)
+        return user
 ```
 
-- `name`：全局唯一，必填
-- 其他全可选
+### 服务参数
 
-## 完整写法
+- `name`：（必需）服务的唯一标识符
+- `deps`：（可选）此服务依赖的服务类列表
+
+## 服务依赖
+
+服务可以依赖于其他服务。使用 `deps` 参数声明依赖：
 
 ```python
-from canary_framework import config, service, on_config, on_init, on_end
+@service(name="database")
+class DatabaseService:
+    pass
 
-@config
-class AppConfig:
-    max_items: int = 100
-
-@service(
-    name="UserService",         # 必填：全局唯一名称
-    deps=[DBService],           # 可选：依赖列表，自动注入为 self.db_service
-)
+@service(name="user_service", deps=[DatabaseService])
 class UserService:
-    db_service: DBService
-
-    @on_config
-    def setup(self) -> None:
-        self.max_items = self.config.max_items  # config 通过 self.config 访问
-
-    @on_init
-    def init(self) -> None:
-        self.db_service.query()          # 使用已注入的依赖
-
-    @on_start
-    async def start(self) -> None:
-        await self.pool.connect()
-
-    @on_end
-    def end(self) -> None:
-        self.pool.close()
+    async def get_user(self, user_id):
+        # 数据库服务自动注入为 self.database_service
+        return await self.database_service.query(...)
 ```
 
-## 生命周期钩子
+依赖项以 snake_case 格式自动注入为属性：
+- `DatabaseService` → `self.database_service`
+- `UserRepository` → `self.user_repository`
 
-钩子必须使用装饰器显式标记，框架不会按方法名自动识别：
+## 服务生命周期
+
+服务经过明确定义的生命周期：
+
+1. **实例化**：创建服务实例
+2. **配置**：调用 `configure()` 方法
+3. **初始化**：调用 `init()` 方法
+4. **启动**：调用 `startup()` 方法
+5. **关闭**：调用 `shutdown()` 方法（应用停止时）
+
+您可以使用生命周期钩子进入这些阶段。有关详细信息，请参阅[生命周期](./lifecycle.md)文档。
+
+## 服务基类
+
+当您用 `@service` 装饰一个类时，它会自动继承自 `ServiceBase`，该类提供：
+
+- `config` 属性：访问配置阶段传递的配置
+- `configure(config)` 方法：配置服务
+- `init()` 方法：初始化服务
+- `startup()` 方法：启动服务
+- `shutdown()` 方法：关闭服务
+
+## 完整示例
 
 ```python
-from canary_framework import LifecycleHook
+from canary_framework import service, after_config, after_init, before_startup, before_shutdown
 
-# LifecycleHook.CONFIG → @on_config  （wiring 后、on_init 前，config 属性可用）
-# LifecycleHook.INIT   → @on_init    （拓扑序）
-# LifecycleHook.START  → @on_start   （拓扑序，无参数）
-# LifecycleHook.END    → @on_end     （逆序，无参数）
+@service(name="cache")
+class CacheService:
+    def __init__(self):
+        self.cache = {}
+        self.connection = None
+    
+    @after_config
+    async def connect(self):
+        # 连接到缓存服务器
+        self.connection = "connected"
+        print("Cache connected")
+    
+    @after_init
+    async def warmup(self):
+        # 用常用数据预热缓存
+        self.cache["default"] = {"value": "default"}
+        print("Cache warmed up")
+    
+    @before_startup
+    async def verify(self):
+        # 验证缓存已准备就绪
+        assert self.connection is not None
+        print("Cache verified")
+    
+    @before_shutdown
+    async def cleanup(self):
+        # 清理资源
+        self.connection = None
+        print("Cache disconnected")
+    
+    async def get(self, key):
+        return self.cache.get(key)
+    
+    async def set(self, key, value):
+        self.cache[key] = value
 ```
 
-钩子方法可以是同步 (`def`) 或异步 (`async def`)，框架自动适配。
+## 测试服务
 
-## Config 和 Deps 作为属性
-
-依赖通过 DI 注入为实例属性。Config 通过 `self.config` 访问，在所有服务和模块中自动可用：
+服务易于测试，因为它们是普通的 Python 类：
 
 ```python
-from canary_framework import config
+import pytest
 
-@config
-class AppConfig:
-    dsn: str = "sqlite://"
-
-@service(name="db", deps=[CacheService])
-class DBService:
-    cache_service: CacheService
-
-    @on_config
-    def setup(self) -> None:
-        self.pool = connect(self.config.dsn)
+@pytest.mark.asyncio
+async def test_cache_service():
+    service = CacheService()
+    await service.configure()
+    await service.init()
+    await service.startup()
+    
+    await service.set("key", "value")
+    assert await service.get("key") == "value"
+    
+    await service.shutdown()
 ```
-
-
