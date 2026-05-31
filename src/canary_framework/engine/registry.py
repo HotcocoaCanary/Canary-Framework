@@ -79,9 +79,7 @@ class Registry:
 
         name: str = meta.name
         if name in self._by_name:
-            raise ValueError(
-                f"Service/Module '{name}' is already registered."
-            )
+            raise ValueError(f"Service/Module '{name}' is already registered.")
 
         entry = ServiceEntry(
             cls=cls,
@@ -119,8 +117,7 @@ class Registry:
             return self._by_name[name]
         except KeyError:
             raise ServiceNotFoundError(
-                f"'{name}' is not registered. "
-                f"Registered: {sorted(self._by_name)}"
+                f"'{name}' is not registered. Registered: {sorted(self._by_name)}"
             ) from None
 
     def get_by_class(self, cls: type) -> ServiceEntry:
@@ -156,9 +153,7 @@ class Registry:
                 return current._by_class[cls]
             except KeyError:
                 current = current.parent
-        raise ServiceNotFoundError(
-            f"'{cls.__name__}' is not registered."
-        ) from None
+        raise ServiceNotFoundError(f"'{cls.__name__}' is not registered.") from None
 
     def get_instance(self, cls: type) -> object:
         """获取服务实例。
