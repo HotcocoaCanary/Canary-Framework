@@ -1,4 +1,11 @@
-""""@router" decorator and HTTP method decorators."""
+"""@router装饰器和HTTP方法装饰器实现。
+
+提供路由定义功能，支持GET、POST、PUT、DELETE、PATCH方法。
+
+@router decorator and HTTP method decorators implementation.
+
+Provides routing definition functionality with GET, POST, PUT, DELETE, PATCH methods.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +23,10 @@ from canary_framework.decorators.service import _make_subclass
 
 
 def _http_method(method: str, path: str) -> Callable[[HookFunction], HookFunction]:
+    """创建HTTP方法装饰器。
+
+    Creates an HTTP method decorator.
+    """
     def decorator(fn: HookFunction) -> HookFunction:
         setattr(fn, ROUTE_ATTR, {"method": method, "path": path})
         return fn
@@ -24,27 +35,42 @@ def _http_method(method: str, path: str) -> Callable[[HookFunction], HookFunctio
 
 
 def get(path: str) -> Callable[[HookFunction], HookFunction]:
-    """Mark an async method as a GET route handler."""
+    """将异步方法标记为GET路由处理器。
+
+    Mark an async method as a GET route handler.
+    """
     return _http_method("GET", path)
 
 
 def post(path: str) -> Callable[[HookFunction], HookFunction]:
-    """Mark an async method as a POST route handler."""
+    """将异步方法标记为POST路由处理器。
+
+    Mark an async method as a POST route handler.
+    """
     return _http_method("POST", path)
 
 
 def put(path: str) -> Callable[[HookFunction], HookFunction]:
-    """Mark an async method as a PUT route handler."""
+    """将异步方法标记为PUT路由处理器。
+
+    Mark an async method as a PUT route handler.
+    """
     return _http_method("PUT", path)
 
 
 def delete(path: str) -> Callable[[HookFunction], HookFunction]:
-    """Mark an async method as a DELETE route handler."""
+    """将异步方法标记为DELETE路由处理器。
+
+    Mark an async method as a DELETE route handler.
+    """
     return _http_method("DELETE", path)
 
 
 def patch(path: str) -> Callable[[HookFunction], HookFunction]:
-    """Mark an async method as a PATCH route handler."""
+    """将异步方法标记为PATCH路由处理器。
+
+    Mark an async method as a PATCH route handler.
+    """
     return _http_method("PATCH", path)
 
 
@@ -55,7 +81,20 @@ def router(
     deps: list[type] | None = None,
     tags: list[str] | None = None,
 ) -> Callable[[type], type[RouterBase]]:
-    """Declare a class as a Canary Framework router service.
+    """声明一个类为路由服务。
+
+    将@service语义与HTTP路由分组相结合。
+
+    Args:
+        prefix: 应用于此组中所有路由的URL前缀。
+        name: 全局唯一的服务名称。
+        deps: 依赖类列表。
+        tags: 此路由组的OpenAPI标签。
+
+    Returns:
+        装饰后的类。
+
+    Declare a class as a Canary Framework router service.
 
     Combines ``@service`` semantics with HTTP route grouping.
 
@@ -64,6 +103,9 @@ def router(
         name: Globally unique service name.
         deps: Dependency classes.
         tags: OpenAPI tags for this route group.
+
+    Returns:
+        The decorated class.
     """
     _deps = list(deps or ())
     _tags = list(tags or [])
@@ -84,7 +126,7 @@ def router(
         )
 
         return cast(
-            type[RouterBase],
+            "type[RouterBase]",
             _make_subclass(
                 cls, RouterBase, meta, meta.name, extra_marker=CF_ROUTER_MARKER
             ),
