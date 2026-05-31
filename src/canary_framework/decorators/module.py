@@ -1,4 +1,11 @@
-""""@module" decorator."""
+"""@module装饰器实现。
+
+将类标记为模块，设置元数据并修改基类继承链。
+
+@module decorator implementation.
+
+Marks classes as modules, sets metadata, and modifies base class chain.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +28,25 @@ def module(
     services: list[type] | None = None,
     config: type | None = None,
 ) -> Callable[[type], type[ModuleBase]]:
-    """Declare a class as a Canary Framework module.
+    """声明一个类为模块。
+
+    添加模块标记和元数据，修改类的基类使其继承自ModuleBase。
+
+    Args:
+        name: 模块的全局唯一名称。
+        deps: 模块依赖的其他模块/服务类列表。
+        services: 模块直接包含的子服务类列表。
+        config: 可选的模块配置类。
+
+    Raises:
+        TypeError: 如果services中的任何服务未被装饰。
+
+    Returns:
+        装饰后的类。
+
+    Declare a class as a Canary Framework module.
+
+    Adds module marker and metadata, modifies the class to inherit from ModuleBase.
 
     Args:
         name: Globally unique module name.
@@ -31,6 +56,9 @@ def module(
 
     Raises:
         TypeError: If any service in ``services`` is not decorated.
+
+    Returns:
+        The decorated class.
     """
     _deps = list(deps or ())
     _services = list(services or ())
@@ -51,7 +79,7 @@ def module(
         )
 
         return cast(
-            type[ModuleBase],
+            "type[ModuleBase]",
             _make_subclass(cls, ModuleBase, meta, name, extra_marker=CF_MODULE_MARKER),
         )
 
