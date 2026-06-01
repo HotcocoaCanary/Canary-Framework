@@ -49,7 +49,6 @@ class ModuleBase(ServiceBase):
         Initializes the ModuleBase instance.
         """
         super().__init__()
-        self.config: object = None
         self._cf_parent_registry: Registry | None = None
         self._cf_registry: Registry | None = None
         self._cf_startup_order: list[str] = []
