@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import patch
 
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
 from canary_framework.decorators import get, module, router, service
 
 
@@ -16,7 +18,7 @@ class TestLogging:
             pass
 
         with patch("canary_framework.core.service._log") as mock_log:
-            service_inst = TestService()
+            service_inst = cast(ServiceBase, TestService())
             await service_inst.configure()
             await service_inst.init()
             await service_inst.startup()
@@ -35,7 +37,7 @@ class TestLogging:
             pass
 
         with patch("canary_framework.core.module._log") as mock_log:
-            module_inst = TestModule()
+            module_inst = cast(ModuleBase, TestModule())
             await module_inst.configure()
             await module_inst.init()
             await module_inst.startup()
@@ -76,7 +78,7 @@ class TestLogging:
                 return {"message": "test"}
 
         with patch("canary_framework.core.router._log") as mock_log:
-            router_inst = TestLogRouter()
+            router_inst = cast(RouterBase, TestLogRouter())
             _ = router_inst.asgi_app
 
             mock_log.debug.assert_any_call(
@@ -101,7 +103,7 @@ class TestLogging:
             class DiTestModule:
                 pass
 
-            module_inst = DiTestModule()
+            module_inst = cast(ModuleBase, DiTestModule())
             await module_inst.configure()
 
             mock_log.debug.assert_any_call("Injecting dependencies into: %s", "main_service")
