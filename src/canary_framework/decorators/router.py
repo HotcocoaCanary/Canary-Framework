@@ -76,9 +76,9 @@ def patch(path: str) -> Callable[[HookFunction], HookFunction]:
 
 
 def router(
+    name: str,
     prefix: str = "",
     *,
-    name: str = "",
     deps: list[type] | None = None,
     tags: list[str] | None = None,
 ) -> Callable[[type], type[RouterBase]]:
@@ -119,7 +119,7 @@ def router(
                 routes.append(attr)
 
         meta = RouterMeta(
-            name=name or cls.__name__.lower(),
+            name=name,
             deps=_deps,
             prefix=prefix,
             tags=_tags,

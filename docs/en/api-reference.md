@@ -65,8 +65,7 @@ def module(
     name: str,
     *,
     deps: List[type] = None,
-    services: List[type] = None,
-    config: type = None
+    services: List[type] = None
 ) -> Callable[[type], type[ModuleBase]]
 ```
 
@@ -92,9 +91,9 @@ Marks a class as a router.
 **Signature:**
 ```python
 def router(
+    name: str = "",
     prefix: str = "",
     *,
-    name: str = "",
     deps: List[type] = None,
     tags: List[str] = None
 ) -> Callable[[type], type[RouterBase]]

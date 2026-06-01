@@ -65,8 +65,7 @@ def module(
     name: str,
     *,
     deps: List[type] = None,
-    services: List[type] = None,
-    config: type = None
+    services: List[type] = None
 ) -> Callable[[type], type[ModuleBase]]
 ```
 
@@ -92,17 +91,17 @@ class AppModule:
 **签名：**
 ```python
 def router(
+    name: str,
     prefix: str = "",
     *,
-    name: str = "",
     deps: List[type] = None,
     tags: List[str] = None
 ) -> Callable[[type], type[RouterBase]]
 ```
 
 **参数：**
+- `name`（str，必需）：路由的唯一标识符
 - `prefix`（str，可选）：所有路由的 URL 前缀
-- `name`（str，可选）：路由的唯一标识符
 - `deps`（List[type]，可选）：路由的依赖项
 - `tags`（List[str]，可选）：文档的 OpenAPI 标签
 
