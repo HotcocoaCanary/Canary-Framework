@@ -22,57 +22,229 @@ from canary_framework.core import RouterBase
 from canary_framework.engine import make_subclass
 
 
-def _http_method(method: str, path: str) -> Callable[[HookFunction], HookFunction]:
+def _http_method(
+    method: str,
+    path: str,
+    *,
+    summary: str | None = None,
+    description: str | None = None,
+    response_model: type | None = None,
+    request_model: type | None = None,
+    path_params: dict[str, object] | None = None,
+    query_params: dict[str, object] | None = None,
+    tags: list[str] | None = None,
+    deprecated: bool = False,
+    operation_id: str | None = None,
+    responses: dict[str, object] | None = None,
+) -> Callable[[HookFunction], HookFunction]:
     """创建HTTP方法装饰器。
 
+    存储完整的OpenAPI路由元数据到ROUTE_ATTR中。
+
     Creates an HTTP method decorator.
+
+    Stores full OpenAPI route metadata in ROUTE_ATTR.
     """
 
     def decorator(fn: HookFunction) -> HookFunction:
-        setattr(fn, ROUTE_ATTR, {"method": method, "path": path})
+        info: dict[str, object] = {
+            "method": method,
+            "path": path,
+        }
+        if summary is not None:
+            info["summary"] = summary
+        if description is not None:
+            info["description"] = description
+        if response_model is not None:
+            info["response_model"] = response_model
+        if request_model is not None:
+            info["request_model"] = request_model
+        if path_params is not None:
+            info["path_params"] = path_params
+        if query_params is not None:
+            info["query_params"] = query_params
+        if tags is not None:
+            info["tags"] = tags
+        if deprecated:
+            info["deprecated"] = deprecated
+        if operation_id is not None:
+            info["operation_id"] = operation_id
+        if responses is not None:
+            info["responses"] = responses
+        setattr(fn, ROUTE_ATTR, info)
         return fn
 
     return decorator
 
 
-def get(path: str) -> Callable[[HookFunction], HookFunction]:
+def get(
+    path: str,
+    *,
+    summary: str | None = None,
+    description: str | None = None,
+    response_model: type | None = None,
+    request_model: type | None = None,
+    path_params: dict[str, object] | None = None,
+    query_params: dict[str, object] | None = None,
+    tags: list[str] | None = None,
+    deprecated: bool = False,
+    operation_id: str | None = None,
+    responses: dict[str, object] | None = None,
+) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为GET路由处理器。
 
     Mark an async method as a GET route handler.
     """
-    return _http_method("GET", path)
+    return _http_method(
+        "GET",
+        path,
+        summary=summary,
+        description=description,
+        response_model=response_model,
+        request_model=request_model,
+        path_params=path_params,
+        query_params=query_params,
+        tags=tags,
+        deprecated=deprecated,
+        operation_id=operation_id,
+        responses=responses,
+    )
 
 
-def post(path: str) -> Callable[[HookFunction], HookFunction]:
+def post(
+    path: str,
+    *,
+    summary: str | None = None,
+    description: str | None = None,
+    response_model: type | None = None,
+    request_model: type | None = None,
+    path_params: dict[str, object] | None = None,
+    query_params: dict[str, object] | None = None,
+    tags: list[str] | None = None,
+    deprecated: bool = False,
+    operation_id: str | None = None,
+    responses: dict[str, object] | None = None,
+) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为POST路由处理器。
 
     Mark an async method as a POST route handler.
     """
-    return _http_method("POST", path)
+    return _http_method(
+        "POST",
+        path,
+        summary=summary,
+        description=description,
+        response_model=response_model,
+        request_model=request_model,
+        path_params=path_params,
+        query_params=query_params,
+        tags=tags,
+        deprecated=deprecated,
+        operation_id=operation_id,
+        responses=responses,
+    )
 
 
-def put(path: str) -> Callable[[HookFunction], HookFunction]:
+def put(
+    path: str,
+    *,
+    summary: str | None = None,
+    description: str | None = None,
+    response_model: type | None = None,
+    request_model: type | None = None,
+    path_params: dict[str, object] | None = None,
+    query_params: dict[str, object] | None = None,
+    tags: list[str] | None = None,
+    deprecated: bool = False,
+    operation_id: str | None = None,
+    responses: dict[str, object] | None = None,
+) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为PUT路由处理器。
 
     Mark an async method as a PUT route handler.
     """
-    return _http_method("PUT", path)
+    return _http_method(
+        "PUT",
+        path,
+        summary=summary,
+        description=description,
+        response_model=response_model,
+        request_model=request_model,
+        path_params=path_params,
+        query_params=query_params,
+        tags=tags,
+        deprecated=deprecated,
+        operation_id=operation_id,
+        responses=responses,
+    )
 
 
-def delete(path: str) -> Callable[[HookFunction], HookFunction]:
+def delete(
+    path: str,
+    *,
+    summary: str | None = None,
+    description: str | None = None,
+    response_model: type | None = None,
+    request_model: type | None = None,
+    path_params: dict[str, object] | None = None,
+    query_params: dict[str, object] | None = None,
+    tags: list[str] | None = None,
+    deprecated: bool = False,
+    operation_id: str | None = None,
+    responses: dict[str, object] | None = None,
+) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为DELETE路由处理器。
 
     Mark an async method as a DELETE route handler.
     """
-    return _http_method("DELETE", path)
+    return _http_method(
+        "DELETE",
+        path,
+        summary=summary,
+        description=description,
+        response_model=response_model,
+        request_model=request_model,
+        path_params=path_params,
+        query_params=query_params,
+        tags=tags,
+        deprecated=deprecated,
+        operation_id=operation_id,
+        responses=responses,
+    )
 
 
-def patch(path: str) -> Callable[[HookFunction], HookFunction]:
+def patch(
+    path: str,
+    *,
+    summary: str | None = None,
+    description: str | None = None,
+    response_model: type | None = None,
+    request_model: type | None = None,
+    path_params: dict[str, object] | None = None,
+    query_params: dict[str, object] | None = None,
+    tags: list[str] | None = None,
+    deprecated: bool = False,
+    operation_id: str | None = None,
+    responses: dict[str, object] | None = None,
+) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为PATCH路由处理器。
 
     Mark an async method as a PATCH route handler.
     """
-    return _http_method("PATCH", path)
+    return _http_method(
+        "PATCH",
+        path,
+        summary=summary,
+        description=description,
+        response_model=response_model,
+        request_model=request_model,
+        path_params=path_params,
+        query_params=query_params,
+        tags=tags,
+        deprecated=deprecated,
+        operation_id=operation_id,
+        responses=responses,
+    )
 
 
 def router(
