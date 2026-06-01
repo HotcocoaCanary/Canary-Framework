@@ -68,11 +68,7 @@ def module(
                     f"is not decorated with @service or @module."
                 )
 
-        meta = ModuleMeta(
-            name=name,
-            deps=_deps,
-            services=_services
-        )
+        meta = ModuleMeta(name=name, deps=_deps, services=_services)
 
         return cast(
             "type[ModuleBase]",
