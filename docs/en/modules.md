@@ -19,7 +19,6 @@ class AuthModule:
 - `name`: (required) A unique identifier for the module
 - `services`: (optional) A list of service or module classes this module contains
 - `deps`: (optional) A list of services or modules this module depends on
-- `config`: (optional) A configuration class for the module
 
 ## Module Composition
 
