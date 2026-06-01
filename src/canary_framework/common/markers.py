@@ -9,7 +9,7 @@ Placing them in common is the key to avoiding circular imports.
 
 from __future__ import annotations
 
-from .types import LifecycleHook, ModuleMeta, ServiceMeta
+from .types import LifecycleHook, ModuleMeta, RouterMeta, ServiceMeta
 
 # Service标记常量
 # Service marker constants
@@ -146,6 +146,29 @@ def is_cf_router(cls: type) -> bool:
         True if the class is decorated with @router, False otherwise.
     """
     return bool(getattr(cls, CF_ROUTER_MARKER, False))
+
+
+def get_router_meta(cls: type) -> RouterMeta | None:
+    """获取路由器类的元数据。
+
+    Args:
+        cls: 路由器类。
+
+    Returns:
+        RouterMeta对象，如果不存在则返回None。
+
+    Get metadata for a router class.
+
+    Args:
+        cls: The router class.
+
+    Returns:
+        RouterMeta object, or None if not found.
+    """
+    raw = getattr(cls, CF_SERVICE_META, None)
+    if isinstance(raw, RouterMeta):
+        return raw
+    return None
 
 
 __all__ = [
