@@ -13,8 +13,11 @@ endpoints inside a @router class.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from types import FunctionType
 from typing import cast
 
+from pydantic import BaseModel
+from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 from starlette.routing import Router as StarletteRouter
@@ -88,17 +91,23 @@ def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
     Returns:
         Starlette Route object.
     """
-    raw_info: dict[str, str] = getattr(attr, ROUTE_ATTR)
-    method: str = raw_info["method"]
-    path: str = raw_info["path"]
+    raw_info = cast("dict[str, object]", getattr(attr, ROUTE_ATTR))
+    method = cast(str, raw_info["method"])
+    path = cast(str, raw_info["path"])
+    request_model = raw_info.get("request_model")
     handler = cast(
         "Callable[..., Awaitable[object]]",
-        # pyright: ignore[reportAttributeAccessIssue]
-        attr.__get__(instance, cls),  # ty:ignore[unresolved-attribute]
+        cast(FunctionType, attr).__get__(instance, cls),
     )
 
-    async def endpoint(request: object) -> Response:
-        result = await handler(request)
+    async def endpoint(request: Request) -> Response:
+        if request_model is not None:
+            body = cast("dict[str, object]", await request.json())
+            model_cls = cast("type[BaseModel]", request_model)
+            parsed = model_cls(**body)
+            result = await handler(request, parsed)
+        else:
+            result = await handler(request)
         return _auto_response(result)
 
     return Route(path, endpoint=endpoint, methods=[method])

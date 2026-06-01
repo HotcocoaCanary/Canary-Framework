@@ -13,22 +13,56 @@ from __future__ import annotations
 
 from typing import cast, override
 
-from starlette.routing import Mount
+from starlette.responses import HTMLResponse, JSONResponse
+from starlette.routing import Mount, Route
 from starlette.routing import Router as StarletteRouter
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from canary_framework.common import (
     DependencyInjectionError,
     LifecycleHook,
+    RouterMeta,
     get_module_meta,
+    get_router_meta,
     get_service_meta,
     is_cf_module,
+    is_cf_router,
     is_cf_service,
 )
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.hooks import LifecycleAware
 from canary_framework.engine.injector import inject_deps, to_snake, topological_sort
+from canary_framework.engine.openapi import generate_openapi_schema
 from canary_framework.engine.registry import Registry
+
+_SWAGGER_UI_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Swagger UI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+        SwaggerUIBundle({ url: "/openapi.json", dom_id: "#swagger-ui" });
+    </script>
+</body>
+</html>"""
+
+_REDOC_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>ReDoc</title>
+</head>
+<body>
+    <div id="redoc"></div>
+    <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"></script>
+    <script>
+        Redoc.init("/openapi.json", {}, document.getElementById("redoc"));
+    </script>
+</body>
+</html>"""
 
 
 class ModuleBase(ServiceBase):
@@ -53,6 +87,7 @@ class ModuleBase(ServiceBase):
         self._cf_registry: Registry | None = None
         self._cf_startup_order: list[str] = []
         self._cf_asgi_app: StarletteRouter | None = None
+        self.config: object = None
 
     @override
     async def configure(self, config_instance: object = None) -> None:
@@ -152,21 +187,23 @@ class ModuleBase(ServiceBase):
     def asgi_app(self) -> StarletteRouter:
         """获取ASGI应用。
 
-        懒加载创建Starlette路由器，挂载所有具有asgi_app属性的子服务。
+        懒加载创建Starlette路由器，挂载所有具有asgi_app属性的子服务，
+        以及Swagger UI、ReDoc和OpenAPI JSON文档端点。
 
         Returns:
-            StarletteRouter实例，包含所有子路由器的挂载点。
+            StarletteRouter实例，包含所有子路由器的挂载点和文档端点。
 
         Get the ASGI application.
 
         Lazily creates the Starlette router with mounts for all child services
-        that have an asgi_app attribute.
+        that have an asgi_app attribute, plus Swagger UI, ReDoc, and OpenAPI
+        JSON documentation endpoints.
 
         Returns:
-            StarletteRouter instance with mounts for child routers.
+            StarletteRouter instance with mounts for child routers and docs.
         """
         if self._cf_asgi_app is None:
-            routes: list[Mount] = []
+            routes: list[Route | Mount] = []
             registry = self._cf_registry
             if registry is not None:
                 for name in self._cf_startup_order:
@@ -176,6 +213,31 @@ class ModuleBase(ServiceBase):
                     if asgi is not None:
                         app = cast(ASGIApp, asgi)
                         routes.append(Mount(f"/{name}", app=app))
+
+            router_metas: list[RouterMeta] = []
+            if registry is not None:
+                for name in self._cf_startup_order:
+                    entry = registry.get_by_name(name)
+                    if is_cf_router(entry.cls):
+                        meta = get_router_meta(entry.cls)
+                        if meta is not None:
+                            router_metas.append(meta)
+
+            openapi_schema = generate_openapi_schema(router_metas)
+
+            async def openapi_endpoint(_request: object) -> JSONResponse:
+                return JSONResponse(openapi_schema)
+
+            async def swagger_endpoint(_request: object) -> HTMLResponse:
+                return HTMLResponse(_SWAGGER_UI_HTML)
+
+            async def redoc_endpoint(_request: object) -> HTMLResponse:
+                return HTMLResponse(_REDOC_HTML)
+
+            routes.append(Route("/openapi.json", endpoint=openapi_endpoint, methods=["GET"]))
+            routes.append(Route("/docs", endpoint=swagger_endpoint, methods=["GET"]))
+            routes.append(Route("/redoc", endpoint=redoc_endpoint, methods=["GET"]))
+
             self._cf_asgi_app = StarletteRouter(routes)
         assert self._cf_asgi_app is not None
         return self._cf_asgi_app
