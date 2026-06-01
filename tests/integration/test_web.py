@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from starlette.testclient import TestClient
+import warnings
+
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore")
+    from starlette.testclient import TestClient
 
 from canary_framework.decorators import get, module, router
 
