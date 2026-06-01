@@ -32,8 +32,11 @@ from canary_framework.common import (
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.hooks import LifecycleAware
 from canary_framework.engine.injector import inject_deps, to_snake, topological_sort
+from canary_framework.engine.logging import get_logger
 from canary_framework.engine.openapi import generate_openapi_schema
 from canary_framework.engine.registry import Registry
+
+_log = get_logger("module")
 
 _SWAGGER_UI_HTML = """<!DOCTYPE html>
 <html>
@@ -114,6 +117,7 @@ class ModuleBase(ServiceBase):
         Raises:
             DependencyInjectionError: If a service instance is None.
         """
+        _log.info("Configuring module: %s", type(self).__name__)
         self.config = config_instance
 
         meta = get_module_meta(type(self))
@@ -172,6 +176,7 @@ class ModuleBase(ServiceBase):
         Raises:
             DependencyInjectionError: If a service instance is None.
         """
+        _log.info("Initializing module: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.AFTER_INIT)
         registry = self._cf_registry
         if registry is not None:
@@ -259,6 +264,7 @@ class ModuleBase(ServiceBase):
         Raises:
             DependencyInjectionError: If a service instance is None.
         """
+        _log.info("Starting module: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.BEFORE_STARTUP)
         registry = self._cf_registry
         if registry is not None:
@@ -285,8 +291,9 @@ class ModuleBase(ServiceBase):
         in reverse topological order.
 
         Raises:
-            DependencyInjectionError: If a service instance is None.
+            DependencyInjectionError: 如果服务实例为None。
         """
+        _log.info("Shutting down module: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.BEFORE_SHUTDOWN)
         registry = self._cf_registry
         if registry is not None:

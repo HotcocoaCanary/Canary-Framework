@@ -16,6 +16,9 @@ import inspect
 
 from canary_framework.common import LifecycleHook, LifecycleHookError
 from canary_framework.engine.hooks import HookDict, find_hooks
+from canary_framework.engine.logging import get_logger
+
+_log = get_logger("service")
 
 
 class ServiceBase:
@@ -52,6 +55,7 @@ class ServiceBase:
         Args:
             config_instance: The configuration object instance.
         """
+        _log.debug("Configuring service: %s", type(self).__name__)
         self.config = config_instance
         await self._invoke_hook(LifecycleHook.AFTER_CONFIG)
 
@@ -64,6 +68,7 @@ class ServiceBase:
 
         Invokes the AFTER_INIT hook.
         """
+        _log.debug("Initializing service: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.AFTER_INIT)
 
     async def startup(self) -> None:
@@ -75,6 +80,7 @@ class ServiceBase:
 
         Invokes the BEFORE_STARTUP hook.
         """
+        _log.debug("Starting service: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.BEFORE_STARTUP)
 
     async def shutdown(self) -> None:
@@ -86,6 +92,7 @@ class ServiceBase:
 
         Invokes the BEFORE_SHUTDOWN hook.
         """
+        _log.debug("Shutting down service: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.BEFORE_SHUTDOWN)
 
     async def _invoke_hook(self, hook: LifecycleHook) -> None:
