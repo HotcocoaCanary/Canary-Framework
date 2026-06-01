@@ -1,9 +1,10 @@
 """OpenAPI Schema generation tests."""
 
-import pytest
+from typing import Any
+
 from pydantic import BaseModel, Field
 
-from canary_framework.common import RouterMeta, ROUTE_ATTR
+from canary_framework.common import ROUTE_ATTR, RouterMeta
 from canary_framework.engine.openapi import (
     generate_openapi_schema,
     get_openapi_json,
@@ -21,16 +22,16 @@ class UserModel(BaseModel):
 class TestOpenAPISchema:
     """Test OpenAPI Schema generation."""
 
-    def test_generate_empty_schema(self):
+    def test_generate_empty_schema(self) -> None:
         """Test generating schema with no routers."""
-        schema = generate_openapi_schema([])
+        schema: dict[str, Any] = generate_openapi_schema([])
         assert schema["openapi"] == "3.0.3"
         assert schema["info"]["title"] == "Canary Framework API"
         assert schema["paths"] == {}
 
-    def test_generate_schema_with_custom_info(self):
+    def test_generate_schema_with_custom_info(self) -> None:
         """Test generating schema with custom title and description."""
-        schema = generate_openapi_schema(
+        schema: dict[str, Any] = generate_openapi_schema(
             [],
             title="Test API",
             version="2.0.0",
@@ -40,10 +41,10 @@ class TestOpenAPISchema:
         assert schema["info"]["version"] == "2.0.0"
         assert schema["info"]["description"] == "Test description"
 
-    def test_generate_schema_with_route(self):
+    def test_generate_schema_with_route(self) -> None:
         """Test generating schema with a single route."""
 
-        def sample_route():
+        def sample_route() -> None:
             pass
 
         setattr(
@@ -69,7 +70,7 @@ class TestOpenAPISchema:
             routes=[sample_route],
         )
 
-        schema = generate_openapi_schema([router_meta])
+        schema: dict[str, Any] = generate_openapi_schema([router_meta])
 
         assert "/api/users" in schema["paths"]
         assert "get" in schema["paths"]["/api/users"]
@@ -78,10 +79,10 @@ class TestOpenAPISchema:
         assert set(schema["paths"]["/api/users"]["get"]["tags"]) == {"api", "users"}
         assert schema["paths"]["/api/users"]["get"]["operationId"] == "get_users"
 
-    def test_generate_schema_with_response_model(self):
+    def test_generate_schema_with_response_model(self) -> None:
         """Test generating schema with a response model."""
 
-        def sample_route():
+        def sample_route() -> None:
             pass
 
         setattr(
@@ -102,17 +103,20 @@ class TestOpenAPISchema:
             routes=[sample_route],
         )
 
-        schema = generate_openapi_schema([router_meta])
+        schema: dict[str, Any] = generate_openapi_schema([router_meta])
 
         assert "UserModel" in schema["components"]["schemas"]
-        assert schema["paths"]["/api/users/{id}"]["get"]["responses"]["200"]["content"][
-            "application/json"
-        ]["schema"]["$ref"] == "#/components/schemas/UserModel"
+        assert (
+            schema["paths"]["/api/users/{id}"]["get"]["responses"]["200"]["content"][
+                "application/json"
+            ]["schema"]["$ref"]
+            == "#/components/schemas/UserModel"
+        )
 
-    def test_generate_schema_with_deprecated(self):
+    def test_generate_schema_with_deprecated(self) -> None:
         """Test generating schema with deprecated route."""
 
-        def sample_route():
+        def sample_route() -> None:
             pass
 
         setattr(
@@ -130,24 +134,23 @@ class TestOpenAPISchema:
             routes=[sample_route],
         )
 
-        schema = generate_openapi_schema([router_meta])
+        schema: dict[str, Any] = generate_openapi_schema([router_meta])
 
         assert schema["paths"]["/old"]["get"]["deprecated"] is True
 
-    def test_get_openapi_json(self):
+    def test_get_openapi_json(self) -> None:
         """Test getting OpenAPI JSON string."""
         json_str = get_openapi_json([])
         assert isinstance(json_str, str)
-        # Verify it's valid JSON
         import json
 
-        data = json.loads(json_str)
+        data: dict[str, Any] = json.loads(json_str)
         assert data["openapi"] == "3.0.3"
 
-    def test_generate_schema_with_request_model(self):
+    def test_generate_schema_with_request_model(self) -> None:
         """Test generating schema with a request model."""
 
-        def sample_route():
+        def sample_route() -> None:
             pass
 
         setattr(
@@ -168,17 +171,20 @@ class TestOpenAPISchema:
             routes=[sample_route],
         )
 
-        schema = generate_openapi_schema([router_meta])
+        schema: dict[str, Any] = generate_openapi_schema([router_meta])
 
         assert "UserModel" in schema["components"]["schemas"]
-        assert schema["paths"]["/api/users"]["post"]["requestBody"]["content"][
-            "application/json"
-        ]["schema"]["$ref"] == "#/components/schemas/UserModel"
+        assert (
+            schema["paths"]["/api/users"]["post"]["requestBody"]["content"]["application/json"][
+                "schema"
+            ]["$ref"]
+            == "#/components/schemas/UserModel"
+        )
 
-    def test_generate_schema_with_path_params(self):
+    def test_generate_schema_with_path_params(self) -> None:
         """Test generating schema with path parameters."""
 
-        def sample_route():
+        def sample_route() -> None:
             pass
 
         setattr(
@@ -199,7 +205,7 @@ class TestOpenAPISchema:
             routes=[sample_route],
         )
 
-        schema = generate_openapi_schema([router_meta])
+        schema: dict[str, Any] = generate_openapi_schema([router_meta])
 
         params = schema["paths"]["/api/users/{user_id}"]["get"]["parameters"]
         assert len(params) == 1
@@ -208,10 +214,10 @@ class TestOpenAPISchema:
         assert params[0]["required"] is True
         assert params[0]["schema"]["type"] == "integer"
 
-    def test_generate_schema_with_query_params(self):
+    def test_generate_schema_with_query_params(self) -> None:
         """Test generating schema with query parameters."""
 
-        def sample_route():
+        def sample_route() -> None:
             pass
 
         setattr(
@@ -233,7 +239,7 @@ class TestOpenAPISchema:
             routes=[sample_route],
         )
 
-        schema = generate_openapi_schema([router_meta])
+        schema: dict[str, Any] = generate_openapi_schema([router_meta])
 
         params = schema["paths"]["/api/users"]["get"]["parameters"]
         assert len(params) == 2
