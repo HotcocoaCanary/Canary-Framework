@@ -76,7 +76,6 @@ class ModuleMeta(ServiceMeta):
         name: 模块的全局唯一名称。
         deps: 依赖的模块/服务类列表。
         services: 直接子服务列表。
-        config_cls: 可选的模块配置类。
 
     Metadata stored on a @module-decorated class.
 
@@ -86,11 +85,9 @@ class ModuleMeta(ServiceMeta):
         name: Globally unique module name.
         deps: List of dependency classes.
         services: Direct child services list.
-        config_cls: Optional per-module config class.
     """
 
     services: list[type] = field(default_factory=list)
-    config_cls: type | None = field(default=None)
 
 
 @dataclass(slots=True)
