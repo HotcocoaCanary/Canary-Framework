@@ -131,6 +131,7 @@ def inject_deps(instance: object, entry: ServiceEntry, registry: Registry) -> No
     Raises:
         DependencyInjectionError: If a dependency instance is None.
     """
+    _log.debug("Injecting dependencies into: %s", entry.name)
     for dep_cls in entry.deps:
         dep_entry = registry.get_by_class(dep_cls)
         if dep_entry.instance is None:

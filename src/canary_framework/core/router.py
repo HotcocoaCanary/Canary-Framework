@@ -25,6 +25,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from canary_framework.common import ROUTE_ATTR, HookFunction
 from canary_framework.core.service import ServiceBase
+from canary_framework.engine.logging import get_logger
+
+_log = get_logger("router")
 
 
 def _auto_response(result: object) -> Response:
@@ -178,7 +181,11 @@ class RouterBase(ServiceBase):
             StarletteRouter instance.
         """
         if self._starlette_router is None:
-            self._starlette_router = StarletteRouter(_collect_routes(self))
+            routes = _collect_routes(self)
+            _log.debug("Collected %d route(s) for router: %s", len(routes), type(self).__name__)
+            for route in routes:
+                _log.debug("  Route: %s %s", route.methods, route.path)
+            self._starlette_router = StarletteRouter(routes)
         return self._starlette_router
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:

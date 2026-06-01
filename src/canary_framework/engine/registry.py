@@ -23,6 +23,9 @@ from canary_framework.common import (
     get_module_meta,
     get_service_meta,
 )
+from canary_framework.engine.logging import get_logger
+
+_log = get_logger("registry")
 
 
 class Registry:
@@ -89,6 +92,7 @@ class Registry:
         )
         self._by_name[name] = entry
         self._by_class[cls] = entry
+        _log.debug("Registered service/module: %s -> %s", cls.__name__, name)
 
     def get_by_name(self, name: str) -> ServiceEntry:
         """按名称查找服务。
