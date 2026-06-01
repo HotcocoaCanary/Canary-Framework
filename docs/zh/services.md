@@ -130,3 +130,21 @@ async def test_cache_service():
     
     await service.shutdown()
 ```
+
+## 服务命名
+
+服务名称在模块内必须唯一。框架会自动将类名转换为 snake_case 格式作为注入属性名：
+
+| 类名 | 注入属性名 |
+|------|------------|
+| `DatabaseService` | `self.database_service` |
+| `UserRepository` | `self.user_repository` |
+| `APIRouter` | `self.api_router` |
+
+## 最佳实践
+
+1. **单一职责**：每个服务应该只负责一件事
+2. **无状态设计**：尽量使服务无状态，或明确管理状态
+3. **依赖最小化**：只声明真正需要的依赖
+4. **类型提示**：使用类型提示提高代码可读性和 IDE 支持
+5. **测试覆盖**：为每个服务编写单元测试

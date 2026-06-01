@@ -6,39 +6,42 @@
 <p align="center">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
   <a href="https://pypi.org/project/canary-framework/"><img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python"></a>
+  <a href="https://github.com/HotcocoaCanary/Canary-Framework/actions/workflows/ci.yml"><img src="https://github.com/HotcocoaCanary/Canary-Framework/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/HotcocoaCanary/Canary-Framework"><img src="https://img.shields.io/github/stars/HotcocoaCanary/Canary-Framework?style=social" alt="GitHub Stars"></a>
 </p>
 
 ---
 
-Canary Framework 是一个**装饰器驱动**的异步服务框架。核心哲学：**服务是最小单元，模块组合服务，模块本身也是服务。**
+Canary Framework is a **decorator-driven** async service framework for Python. Core philosophy: **Services are the smallest unit, modules compose services, and modules themselves are services.**
 
-## 核心特性
+## Core Features
 
-- **装饰器驱动** — 使用 `@service`、`@module`、`@router` 等装饰器，零继承
-- **拓扑启动** — Kahn 算法确保依赖优先启动
-- **依赖注入** — `deps=[DBService]` 自动注入为 `self.db_service`
-- **生命周期管理** — `@after_config`/`@after_init`/`@before_startup`/`@before_shutdown` 钩子
-- **ASGI 兼容** — 基于 Starlette，支持 uvicorn 等 ASGI 服务器
-- **模块化架构** — 层级化组合，模块可嵌套
+- **Decorator-Driven** — Use `@service`, `@module`, `@router` decorators, zero inheritance required
+- **Topological Startup** — Kahn's algorithm ensures dependencies start first
+- **Dependency Injection** — `deps=[DBService]` auto-injected as `self.db_service`
+- **Lifecycle Management** — `@after_config`/`@after_init`/`@before_startup`/`@before_shutdown` hooks
+- **ASGI Compatible** — Built on Starlette, works with uvicorn and other ASGI servers
+- **Modular Architecture** — Hierarchical composition with nested modules
+- **OpenAPI Support** — Auto-generated Swagger UI and ReDoc documentation
 
-## 设计原则
+## Design Principles
 
-1. **装饰器驱动** — 代码即配置，无需复杂配置
-2. **异步优先** — 基于 async/await，高性能
-3. **显式依赖** — 依赖声明清晰，易于理解和测试
-4. **约定优于配置** — 自动注入、自动挂载
-5. **可组合性** — 通过模块组合构建复杂系统
+1. **Decorator-Driven** — Code is configuration, no complex setup required
+2. **Async-First** — Built on async/await for high performance
+3. **Explicit Dependencies** — Clear dependency declarations for better understanding and testing
+4. **Convention Over Configuration** — Auto-injection, auto-mounting
+5. **Composability** — Build complex systems through module composition
 
-## 安装
+## Installation
 
 ```bash
 pip install canary-framework
 ```
 
-## 快速开始
+## Quick Start
 
 ```python
-from canary_framework import module, service, after_config, before_shutdown
+from canary_framework import module, service, router, get, post, after_config
 
 @service(name="database")
 class DatabaseService:
@@ -49,120 +52,158 @@ class DatabaseService:
     async def connect(self):
         self.connection = "connected"
         print("Database connected")
-    
-    @before_shutdown
-    async def disconnect(self):
-        self.connection = None
-        print("Database disconnected")
 
 @service(name="user_service", deps=[DatabaseService])
 class UserService:
     async def get_user(self, user_id):
-        return await self.database_service.query(f"SELECT * FROM users WHERE id={user_id}")
+        return {"id": user_id, "name": "User"}
 
-@module(name="app", services=[DatabaseService, UserService])
+@router(name="api", prefix="/api", deps=[UserService])
+class ApiRouter:
+    @get("/users/{user_id}")
+    async def get_user(self, request):
+        user_id = request.path_params["user_id"]
+        return await self.user_service.get_user(int(user_id))
+    
+    @post("/users")
+    async def create_user(self, request):
+        data = await request.json()
+        return {"id": 1, **data}, 201
+
+@module(name="app", services=[DatabaseService, UserService, ApiRouter])
 class AppModule:
     pass
 
-# 使用 uvicorn 运行
-# uvicorn main:AppModule --host 0.0.0.0 --port 8000
+# Run with uvicorn
+# uvicorn main:AppModule --host 0.0.0.0 --port 8000 --reload
 ```
 
-## Web 示例
+## Web Example with OpenAPI
 
 ```python
-from canary_framework import module, service, router, get, post, after_config
+from canary_framework import module, router, get, post
+from pydantic import BaseModel, Field
 
-@service(name="db")
-class DatabaseService:
-    @after_config
-    async def connect(self):
-        print("Database connected")
+class UserRequest(BaseModel):
+    name: str = Field(description="User name")
+    email: str = Field(description="User email")
 
-@router(name="api", prefix="/api", deps=[DatabaseService])
-class ApiRouter:
-    @get("/hello")
-    async def hello(self, request):
-        return {"message": "Hello from Canary!"}
+class UserResponse(BaseModel):
+    id: int = Field(description="User ID")
+    name: str = Field(description="User name")
+    email: str = Field(description="User email")
+
+@router(name="users", prefix="/users", tags=["Users"])
+class UsersRouter:
+    @get("/", summary="List users", description="Get all users")
+    async def list_users(self, request):
+        return {"users": []}
     
-    @post("/echo")
-    async def echo(self, request):
-        data = await request.json()
-        return {"echo": data}
+    @post("/", 
+          summary="Create user", 
+          description="Create a new user",
+          request_model=UserRequest,
+          response_model=UserResponse)
+    async def create_user(self, request, user: UserRequest):
+        return {"id": 1, **user.model_dump()}, 201
 
-@module(name="app", services=[DatabaseService, ApiRouter])
+@module(name="app", services=[UsersRouter])
 class AppModule:
     pass
 ```
 
-## 文档
+## OpenAPI Documentation
 
-📖 完整文档: [Canary Framework Docs](https://HotcocoaCanary.github.io/Canary-Framework/)
+Access automatically generated documentation:
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+- **OpenAPI JSON**: `http://localhost:8000/openapi.json`
 
-中文文档: [docs/zh/](./docs/zh/) · English: [docs/en/](./docs/en/)
+## Documentation
 
-### 文档结构
+📖 Complete documentation: [Canary Framework Docs](https://HotcocoaCanary.github.io/Canary-Framework/)
 
-- **快速入门** — 从零开始构建完整应用
-- **服务** — 服务定义、依赖注入、生命周期
-- **模块** — 模块组合、层级结构
-- **Web 路由** — 路由、HTTP 方法、请求处理
-- **依赖注入** — DI 系统、拓扑排序、注册表
-- **生命周期** — 生命周期钩子、最佳实践
-- **核心概念** — 设计原则、架构、底层原理
-- **API 参考** — 完整 API 文档
+### Documentation Structure
 
-## 架构
+- **Quickstart** — Build a complete application from scratch
+- **Services** — Service definition, dependency injection, lifecycle
+- **Modules** — Module composition, hierarchical structure
+- **Web Routing** — Routing, HTTP methods, request handling
+- **Dependency Injection** — DI system, topological sorting, registry
+- **Lifecycle** — Lifecycle hooks, best practices
+- **Core Concepts** — Design principles, architecture, internals
+- **API Reference** — Complete API documentation
+
+## Architecture
 
 ```
 src/canary_framework/
-├── common/              # 共享类型、枚举、异常
-├── core/                # 核心基类
-│   ├── module.py       # ModuleBase - 模块基类
-│   ├── service.py      # ServiceBase - 服务基类
-│   └── router.py       # RouterBase - 路由基类
-├── decorators/         # 装饰器实现
-│   ├── module.py       # @module
-│   ├── service.py      # @service
-│   ├── router.py       # @router, @get/@post/...
-│   └── lifecycle.py    # 生命周期钩子
-└── engine/             # 核心引擎
-    ├── registry.py     # Registry - 服务注册表
-    ├── injector.py     # 依赖注入、拓扑排序
-    └── hooks.py        # 生命周期钩子
+├── common/              # Shared types, enums, exceptions
+│   ├── errors.py        # Framework exceptions
+│   ├── markers.py       # Metadata markers and accessors
+│   └── types.py         # Data classes and type aliases
+├── core/                # Core base classes
+│   ├── module.py        # ModuleBase - module orchestration
+│   ├── service.py       # ServiceBase - lifecycle management
+│   └── router.py        # RouterBase - ASGI routing
+├── decorators/         # Decorator implementations
+│   ├── module.py        # @module decorator
+│   ├── service.py       # @service decorator
+│   ├── router.py        # @router, @get/@post/... decorators
+│   └── lifecycle.py     # @after_config, @after_init, etc.
+└── engine/             # Core engine components
+    ├── registry.py      # Registry - service registration
+    ├── injector.py      # Dependency injection, topological sort
+    ├── hooks.py         # Lifecycle hook discovery
+    ├── openapi.py       # OpenAPI schema generation
+    ├── utils.py         # Helper utilities
+    └── logging.py       # Logging utilities
 ```
 
-### 生命周期流程
+### Lifecycle Flow
 
 ```
 AppModule.configure()
-  ├── 收集所有服务
-  ├── 构建依赖图
-  ├── 拓扑排序 (Kahn 算法)
-  ├── 实例化服务
-  ├── 注入依赖
-  └── 调用每个服务的 configure() + @after_config 钩子
+  ├── Collect all services
+  ├── Build dependency graph
+  ├── Topological sort (Kahn's algorithm)
+  ├── Instantiate services
+  ├── Inject dependencies
+  └── Call configure() + @after_config hooks on each service
 
 AppModule.init()
-  └── 调用每个服务的 init() + @after_init 钩子
+  └── Call init() + @after_init hooks on each service
 
 AppModule.startup()
-  └── 调用每个服务的 startup() + @before_startup 钩子
+  └── Call startup() + @before_startup hooks on each service
 
 AppModule.shutdown()
-  └── 逆拓扑顺序调用 shutdown() + @before_shutdown 钩子
+  └── Call shutdown() + @before_shutdown hooks in reverse order
 ```
 
-## 社区
+## Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run unit tests
+pytest tests/unit/
+
+# Run integration tests
+pytest tests/integration/
+```
+
+## Community
 
 - 💬 [Discussions](https://github.com/HotcocoaCanary/Canary-Framework/discussions)
 - 🐛 [Issues](https://github.com/HotcocoaCanary/Canary-Framework/issues)
 - 📖 [Docs](https://HotcocoaCanary.github.io/Canary-Framework/)
 
-## 贡献
+## Contributing
 
-参见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
-[Apache 2.0](./LICENSE) · Copyright 2026 张文博 (Canary)
+[Apache 2.0](./LICENSE) · Copyright 2026 Zhang Wenbo (Canary)

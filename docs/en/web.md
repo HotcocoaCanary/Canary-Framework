@@ -311,6 +311,104 @@ class ApiRouter:
         pass
 ```
 
+## Middleware Support
+
+Canary Framework supports custom middleware. You can define middleware in modules to handle requests and responses:
+
+```python
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class CustomMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # Before request
+        print(f"Request: {request.method} {request.url}")
+        
+        # Call next middleware/router
+        response = await call_next(request)
+        
+        # After request
+        print(f"Response status: {response.status_code}")
+        
+        return response
+
+@module(name="app", services=[TodosRouter])
+class AppModule:
+    def __init__(self):
+        self.middleware = [CustomMiddleware]
+```
+
+## Static Files
+
+You can easily serve static files:
+
+```python
+from starlette.staticfiles import StaticFiles
+
+@router(name="static")
+class StaticRouter:
+    def __init__(self):
+        # Mount static files directory
+        self.asgi_app = StaticFiles(directory="static", html=True)
+
+@module(name="app", services=[StaticRouter, ApiRouter])
+class AppModule:
+    pass
+```
+
+## Error Handling
+
+You can customize error handling:
+
+```python
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+@router(name="api", prefix="/api")
+class ApiRouter:
+    async def handle_exception(self, request: Request, exc: Exception):
+        if isinstance(exc, HTTPException):
+            return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+        return JSONResponse({"error": "Internal Server Error"}, status_code=500)
+```
+
+## CORS Support
+
+Use Starlette's CORS middleware:
+
+```python
+from starlette.middleware.cors import CORSMiddleware
+
+@module(name="app", services=[ApiRouter])
+class AppModule:
+    def __init__(self):
+        self.middleware = [
+            CORSMiddleware(
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        ]
+```
+
+## WebSocket Support
+
+Canary Framework supports WebSocket:
+
+```python
+from starlette.websockets import WebSocket
+
+@router(name="ws")
+class WebSocketRouter:
+    @get("/ws")
+    async def websocket_endpoint(self, websocket: WebSocket):
+        await websocket.accept()
+        while True:
+            data = await websocket.receive_text()
+            await websocket.send_text(f"Message received: {data}")
+```
+
 ## Complete Example
 
 ```python
@@ -318,13 +416,15 @@ from canary_framework import module, service, router, get, post, put, delete
 from pydantic import BaseModel, Field
 from typing import Dict, List
 
-# Data model
 class TodoResponse(BaseModel):
     id: int = Field(description="Todo ID")
     title: str = Field(description="Title")
     completed: bool = Field(description="Whether completed")
 
-# Data store (in-memory)
+class TodoCreate(BaseModel):
+    title: str = Field(description="Title")
+    completed: bool = Field(description="Whether completed", default=False)
+
 @service(name="data_store")
 class DataStore:
     def __init__(self):
@@ -350,15 +450,17 @@ class DataStore:
     async def delete(self, todo_id):
         self.todos = [t for t in self.todos if t["id"] != todo_id]
 
-# Todo router
-@router(name="todos", prefix="/todos", deps=[DataStore])
+@router(name="todos", prefix="/todos", deps=[DataStore], tags=["Todos"])
 class TodosRouter:
-    @get("/")
+    @get("/", summary="List todos", description="Get all todos")
     async def list_todos(self, request):
         todos = await self.data_store.get_all()
         return {"todos": todos}
     
-    @get("/{todo_id}")
+    @get("/{todo_id}", 
+         summary="Get todo", 
+         description="Get todo by ID",
+         response_model=TodoResponse)
     async def get_todo(self, request):
         todo_id = int(request.path_params["todo_id"])
         todo = await self.data_store.get_one(todo_id)
@@ -366,29 +468,45 @@ class TodosRouter:
             return todo
         return {"error": "Todo not found"}, 404
     
-    @post("/")
-    async def create_todo(self, request):
-        data = await request.json()
-        todo = await self.data_store.create(data)
+    @post("/", 
+          summary="Create todo", 
+          description="Create a new todo",
+          request_model=TodoCreate,
+          response_model=TodoResponse)
+    async def create_todo(self, request, todo: TodoCreate):
+        todo = await self.data_store.create(todo.model_dump())
         return todo, 201
     
-    @put("/{todo_id}")
-    async def update_todo(self, request):
+    @put("/{todo_id}",
+         summary="Update todo",
+         description="Update todo",
+         request_model=TodoCreate,
+         response_model=TodoResponse)
+    async def update_todo(self, request, todo: TodoCreate):
         todo_id = int(request.path_params["todo_id"])
-        data = await request.json()
-        todo = await self.data_store.update(todo_id, data)
+        todo = await self.data_store.update(todo_id, todo.model_dump())
         if todo:
             return todo
         return {"error": "Todo not found"}, 404
     
-    @delete("/{todo_id}")
+    @delete("/{todo_id}",
+            summary="Delete todo",
+            description="Delete todo")
     async def delete_todo(self, request):
         todo_id = int(request.path_params["todo_id"])
         await self.data_store.delete(todo_id)
         return {"message": "Todo deleted"}
 
-# Main app
 @module(name="app", services=[DataStore, TodosRouter])
 class AppModule:
     pass
 ```
+
+## Best Practices
+
+1. **Route Organization**: Organize routes by feature modules (e.g., users, posts, todos)
+2. **Parameter Validation**: Use Pydantic models for request body validation
+3. **Error Handling**: Use consistent error response format
+4. **Documentation**: Add summary and description to each route
+5. **Tag Grouping**: Use tags to group related APIs
+6. **Response Models**: Explicitly specify response_model for better OpenAPI documentation

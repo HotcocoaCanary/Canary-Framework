@@ -184,3 +184,11 @@ class UsersModule:
 class App:
     pass
 ```
+
+## Best Practices
+
+1. **Layered Architecture**: Organize modules by feature (e.g., auth, users, posts)
+2. **Single Responsibility**: Each module focuses on one functional area
+3. **Module Composition**: Build large applications by composing smaller modules
+4. **Config Isolation**: Provide isolated configuration space for each module
+5. **Test Isolation**: Each module can be tested independently

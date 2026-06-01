@@ -26,7 +26,6 @@ def module(
     *,
     deps: list[type] | None = None,
     services: list[type] | None = None,
-    config: type | None = None,
 ) -> Callable[[type], type[ModuleBase]]:
     """声明一个类为模块。
 
@@ -36,7 +35,6 @@ def module(
         name: 模块的全局唯一名称。
         deps: 模块依赖的其他模块/服务类列表。
         services: 模块直接包含的子服务类列表。
-        config: 可选的模块配置类。
 
     Raises:
         TypeError: 如果services中的任何服务未被装饰。
@@ -51,8 +49,7 @@ def module(
     Args:
         name: Globally unique module name.
         deps: Dependency classes.
-        services: Direct child nodes.
-        config: Optional per-module config class.
+        services: Direct child services.
 
     Raises:
         TypeError: If any service in ``services`` is not decorated.
@@ -74,8 +71,7 @@ def module(
         meta = ModuleMeta(
             name=name,
             deps=_deps,
-            services=_services,
-            config_cls=config,
+            services=_services
         )
 
         return cast(

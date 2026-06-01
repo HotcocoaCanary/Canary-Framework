@@ -311,6 +311,104 @@ class ApiRouter:
         pass
 ```
 
+## 中间件支持
+
+Canary 框架支持自定义中间件。您可以通过在模块中定义中间件来处理请求和响应：
+
+```python
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class CustomMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # 请求处理前
+        print(f"Request: {request.method} {request.url}")
+        
+        # 调用下一个中间件/路由
+        response = await call_next(request)
+        
+        # 请求处理后
+        print(f"Response status: {response.status_code}")
+        
+        return response
+
+@module(name="app", services=[TodosRouter])
+class AppModule:
+    def __init__(self):
+        self.middleware = [CustomMiddleware]
+```
+
+## 静态文件服务
+
+您可以轻松地提供静态文件：
+
+```python
+from starlette.staticfiles import StaticFiles
+
+@router(name="static")
+class StaticRouter:
+    def __init__(self):
+        # 挂载静态文件目录
+        self.asgi_app = StaticFiles(directory="static", html=True)
+
+@module(name="app", services=[StaticRouter, ApiRouter])
+class AppModule:
+    pass
+```
+
+## 错误处理
+
+您可以自定义错误处理：
+
+```python
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+@router(name="api", prefix="/api")
+class ApiRouter:
+    async def handle_exception(self, request: Request, exc: Exception):
+        if isinstance(exc, HTTPException):
+            return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+        return JSONResponse({"error": "Internal Server Error"}, status_code=500)
+```
+
+## CORS 支持
+
+使用 Starlette 的 CORS 中间件：
+
+```python
+from starlette.middleware.cors import CORSMiddleware
+
+@module(name="app", services=[ApiRouter])
+class AppModule:
+    def __init__(self):
+        self.middleware = [
+            CORSMiddleware(
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        ]
+```
+
+## WebSocket 支持
+
+Canary 框架支持 WebSocket：
+
+```python
+from starlette.websockets import WebSocket
+
+@router(name="ws")
+class WebSocketRouter:
+    @get("/ws")
+    async def websocket_endpoint(self, websocket: WebSocket):
+        await websocket.accept()
+        while True:
+            data = await websocket.receive_text()
+            await websocket.send_text(f"Message received: {data}")
+```
+
 ## 完整示例
 
 ```python
@@ -318,14 +416,15 @@ from canary_framework import module, service, router, get, post, put, delete
 from pydantic import BaseModel, Field
 from typing import Dict, List
 
-# 数据模型
 class TodoResponse(BaseModel):
     id: int = Field(description="待办事项ID")
     title: str = Field(description="标题")
     completed: bool = Field(description="是否完成")
-```
 
-# 数据存储（内存中）
+class TodoCreate(BaseModel):
+    title: str = Field(description="标题")
+    completed: bool = Field(description="是否完成", default=False)
+
 @service(name="data_store")
 class DataStore:
     def __init__(self):
@@ -351,15 +450,17 @@ class DataStore:
     async def delete(self, todo_id):
         self.todos = [t for t in self.todos if t["id"] != todo_id]
 
-# 待办事项路由
-@router(name="todos", prefix="/todos", deps=[DataStore])
+@router(name="todos", prefix="/todos", deps=[DataStore], tags=["Todos"])
 class TodosRouter:
-    @get("/")
+    @get("/", summary="获取待办列表", description="获取所有待办事项")
     async def list_todos(self, request):
         todos = await self.data_store.get_all()
         return {"todos": todos}
     
-    @get("/{todo_id}")
+    @get("/{todo_id}", 
+         summary="获取待办", 
+         description="根据ID获取待办事项",
+         response_model=TodoResponse)
     async def get_todo(self, request):
         todo_id = int(request.path_params["todo_id"])
         todo = await self.data_store.get_one(todo_id)
@@ -367,29 +468,45 @@ class TodosRouter:
             return todo
         return {"error": "Todo not found"}, 404
     
-    @post("/")
-    async def create_todo(self, request):
-        data = await request.json()
-        todo = await self.data_store.create(data)
+    @post("/", 
+          summary="创建待办", 
+          description="创建新的待办事项",
+          request_model=TodoCreate,
+          response_model=TodoResponse)
+    async def create_todo(self, request, todo: TodoCreate):
+        todo = await self.data_store.create(todo.model_dump())
         return todo, 201
     
-    @put("/{todo_id}")
-    async def update_todo(self, request):
+    @put("/{todo_id}",
+         summary="更新待办",
+         description="更新待办事项",
+         request_model=TodoCreate,
+         response_model=TodoResponse)
+    async def update_todo(self, request, todo: TodoCreate):
         todo_id = int(request.path_params["todo_id"])
-        data = await request.json()
-        todo = await self.data_store.update(todo_id, data)
+        todo = await self.data_store.update(todo_id, todo.model_dump())
         if todo:
             return todo
         return {"error": "Todo not found"}, 404
     
-    @delete("/{todo_id}")
+    @delete("/{todo_id}",
+            summary="删除待办",
+            description="删除待办事项")
     async def delete_todo(self, request):
         todo_id = int(request.path_params["todo_id"])
         await self.data_store.delete(todo_id)
         return {"message": "Todo deleted"}
 
-# 主应用
 @module(name="app", services=[DataStore, TodosRouter])
 class AppModule:
     pass
 ```
+
+## 最佳实践
+
+1. **路由组织**：按功能模块组织路由（如 users、posts、todos）
+2. **参数验证**：使用 Pydantic 模型进行请求体验证
+3. **错误处理**：统一的错误响应格式
+4. **文档注释**：为每个路由添加 summary 和 description
+5. **标签分组**：使用 tags 对 API 进行分组
+6. **响应模型**：明确指定 response_model 以生成更好的 OpenAPI 文档

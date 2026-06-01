@@ -131,3 +131,21 @@ async def test_cache_service():
     
     await service.shutdown()
 ```
+
+## Service Naming
+
+Service names must be unique within a module. The framework automatically converts class names to snake_case for injection:
+
+| Class Name | Injected Attribute |
+|------------|-------------------|
+| `DatabaseService` | `self.database_service` |
+| `UserRepository` | `self.user_repository` |
+| `APIRouter` | `self.api_router` |
+
+## Best Practices
+
+1. **Single Responsibility**: Each service should do one thing well
+2. **Stateless Design**: Prefer stateless services or manage state explicitly
+3. **Minimal Dependencies**: Only declare dependencies you actually need
+4. **Type Hints**: Use type hints for better readability and IDE support
+5. **Test Coverage**: Write unit tests for each service
