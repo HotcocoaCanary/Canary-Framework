@@ -184,11 +184,145 @@ Routers are mounted at paths based on their names:
 - `UsersRouter(name="users")` → `/users`
 - `ItemsRouter(name="items")` → `/items`
 
+## OpenAPI Documentation
+
+Canary Framework automatically integrates Swagger UI and ReDoc with zero configuration.
+
+### Accessing Documentation
+
+After starting the application, you can access these endpoints:
+
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+- **OpenAPI JSON**: `http://localhost:8000/openapi.json`
+
+### OpenAPI Parameters for HTTP Decorators
+
+HTTP method decorators support the following OpenAPI documentation parameters:
+
+| Parameter | Type | Description |
+|------|------|------|
+| `summary` | str | Short summary of the operation |
+| `description` | str | Detailed description of the operation |
+| `request_model` | Pydantic BaseModel | Request body data model |
+| `response_model` | Pydantic BaseModel | Response data model |
+| `responses` | dict | Custom response definitions |
+| `tags` | list[str] | Tags for API grouping |
+| `deprecated` | bool | Whether this operation is deprecated |
+| `operation_id` | str | Unique operation identifier |
+| `path_params` | dict | Path parameter definitions (name -> {"type": "str", "description": "", "required": true}) |
+| `query_params` | dict | Query parameter definitions (name -> {"type": "str", "description": "", "required": false}) |
+
+### Usage Example
+
+```python
+from pydantic import BaseModel, Field
+from canary_framework import router, get, post, put, delete
+
+# Define request and response models
+class UserRequest(BaseModel):
+    name: str = Field(description="User name")
+    email: str = Field(description="User email")
+
+class UserResponse(BaseModel):
+    id: int = Field(description="User ID")
+    name: str = Field(description="User name")
+    email: str = Field(description="User email")
+
+@router(name="users", prefix="/users", tags=["Users"])
+class UsersRouter:
+    @get("/", 
+         summary="List users", 
+         description="Get all users in the system",
+         tags=["Users", "List"],
+         query_params={
+             "page": {"type": "int", "description": "Page number", "required": False},
+             "limit": {"type": "int", "description": "Items per page", "required": False}
+         })
+    async def list_users(self, request):
+        return {"users": []}
+    
+    @get("/{user_id}", 
+         summary="Get user",
+         description="Get user details by user ID",
+         response_model=UserResponse,
+         path_params={
+             "user_id": {"type": "int", "description": "User ID"}
+         })
+    async def get_user(self, request):
+        user_id = request.path_params["user_id"]
+        return {"id": int(user_id), "name": "John", "email": "john@example.com"}
+    
+    @post("/", 
+          summary="Create user",
+          description="Create a new user",
+          request_model=UserRequest,
+          response_model=UserResponse)
+    async def create_user(self, request, user: UserRequest):
+        # request_model auto-parses the request body and passes it as the second parameter
+        return {"id": 1, **user.model_dump()}, 201
+    
+    @put("/{user_id}",
+         summary="Update user",
+         description="Update user information",
+         request_model=UserRequest,
+         response_model=UserResponse,
+         path_params={
+             "user_id": {"type": "int", "description": "User ID"}
+         })
+    async def update_user(self, request, user: UserRequest):
+        user_id = int(request.path_params["user_id"])
+        return {"id": user_id, **user.model_dump()}
+    
+    @delete("/{user_id}",
+            summary="Delete user",
+            description="Delete a specified user",
+            path_params={
+                "user_id": {"type": "int", "description": "User ID"}
+            })
+    async def delete_user(self, request):
+        return {"message": "User deleted"}
+```
+
+### Request Model Auto-Parse
+
+When using `request_model` parameter:
+1. Request body is automatically parsed into the specified Pydantic model
+2. Model instance is passed as the second parameter to the route handler
+3. Data validation is automatically performed
+
+### Path and Query Parameters
+
+- `path_params`: Define path parameter type, description and required status
+- `query_params`: Define query parameter type, description and required status
+- Path parameters are automatically extracted from path patterns (like `{user_id}`) and added to the OpenAPI Schema
+
+
+### Tags Grouping
+
+Router-level and method-level tags are automatically merged:
+
+```python
+@router(name="api", tags=["API"])
+class ApiRouter:
+    @get("/users", tags=["Users"])
+    async def get_users(self, request):
+        # Merged tags: ["API", "Users"]
+        pass
+```
+
 ## Complete Example
 
 ```python
 from canary_framework import module, service, router, get, post, put, delete
+from pydantic import BaseModel, Field
 from typing import Dict, List
+
+# Data model
+class TodoResponse(BaseModel):
+    id: int = Field(description="Todo ID")
+    title: str = Field(description="Title")
+    completed: bool = Field(description="Whether completed")
 
 # Data store (in-memory)
 @service(name="data_store")

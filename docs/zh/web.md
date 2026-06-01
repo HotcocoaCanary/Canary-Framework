@@ -184,11 +184,146 @@ class AppModule:
 - `UsersRouter(name="users")` → `/users`
 - `ItemsRouter(name="items")` → `/items`
 
+## OpenAPI 文档
+
+Canary 框架自动集成 Swagger UI 和 ReDoc，无需额外配置。
+
+### 访问文档
+
+启动应用后，可以访问以下端点：
+
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+- **OpenAPI JSON**: `http://localhost:8000/openapi.json`
+
+### HTTP 方法装饰器的 OpenAPI 参数
+
+HTTP 方法装饰器支持以下 OpenAPI 文档参数：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `summary` | str | 操作的简短摘要 |
+| `description` | str | 操作的详细描述 |
+| `request_model` | Pydantic BaseModel | 请求体数据模型 |
+| `response_model` | Pydantic BaseModel | 响应数据模型 |
+| `responses` | dict | 自定义响应定义 |
+| `tags` | list[str] | API 分组标签 |
+| `deprecated` | bool | 是否弃用 |
+| `operation_id` | str | 操作唯一标识符 |
+| `path_params` | dict | 路径参数定义（名称 -> {"type": "str", "description": "", "required": true}） |
+| `query_params` | dict | 查询参数定义（名称 -> {"type": "str", "description": "", "required": false}） |
+
+### 使用示例
+
+```python
+from pydantic import BaseModel, Field
+from canary_framework import router, get, post, put, delete
+
+# 定义请求和响应模型
+class UserRequest(BaseModel):
+    name: str = Field(description="用户名")
+    email: str = Field(description="用户邮箱")
+
+class UserResponse(BaseModel):
+    id: int = Field(description="用户ID")
+    name: str = Field(description="用户名")
+    email: str = Field(description="用户邮箱")
+
+@router(name="users", prefix="/users", tags=["Users"])
+class UsersRouter:
+    @get("/", 
+         summary="获取用户列表", 
+         description="获取系统中所有用户的列表",
+         tags=["Users", "List"],
+         query_params={
+             "page": {"type": "int", "description": "页码", "required": False},
+             "limit": {"type": "int", "description": "每页数量", "required": False}
+         })
+    async def list_users(self, request):
+        return {"users": []}
+    
+    @get("/{user_id}", 
+         summary="获取单个用户",
+         description="根据用户ID获取用户详细信息",
+         response_model=UserResponse,
+         path_params={
+             "user_id": {"type": "int", "description": "用户ID"}
+         })
+    async def get_user(self, request):
+        user_id = request.path_params["user_id"]
+        return {"id": int(user_id), "name": "John", "email": "john@example.com"}
+    
+    @post("/", 
+          summary="创建用户",
+          description="创建新用户",
+          request_model=UserRequest,
+          response_model=UserResponse)
+    async def create_user(self, request, user: UserRequest):
+        # request_model 会自动解析请求体并作为第二个参数传入
+        return {"id": 1, **user.model_dump()}, 201
+    
+    @put("/{user_id}",
+         summary="更新用户",
+         description="更新用户信息",
+         request_model=UserRequest,
+         response_model=UserResponse,
+         path_params={
+             "user_id": {"type": "int", "description": "用户ID"}
+         })
+    async def update_user(self, request, user: UserRequest):
+        user_id = int(request.path_params["user_id"])
+        return {"id": user_id, **user.model_dump()}
+    
+    @delete("/{user_id}",
+            summary="删除用户",
+            description="删除指定用户",
+            path_params={
+                "user_id": {"type": "int", "description": "用户ID"}
+            })
+    async def delete_user(self, request):
+        return {"message": "User deleted"}
+```
+
+### 请求模型自动解析
+
+当使用 `request_model` 参数时：
+1. 请求体会自动解析为该 Pydantic 模型
+2. 模型实例会作为第二个参数传递给路由处理函数
+3. 自动进行数据验证
+
+### 路径参数和查询参数
+
+- `path_params`：定义路径参数的类型、描述和是否必需
+- `query_params`：定义查询参数的类型、描述和是否必需
+- 路径参数会从路径模式（如 `{user_id}`）自动提取并添加到 OpenAPI Schema 中
+
+
+### Tags 分组
+
+路由级别和方法级别的 tags 会自动合并：
+
+```python
+@router(name="api", tags=["API"])
+class ApiRouter:
+    @get("/users", tags=["Users"])
+    async def get_users(self, request):
+        # 合并后的 tags: ["API", "Users"]
+        pass
+```
+
 ## 完整示例
 
 ```python
 from canary_framework import module, service, router, get, post, put, delete
+from pydantic import BaseModel, Field
 from typing import Dict, List
+
+# 数据模型
+class TodoResponse(BaseModel):
+    id: int = Field(description="待办事项ID")
+    title: str = Field(description="标题")
+    completed: bool = Field(description="是否完成")
+```
 
 # 数据存储（内存中）
 @service(name="data_store")
