@@ -296,6 +296,46 @@ app = AppModule()
 await app.configure(AppConfig())
 ```
 
+### Logging Configuration
+
+The framework automatically configures logging during `configure()`. No manual
+`logging.basicConfig()` is needed.
+
+**Default behavior**: When you call `app.configure(config)`, the framework adds a
+`StreamHandler` to the `cf` logger with `INFO` level:
+
+```python
+from canary_framework import module
+
+@module(name="app", services=[...])
+class AppModule:
+    pass
+
+class AppConfig:
+    def __init__(self):
+        self.database_url = "sqlite:///mydb.db"
+
+app = AppModule()
+await app.configure(AppConfig())
+# Framework logs now visible on stdout:
+# [2026-06-02 13:00:00] cf.module             INFO     Configuring module: AppModule
+```
+
+**Custom log level**: Set `cf_log_level` on your config object to control the
+framework log level:
+
+```python
+class AppConfig:
+    cf_log_level: str = "DEBUG"  # Show debug-level framework logs
+    # ... other config fields ...
+```
+
+Valid levels: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, `"CRITICAL"`.
+
+**Manual handler**: If you have already configured a handler on the root logger
+or the `cf` logger, the framework skips its own setup. This allows you to use
+your own logging configuration freely.
+
 ## Error Handling
 
 If a hook raises an exception, it's wrapped in `LifecycleHookError`:

@@ -32,7 +32,7 @@ from canary_framework.common import (
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.hooks import LifecycleAware
 from canary_framework.engine.injector import inject_deps, to_snake, topological_sort
-from canary_framework.engine.logging import get_logger
+from canary_framework.engine.logging import ensure_logging, get_logger
 from canary_framework.engine.openapi import generate_openapi_schema
 from canary_framework.engine.registry import Registry
 
@@ -119,6 +119,9 @@ class ModuleBase(ServiceBase):
         """
         _log.info("Configuring module: %s", type(self).__name__)
         self.config = config_instance
+
+        cf_log_level = getattr(config_instance, "cf_log_level", "INFO")
+        ensure_logging(cf_log_level)
 
         meta = get_module_meta(type(self))
         if not meta.services:
