@@ -19,7 +19,7 @@ class TestLifecycle:
     async def test_init_startup_shutdown_flow(self) -> None:
         calls: list[str] = []
 
-        @service("hello")
+        @service()
         class Hello:
             @after_init
             def hook_init(self) -> None:
@@ -43,19 +43,19 @@ class TestLifecycle:
     async def test_topological_order(self) -> None:
         calls: list[str] = []
 
-        @service("a")
+        @service()
         class A:
             @after_init
             def hook_init(self) -> None:
                 calls.append("a:init")
 
-        @service("b", deps=[A])
+        @service(deps=[A])
         class B:
             @after_init
             def hook_init(self) -> None:
                 calls.append("b:init")
 
-        @module("m", services=[A, B])
+        @module(services=[A, B])
         class M:
             pass
 
@@ -67,19 +67,19 @@ class TestLifecycle:
     async def test_reverse_shutdown_order(self) -> None:
         calls: list[str] = []
 
-        @service("a")
+        @service()
         class A:
             @before_shutdown
             def hook_shutdown(self) -> None:
                 calls.append("a:stop")
 
-        @service("b", deps=[A])
+        @service(deps=[A])
         class B:
             @before_shutdown
             def hook_shutdown(self) -> None:
                 calls.append("b:stop")
 
-        @module("m", services=[A, B])
+        @module(services=[A, B])
         class M:
             pass
 
@@ -96,7 +96,7 @@ class TestLifecycle:
 
         captured: dict[str, str] = {}
 
-        @service("configured")
+        @service()
         class Configured:
             @after_init
             def hook_init(self) -> None:
@@ -108,7 +108,7 @@ class TestLifecycle:
         assert captured.get("name") == "canary"
 
     async def test_hook_error_wraps_in_lifecycle_error(self) -> None:
-        @service("broken")
+        @service()
         class Broken:
             @after_init
             def hook_init(self) -> None:
@@ -124,11 +124,11 @@ class TestCircularDependency:
     async def test_circular_detected(self) -> None:
         from canary_framework.engine import topological_sort
 
-        @service("a")
+        @service()
         class A:
             pass
 
-        @service("b")
+        @service()
         class B:
             pass
 

@@ -13,7 +13,7 @@ from canary_framework.decorators import get, module, router
 
 class TestModuleWeb:
     async def test_router_asgi_app(self) -> None:
-        @router(name="api")
+        @router()
         class ApiRouter:
             @get("/hello")
             async def hello(self, request):  # type: ignore[no-untyped-def]
@@ -26,13 +26,13 @@ class TestModuleWeb:
         assert response.json() == {"message": "Hello"}
 
     async def test_module_mounts_routers(self) -> None:
-        @router(name="web")
+        @router()
         class WebRouter:
             @get("/ping")
             async def ping(self, request):  # type: ignore[no-untyped-def]
                 return {"pong": True}
 
-        @module("app", services=[WebRouter])
+        @module(services=[WebRouter])
         class AppModule:
             pass
 
@@ -40,6 +40,6 @@ class TestModuleWeb:
         await app.configure()  # type: ignore[attr-defined]
         await app.init()  # type: ignore[attr-defined]
         client = TestClient(app)  # type: ignore[arg-type]
-        response = client.get("/web/ping")
+        response = client.get("/WebRouterRouter/ping")
         assert response.status_code == 200
         assert response.json() == {"pong": True}
