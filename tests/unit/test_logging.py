@@ -15,7 +15,7 @@ class TestLogging:
     async def test_service_lifecycle_logging(self) -> None:
         """Test that ServiceBase logs lifecycle events."""
 
-        @service(name="test_service")
+        @service()
         class TestService:
             pass
 
@@ -34,7 +34,7 @@ class TestLogging:
     async def test_module_lifecycle_logging(self) -> None:
         """Test that ModuleBase logs lifecycle events at INFO level."""
 
-        @module(name="test_module")
+        @module()
         class TestModule:
             pass
 
@@ -58,7 +58,7 @@ class TestLogging:
         with patch("canary_framework.engine.registry._log") as mock_log:
             registry = Registry()
 
-            @service(name="registry_test_service")
+            @service()
             class RegistryTestService:
                 pass
 
@@ -67,13 +67,13 @@ class TestLogging:
             mock_log.debug.assert_any_call(
                 "Registered service/module: %s -> %s",
                 "RegistryTestService",
-                "registry_test_service",
+                "RegistryTestServiceService",
             )
 
     async def test_router_logging(self) -> None:
         """Test that RouterBase logs route collection."""
 
-        @router(name="test_log_router")
+        @router()
         class TestLogRouter:
             @get("/test")
             async def test_handler(self, request):  # type: ignore[no-untyped-def]
@@ -91,24 +91,24 @@ class TestLogging:
     async def test_dependency_injection_logging(self) -> None:
         """Test that dependency injection logs are generated."""
 
-        @service(name="dep_service")
+        @service()
         class DepService:
             pass
 
-        @service(name="main_service", deps=[DepService])
+        @service(deps=[DepService])
         class MainService:
             pass
 
         with patch("canary_framework.engine.injector._log") as mock_log:
 
-            @module(name="di_test_module", services=[DepService, MainService])
+            @module(services=[DepService, MainService])
             class DiTestModule:
                 pass
 
             module_inst = cast(ModuleBase, DiTestModule())
             await module_inst.configure()
 
-            mock_log.debug.assert_any_call("Injecting dependencies into: %s", "main_service")
+            mock_log.debug.assert_any_call("Injecting dependencies into: %s", "MainServiceService")
             mock_log.debug.assert_any_call("  %s  →  self.%s", "DepService", "dep_service")
 
     async def test_ensure_logging_adds_handler(self) -> None:
@@ -237,7 +237,7 @@ class TestLogging:
 
         try:
 
-            @module(name="test_log_module")
+            @module()
             class TestLogModule:
                 pass
 

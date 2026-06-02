@@ -22,7 +22,6 @@ from canary_framework.engine import make_subclass
 
 
 def module(
-    name: str,
     *,
     deps: list[type] | None = None,
     services: list[type] | None = None,
@@ -30,9 +29,9 @@ def module(
     """声明一个类为模块。
 
     添加模块标记和元数据，修改类的基类使其继承自ModuleBase。
+    模块名称自动生成为``类名 + Module``。
 
     Args:
-        name: 模块的全局唯一名称。
         deps: 模块依赖的其他模块/服务类列表。
         services: 模块直接包含的子服务类列表。
 
@@ -45,9 +44,9 @@ def module(
     Declare a class as a Canary Framework module.
 
     Adds module marker and metadata, modifies the class to inherit from ModuleBase.
+    The module name is auto-generated as ``ClassName + Module``.
 
     Args:
-        name: Globally unique module name.
         deps: Dependency classes.
         services: Direct child services.
 
@@ -61,6 +60,7 @@ def module(
     _services = list(services or ())
 
     def decorator(cls: type) -> type[ModuleBase]:
+        name = cls.__name__ + "Module"
         for svc_cls in _services:
             if not is_cf_service(svc_cls):
                 raise TypeError(

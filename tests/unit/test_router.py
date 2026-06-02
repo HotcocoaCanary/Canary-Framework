@@ -20,14 +20,14 @@ class TestHTTPMethodDecorators:
 
 class TestRouterDecorator:
     def test_router_injects_router_base(self) -> None:
-        @router(prefix="/api", name="api")
+        @router(prefix="/api")
         class ApiRouter:
             pass
 
         assert issubclass(ApiRouter, RouterBase)
 
     def test_is_cf_router(self) -> None:
-        @router(name="r")
+        @router()
         class R:
             pass
 
@@ -39,7 +39,7 @@ class TestRouterDecorator:
         assert is_cf_router(Plain) is False
 
     def test_router_meta(self) -> None:
-        @router(prefix="/v1", name="v1", tags=["api"])
+        @router(prefix="/v1", tags=["api"])
         class V1:
             pass
 
@@ -49,7 +49,7 @@ class TestRouterDecorator:
         assert meta.tags == ["api"]
 
     def test_router_collects_routes(self) -> None:
-        @router(name="collector")
+        @router()
         class Collector:
             @get("/hello")
             async def hello(self, request):  # type: ignore[no-untyped-def]
@@ -62,7 +62,7 @@ class TestRouterDecorator:
 
 class TestRouterBase:
     async def test_asgi_app(self) -> None:
-        @router(name="test")
+        @router()
         class TestRouter:
             @get("/ping")
             async def ping(self, request):  # type: ignore[no-untyped-def]

@@ -248,7 +248,6 @@ def patch(
 
 
 def router(
-    name: str,
     prefix: str = "",
     *,
     deps: list[type] | None = None,
@@ -257,10 +256,10 @@ def router(
     """声明一个类为路由服务。
 
     将@service语义与HTTP路由分组相结合。
+    路由名称自动生成为``类名 + Router``。
 
     Args:
         prefix: 应用于此组中所有路由的URL前缀。
-        name: 全局唯一的服务名称。
         deps: 依赖类列表。
         tags: 此路由组的OpenAPI标签。
 
@@ -270,10 +269,10 @@ def router(
     Declare a class as a Canary Framework router service.
 
     Combines ``@service`` semantics with HTTP route grouping.
+    The router name is auto-generated as ``ClassName + Router``.
 
     Args:
         prefix: URL prefix applied to all routes in this group.
-        name: Globally unique service name.
         deps: Dependency classes.
         tags: OpenAPI tags for this route group.
 
@@ -284,6 +283,7 @@ def router(
     _tags = list(tags or [])
 
     def decorator(cls: type) -> type[RouterBase]:
+        name = cls.__name__ + "Router"
         routes: list[HookFunction] = []
         for attr_name in dir(cls):
             attr = getattr(cls, attr_name, None)
@@ -300,7 +300,7 @@ def router(
 
         return cast(
             "type[RouterBase]",
-            make_subclass(cls, RouterBase, meta, meta.name, extra_marker=CF_ROUTER_MARKER),
+            make_subclass(cls, RouterBase, meta, name, extra_marker=CF_ROUTER_MARKER),
         )
 
     return decorator

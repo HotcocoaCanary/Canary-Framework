@@ -15,14 +15,14 @@ from canary_framework.decorators import (
 
 class TestServiceDecorator:
     def test_service_injects_base_class(self) -> None:
-        @service("test-svc")
+        @service()
         class MyService:
             pass
 
         assert issubclass(MyService, ServiceBase)
 
     def test_is_cf_service_returns_true(self) -> None:
-        @service("svc")
+        @service()
         class Svc:
             pass
 
@@ -35,21 +35,21 @@ class TestServiceDecorator:
         assert is_cf_service(Plain) is False
 
     def test_get_service_meta(self) -> None:
-        @service("dbsvc")
+        @service()
         class DBService:
             pass
 
         meta = get_service_meta(DBService)
         assert isinstance(meta, ServiceMeta)
-        assert meta.name == "dbsvc"
+        assert meta.name == "DBServiceService"
         assert meta.deps == []
 
     def test_service_with_deps(self) -> None:
-        @service("a")
+        @service()
         class A:
             pass
 
-        @service("b", deps=[A])
+        @service(deps=[A])
         class B:
             pass
 
@@ -61,7 +61,7 @@ class TestServiceLifecycle:
     async def test_after_config(self) -> None:
         calls: list[str] = []
 
-        @service("svc")
+        @service()
         class Svc:
             @after_config
             def hook(self) -> None:
@@ -74,7 +74,7 @@ class TestServiceLifecycle:
     async def test_after_init(self) -> None:
         calls: list[str] = []
 
-        @service("svc")
+        @service()
         class Svc:
             @after_init
             def hook(self) -> None:
@@ -88,7 +88,7 @@ class TestServiceLifecycle:
     async def test_before_startup(self) -> None:
         calls: list[str] = []
 
-        @service("svc")
+        @service()
         class Svc:
             @before_startup
             def hook(self) -> None:
@@ -103,7 +103,7 @@ class TestServiceLifecycle:
     async def test_before_shutdown(self) -> None:
         calls: list[str] = []
 
-        @service("svc")
+        @service()
         class Svc:
             @before_shutdown
             def hook(self) -> None:
@@ -122,7 +122,7 @@ class TestServiceLifecycle:
 
         captured: dict[str, str] = {}
 
-        @service("svc")
+        @service()
         class Svc:
             @after_config
             def hook(self) -> None:

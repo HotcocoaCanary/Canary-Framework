@@ -13,7 +13,7 @@ from canary_framework.decorators import (
 )
 
 
-@service("a")
+@service()
 class ServiceA:
     calls: list[str]
 
@@ -36,7 +36,7 @@ class ServiceA:
         return "a"
 
 
-@service("b", deps=[ServiceA])
+@service(deps=[ServiceA])
 class ServiceB:
     calls: list[str]
 
@@ -56,7 +56,7 @@ class ServiceB:
         self.calls.append("b:end")
 
 
-@service("c", deps=[ServiceB])
+@service(deps=[ServiceB])
 class ServiceC:
     calls: list[str]
 
@@ -72,7 +72,7 @@ class ServiceC:
         self.calls.append("c:start")
 
 
-@module("m", services=[ServiceA, ServiceB])
+@module(services=[ServiceA, ServiceB])
 class ModuleM:
     calls: list[str]
 

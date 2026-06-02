@@ -10,31 +10,31 @@ from canary_framework.decorators import after_init, module, service
 
 class TestModuleDecorator:
     def test_module_injects_module_base(self) -> None:
-        @module("test-mod")
+        @module()
         class MyModule:
             pass
 
         assert is_cf_module(MyModule) is True
 
     def test_is_cf_module_on_service(self) -> None:
-        @service("svc")
+        @service()
         class Svc:
             pass
 
         assert is_cf_module(Svc) is False
 
     def test_get_module_meta(self) -> None:
-        @service("leaf")
+        @service()
         class Leaf:
             pass
 
-        @module("parent", services=[Leaf])
+        @module(services=[Leaf])
         class Parent:
             pass
 
         meta = get_module_meta(Parent)
         assert isinstance(meta, ModuleMeta)
-        assert meta.name == "parent"
+        assert meta.name == "ParentModule"
         assert meta.services == [Leaf]
 
     def test_module_rejects_non_decorated(self) -> None:
@@ -43,7 +43,7 @@ class TestModuleDecorator:
 
         with pytest.raises(TypeError, match="not decorated"):
 
-            @module("bad", services=[Plain])
+            @module(services=[Plain])
             class Bad:
                 pass
 
@@ -52,13 +52,13 @@ class TestModuleLifecycle:
     async def test_config_and_init(self) -> None:
         calls: list[str] = []
 
-        @service("leaf")
+        @service()
         class Leaf:
             @after_init
             def init(self) -> None:
                 calls.append("leaf:init")
 
-        @module("root", services=[Leaf])
+        @module(services=[Leaf])
         class Root:
             pass
 
@@ -68,25 +68,25 @@ class TestModuleLifecycle:
         assert "leaf:init" in calls
 
     async def test_topological_order(self) -> None:
-        @service("a")
+        @service()
         class A:
             pass
 
-        @service("b", deps=[A])
+        @service(deps=[A])
         class B:
             pass
 
-        @module("m", services=[A, B])
+        @module(services=[A, B])
         class M:
             pass
 
         app = M()
         await app.configure()  # type: ignore[attr-defined]
         order = app._cf_startup_order  # type: ignore[attr-defined]
-        assert order.index("a") < order.index("b")
+        assert order.index("AService") < order.index("BService")
 
     async def test_empty_module(self) -> None:
-        @module("empty")
+        @module()
         class Empty:
             pass
 
