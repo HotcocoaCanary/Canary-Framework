@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from canary_framework.core import ModuleBase
 from canary_framework.decorators import (
     after_init,
     before_shutdown,
@@ -85,12 +86,12 @@ class ModuleM:
 
 
 @pytest.fixture
-def module_instance() -> ModuleM:
+def module_instance() -> ModuleBase:
     return ModuleM()
 
 
 @pytest.fixture
-async def init_module() -> ModuleM:
+async def init_module() -> ModuleBase:
     inst = ModuleM()
     await inst.configure()  # type: ignore[attr-defined]
     await inst.init()  # type: ignore[attr-defined]
