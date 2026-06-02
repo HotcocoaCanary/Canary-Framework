@@ -235,6 +235,8 @@ curl -X DELETE http://localhost:8000/api/posts/2
 - 如何使用生命周期钩子进行初始化和清理
 - 如何使用 Pydantic 模型进行请求验证
 - 如何自动生成 OpenAPI 文档
+- **框架日志自动配置** — 无需手动调用 `logging.basicConfig()`。
+  在配置对象上设置 `cf_log_level` 来控制详细程度（默认：`"INFO"`）
 
 ## 下一步
 

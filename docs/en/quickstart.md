@@ -235,6 +235,8 @@ After starting the application, you can access these endpoints:
 - How to use lifecycle hooks for initialization and cleanup
 - How to use Pydantic models for request validation
 - How to automatically generate OpenAPI documentation
+- **Framework logging is auto-configured** — no `logging.basicConfig()` needed.
+  Set `cf_log_level` on your config object to control the verbosity (default: `"INFO"`)
 
 ## Next Steps
 

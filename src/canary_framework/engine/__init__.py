@@ -10,7 +10,7 @@ from canary_framework.engine.injector import (
     to_snake,
     topological_sort,
 )
-from canary_framework.engine.logging import get_logger
+from canary_framework.engine.logging import ensure_logging, get_logger
 from canary_framework.engine.openapi import (
     generate_openapi_schema,
     get_openapi_json,
@@ -22,6 +22,7 @@ __all__ = [
     "HookDict",
     "LifecycleAware",
     "Registry",
+    "ensure_logging",
     "find_hooks",
     "generate_openapi_schema",
     "get_logger",

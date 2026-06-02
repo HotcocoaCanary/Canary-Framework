@@ -296,6 +296,43 @@ app = AppModule()
 await app.configure(AppConfig())
 ```
 
+### 日志配置
+
+框架在 `configure()` 阶段自动配置日志，无需手动调用 `logging.basicConfig()`。
+
+**默认行为**：调用 `app.configure(config)` 时，框架自动为 `cf` 日志器添加
+`StreamHandler`，默认级别为 `INFO`：
+
+```python
+from canary_framework import module
+
+@module(name="app", services=[...])
+class AppModule:
+    pass
+
+class AppConfig:
+    def __init__(self):
+        self.database_url = "sqlite:///mydb.db"
+
+app = AppModule()
+await app.configure(AppConfig())
+# 框架日志现在会输出到 stdout：
+# [2026-06-02 13:00:00] cf.module             INFO     Configuring module: AppModule
+```
+
+**自定义日志级别**：在配置对象上设置 `cf_log_level` 字段来控制框架日志级别：
+
+```python
+class AppConfig:
+    cf_log_level: str = "DEBUG"  # 显示 DEBUG 级别的框架日志
+    # ... 其他配置字段 ...
+```
+
+有效级别：`"DEBUG"`、`"INFO"`、`"WARNING"`、`"ERROR"`、`"CRITICAL"`。
+
+**手动处理器**：如果你已经为 root 日志器或 `cf` 日志器配置了 handler，框架会跳过
+自动设置，让你可以自由使用自己的日志配置。
+
 ## 错误处理
 
 如果钩子抛出异常，它会被包装在 `LifecycleHookError` 中：
