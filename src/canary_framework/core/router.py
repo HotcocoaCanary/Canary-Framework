@@ -16,7 +16,7 @@ import inspect
 import re
 from collections.abc import Awaitable, Callable
 from types import FunctionType
-from typing import cast
+from typing import cast, get_type_hints
 
 from pydantic import BaseModel
 from starlette.requests import Request
@@ -187,11 +187,21 @@ def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
     starlette_path, path_param_names, query_param_names = _parse_route_path(path)
 
     sig = inspect.signature(attr)
-    param_types = {
-        name: param.annotation if param.annotation is not inspect.Parameter.empty else None
-        for name, param in sig.parameters.items()
-        if name != "self"
-    }
+    try:
+        type_hints = get_type_hints(attr)
+    except Exception:
+        type_hints = {}
+
+    param_types = {}
+    for name, param in sig.parameters.items():
+        if name == "self":
+            continue
+        if name in type_hints:
+            param_types[name] = type_hints[name]
+        elif param.annotation is not inspect.Parameter.empty:
+            param_types[name] = param.annotation
+        else:
+            param_types[name] = None
 
     async def endpoint(request: Request) -> Response:
         kwargs: dict[str, object] = {}

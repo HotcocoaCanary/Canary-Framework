@@ -16,7 +16,7 @@ class TestModuleWeb:
         @router()
         class ApiRouter:
             @get("/hello")
-            async def hello(self, request):  # type: ignore[no-untyped-def]
+            async def hello(self) -> dict[str, str]:
                 return {"message": "Hello"}
 
         inst = ApiRouter()
@@ -29,7 +29,7 @@ class TestModuleWeb:
         @router()
         class WebRouter:
             @get("/ping")
-            async def ping(self, request):  # type: ignore[no-untyped-def]
+            async def ping(self) -> dict[str, bool]:
                 return {"pong": True}
 
         @module(services=[WebRouter])
@@ -43,3 +43,29 @@ class TestModuleWeb:
         response = client.get("/WebRouterRouter/ping")
         assert response.status_code == 200
         assert response.json() == {"pong": True}
+
+    async def test_path_and_query_parameters(self) -> None:
+        @router()
+        class ApiRouter:
+            @get("/user/{user_id}?page={page}#count={count}")
+            async def get_user(self, user_id: str, page: str, count: str) -> dict[str, str]:
+                return {"user_id": user_id, "page": page, "count": count}
+
+        inst = ApiRouter()
+        client = TestClient(inst.asgi_app)  # type: ignore[attr-defined]
+        response = client.get("/user/123?page=1&count=10")
+        assert response.status_code == 200
+        assert response.json() == {"user_id": "123", "page": "1", "count": "10"}
+
+    async def test_type_conversion(self) -> None:
+        @router()
+        class ApiRouter:
+            @get("/user/{user_id}?page={page}#count={count}")
+            async def get_user(self, user_id: int, page: int, count: int) -> dict[str, int]:
+                return {"user_id": user_id, "page": page, "count": count}
+
+        inst = ApiRouter()
+        client = TestClient(inst.asgi_app)  # type: ignore[attr-defined]
+        response = client.get("/user/123?page=1&count=10")
+        assert response.status_code == 200
+        assert response.json() == {"user_id": 123, "page": 1, "count": 10}
