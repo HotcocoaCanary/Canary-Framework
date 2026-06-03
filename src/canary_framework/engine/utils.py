@@ -45,7 +45,7 @@ def make_subclass(
     if meta.deps:
         from canary_framework.engine.injector import to_snake
 
-        annotations = dict(getattr(new_cls, "__annotations__", {}))
+        annotations = dict(getattr(cls, "__annotations__", {}))
         for dep_cls in meta.deps:
             attr_name = to_snake(dep_cls.__name__)
             if attr_name not in annotations:
