@@ -50,6 +50,10 @@ def make_subclass(
             attr_name = to_snake(dep_cls.__name__)
             if attr_name not in annotations:
                 annotations[attr_name] = dep_cls
+                # Create a class-level placeholder attribute so IDE recognizes
+                # the instance attribute declaration and provides type hints.
+                # The actual instance attribute is set at runtime by inject_deps.
+                setattr(new_cls, attr_name, None)
 
         if annotations:
             new_cls.__annotations__ = annotations
