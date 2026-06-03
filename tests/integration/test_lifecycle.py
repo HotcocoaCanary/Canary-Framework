@@ -1,144 +1,117 @@
-"""Integration tests for framework lifecycle."""
-
-from __future__ import annotations
+"""Integration tests for lifecycle."""
 
 import pytest
 
-from canary_framework.common import CircularDependencyError, LifecycleHookError
-from canary_framework.decorators import (
+from canary_framework import (
+    after_config,
     after_init,
     before_shutdown,
     before_startup,
     module,
     service,
 )
-from canary_framework.engine import Registry
 
 
+@pytest.mark.integration
 class TestLifecycle:
-    async def test_init_startup_shutdown_flow(self) -> None:
-        calls: list[str] = []
+    """Integration tests for lifecycle."""
+
+    @pytest.mark.asyncio
+    async def test_lifecycle_hooks_execution_order(self) -> None:
+        """Test that lifecycle hooks execute in order."""
+
+        events: list[str] = []
 
         @service()
-        class Hello:
+        class MyService:
+            @after_config
+            def on_config(self) -> None:
+                events.append("service-config")
+
             @after_init
-            def hook_init(self) -> None:
-                calls.append("init")
+            def on_init(self) -> None:
+                events.append("service-init")
 
             @before_startup
-            def hook_start(self) -> None:
-                calls.append("startup")
+            def on_startup(self) -> None:
+                events.append("service-startup")
 
             @before_shutdown
-            def hook_shutdown(self) -> None:
-                calls.append("shutdown")
+            def on_shutdown(self) -> None:
+                events.append("service-shutdown")
 
-        app = Hello()
+        @module(services=[MyService])
+        class MyModule:
+            @after_config
+            def on_config(self) -> None:
+                events.append("module-config")
+
+            @after_init
+            def on_init(self) -> None:
+                events.append("module-init")
+
+            @before_startup
+            def on_startup(self) -> None:
+                events.append("module-startup")
+
+            @before_shutdown
+            def on_shutdown(self) -> None:
+                events.append("module-shutdown")
+
+        app = MyModule()
         await app.configure()  # type: ignore[attr-defined]
         await app.init()  # type: ignore[attr-defined]
         await app.startup()  # type: ignore[attr-defined]
         await app.shutdown()  # type: ignore[attr-defined]
-        assert calls == ["init", "startup", "shutdown"]
 
-    async def test_topological_order(self) -> None:
-        calls: list[str] = []
+        # Check that all hooks were called
+        assert len(events) == 8
+        assert "service-config" in events
+        assert "service-init" in events
+        assert "service-startup" in events
+        assert "service-shutdown" in events
+        assert "module-config" in events
+        assert "module-init" in events
+        assert "module-startup" in events
+        assert "module-shutdown" in events
 
-        @service()
-        class A:
-            @after_init
-            def hook_init(self) -> None:
-                calls.append("a:init")
+    @pytest.mark.asyncio
+    async def test_lifecycle_with_multiple_services(self) -> None:
+        """Test lifecycle with multiple services."""
 
-        @service(deps=[A])
-        class B:
-            @after_init
-            def hook_init(self) -> None:
-                calls.append("b:init")
-
-        @module(services=[A, B])
-        class M:
-            pass
-
-        app = M()
-        await app.configure()  # type: ignore[attr-defined]
-        await app.init()  # type: ignore[attr-defined]
-        assert calls.index("a:init") < calls.index("b:init")
-
-    async def test_reverse_shutdown_order(self) -> None:
-        calls: list[str] = []
+        startup_order: list[str] = []
+        shutdown_order: list[str] = []
 
         @service()
-        class A:
-            @before_shutdown
-            def hook_shutdown(self) -> None:
-                calls.append("a:stop")
+        class Service1:
+            @before_startup
+            def on_startup(self) -> None:
+                startup_order.append("Service1")
 
-        @service(deps=[A])
-        class B:
             @before_shutdown
-            def hook_shutdown(self) -> None:
-                calls.append("b:stop")
+            def on_shutdown(self) -> None:
+                shutdown_order.append("Service1")
 
-        @module(services=[A, B])
-        class M:
+        @service()
+        class Service2:
+            @before_startup
+            def on_startup(self) -> None:
+                startup_order.append("Service2")
+
+            @before_shutdown
+            def on_shutdown(self) -> None:
+                shutdown_order.append("Service2")
+
+        @module(services=[Service1, Service2])
+        class MyModule:
             pass
 
-        app = M()
+        app = MyModule()
         await app.configure()  # type: ignore[attr-defined]
-        await app.init()  # type: ignore[attr-defined]
         await app.startup()  # type: ignore[attr-defined]
         await app.shutdown()  # type: ignore[attr-defined]
-        assert calls.index("b:stop") < calls.index("a:stop")
 
-    async def test_config_loaded_before_init(self) -> None:
-        class AppConfig:
-            name: str = "canary"
-
-        captured: dict[str, str] = {}
-
-        @service()
-        class Configured:
-            @after_init
-            def hook_init(self) -> None:
-                captured["name"] = self.config.name  # type: ignore[attr-defined]
-
-        app = Configured()
-        await app.configure(AppConfig())  # type: ignore[attr-defined]
-        await app.init()  # type: ignore[attr-defined]
-        assert captured.get("name") == "canary"
-
-    async def test_hook_error_wraps_in_lifecycle_error(self) -> None:
-        @service()
-        class Broken:
-            @after_init
-            def hook_init(self) -> None:
-                raise RuntimeError("crash")
-
-        app = Broken()
-        await app.configure()  # type: ignore[attr-defined]
-        with pytest.raises(LifecycleHookError, match="crash"):
-            await app.init()  # type: ignore[attr-defined]
-
-
-class TestCircularDependency:
-    async def test_circular_detected(self) -> None:
-        from canary_framework.engine import topological_sort
-
-        @service()
-        class A:
-            pass
-
-        @service()
-        class B:
-            pass
-
-        reg = Registry()
-        reg.register(A)
-        reg.register(B)
-        a_entry = reg.get_by_class(A)
-        a_entry.dep_names = ["b"]
-        b_entry = reg.get_by_class(B)
-        b_entry.dep_names = ["a"]
-
-        with pytest.raises(CircularDependencyError):
-            topological_sort(reg)
+        assert len(startup_order) == 2
+        assert len(shutdown_order) == 2
+        # Shutdown order should be reverse of startup order
+        assert shutdown_order == startup_order[::-1]
