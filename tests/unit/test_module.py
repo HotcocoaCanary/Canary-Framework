@@ -1,97 +1,48 @@
-"""Unit tests for @module decorator."""
-
-from __future__ import annotations
+"""Unit tests for core.module module."""
 
 import pytest
 
-from canary_framework.common import ModuleMeta, get_module_meta, is_cf_module
-from canary_framework.decorators import after_init, module, service
+from canary_framework.core.module import ModuleBase
 
 
-class TestModuleDecorator:
-    def test_module_injects_module_base(self) -> None:
-        @module()
-        class MyModule:
-            pass
+@pytest.mark.unit
+class TestModuleBase:
+    """Tests for ModuleBase class."""
 
-        assert is_cf_module(MyModule) is True
+    def test_initialization(self) -> None:
+        """Test initialization."""
+        module = ModuleBase()
+        assert module._cf_parent_registry is None
+        assert module._cf_registry is None
+        assert module._cf_startup_order == []
+        assert module._cf_asgi_app is None
+        assert module.config is None
 
-    def test_is_cf_module_on_service(self) -> None:
-        @service()
-        class Svc:
-            pass
+    @pytest.mark.asyncio
+    async def test_configure_empty_module(self) -> None:
+        """Test configure on empty module."""
+        module = ModuleBase()
+        config = {"key": "value"}
+        await module.configure(config)
+        assert module.config == config
 
-        assert is_cf_module(Svc) is False
+    def test_asgi_app_lazy_loaded(self) -> None:
+        """Test asgi_app is lazily loaded."""
+        module = ModuleBase()
+        assert module._cf_asgi_app is None
+        app = module.asgi_app
+        assert module._cf_asgi_app is not None
+        assert app is module._cf_asgi_app
 
-    def test_get_module_meta(self) -> None:
-        @service()
-        class Leaf:
-            pass
+    def test_asgi_app_includes_openapi(self) -> None:
+        """Test asgi_app includes OpenAPI endpoints."""
+        module = ModuleBase()
+        app = module.asgi_app
 
-        @module(services=[Leaf])
-        class Parent:
-            pass
-
-        meta = get_module_meta(Parent)
-        assert isinstance(meta, ModuleMeta)
-        assert meta.name == "ParentModule"
-        assert meta.services == [Leaf]
-
-    def test_module_rejects_non_decorated(self) -> None:
-        class Plain:
-            pass
-
-        with pytest.raises(TypeError, match="not decorated"):
-
-            @module(services=[Plain])
-            class Bad:
-                pass
-
-
-class TestModuleLifecycle:
-    async def test_config_and_init(self) -> None:
-        calls: list[str] = []
-
-        @service()
-        class Leaf:
-            @after_init
-            def init(self) -> None:
-                calls.append("leaf:init")
-
-        @module(services=[Leaf])
-        class Root:
-            pass
-
-        app = Root()
-        await app.configure()  # type: ignore[attr-defined]
-        await app.init()  # type: ignore[attr-defined]
-        assert "leaf:init" in calls
-
-    async def test_topological_order(self) -> None:
-        @service()
-        class A:
-            pass
-
-        @service(deps=[A])
-        class B:
-            pass
-
-        @module(services=[A, B])
-        class M:
-            pass
-
-        app = M()
-        await app.configure()  # type: ignore[attr-defined]
-        order = app._cf_startup_order  # type: ignore[attr-defined]
-        assert order.index("AService") < order.index("BService")
-
-    async def test_empty_module(self) -> None:
-        @module()
-        class Empty:
-            pass
-
-        app = Empty()
-        await app.configure()  # type: ignore[attr-defined]
-        await app.init()  # type: ignore[attr-defined]
-        await app.startup()  # type: ignore[attr-defined]
-        await app.shutdown()  # type: ignore[attr-defined]
+        # Check that the routes include OpenAPI endpoints
+        # We can check the routes by looking at the Starlette router
+        routes = app.routes
+        paths = [route.path for route in routes]  # type: ignore[attr-defined]
+        assert "/openapi.json" in paths
+        assert "/docs" in paths
+        assert "/redoc" in paths

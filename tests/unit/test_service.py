@@ -1,133 +1,102 @@
-"""Unit tests for @service decorator."""
+"""Unit tests for core.service module."""
 
-from __future__ import annotations
+import pytest
 
-from canary_framework.common import ServiceMeta, get_service_meta, is_cf_service
-from canary_framework.core import ServiceBase
-from canary_framework.decorators import (
-    after_config,
-    after_init,
-    before_shutdown,
-    before_startup,
-    service,
-)
+from canary_framework.common import CF_HOOK_MARKER_MAP, LifecycleHook
+from canary_framework.common.errors import LifecycleHookError
+from canary_framework.core.service import ServiceBase
 
 
-class TestServiceDecorator:
-    def test_service_injects_base_class(self) -> None:
-        @service()
-        class MyService:
-            pass
+@pytest.mark.unit
+class TestServiceBase:
+    """Tests for ServiceBase class."""
 
-        assert issubclass(MyService, ServiceBase)
+    def test_initialization(self) -> None:
+        """Test initialization sets up attributes."""
+        service = ServiceBase()
+        assert service._cf_hooks is None
+        assert service.config is None
 
-    def test_is_cf_service_returns_true(self) -> None:
-        @service()
-        class Svc:
-            pass
+    @pytest.mark.asyncio
+    async def test_configure_sets_config(self) -> None:
+        """Test configure sets the config."""
+        service = ServiceBase()
+        config = {"key": "value"}
+        await service.configure(config)
+        assert service.config == config
 
-        assert is_cf_service(Svc) is True
+    @pytest.mark.asyncio
+    async def test_lifecycle_hooks_called(self) -> None:
+        """Test that lifecycle hooks are called."""
 
-    def test_is_cf_service_returns_false(self) -> None:
-        class Plain:
-            pass
+        class MyService(ServiceBase):
+            def __init__(self) -> None:
+                super().__init__()
+                self.after_config_called = False
+                self.after_init_called = False
+                self.before_startup_called = False
+                self.before_shutdown_called = False
 
-        assert is_cf_service(Plain) is False
+            def after_config(self) -> None:
+                self.after_config_called = True
 
-    def test_get_service_meta(self) -> None:
-        @service()
-        class DBService:
-            pass
+            def after_init(self) -> None:
+                self.after_init_called = True
 
-        meta = get_service_meta(DBService)
-        assert isinstance(meta, ServiceMeta)
-        assert meta.name == "DBServiceService"
-        assert meta.deps == []
+            def before_startup(self) -> None:
+                self.before_startup_called = True
 
-    def test_service_with_deps(self) -> None:
-        @service()
-        class A:
-            pass
+            def before_shutdown(self) -> None:
+                self.before_shutdown_called = True
 
-        @service(deps=[A])
-        class B:
-            pass
+        setattr(MyService.after_config, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_CONFIG], True)
+        setattr(MyService.after_init, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_INIT], True)
+        setattr(MyService.before_startup, CF_HOOK_MARKER_MAP[LifecycleHook.BEFORE_STARTUP], True)
+        setattr(MyService.before_shutdown, CF_HOOK_MARKER_MAP[LifecycleHook.BEFORE_SHUTDOWN], True)
 
-        meta = get_service_meta(B)
-        assert meta.deps == [A]
+        service = MyService()
 
+        await service.configure(None)
+        assert service.after_config_called
 
-class TestServiceLifecycle:
-    async def test_after_config(self) -> None:
-        calls: list[str] = []
+        await service.init()
+        assert service.after_init_called
 
-        @service()
-        class Svc:
-            @after_config
-            def hook(self) -> None:
-                calls.append("after_config")
+        await service.startup()
+        assert service.before_startup_called
 
-        inst = Svc()
-        await inst.configure()  # type: ignore[attr-defined]
-        assert "after_config" in calls
+        await service.shutdown()
+        assert service.before_shutdown_called
 
-    async def test_after_init(self) -> None:
-        calls: list[str] = []
+    @pytest.mark.asyncio
+    async def test_async_hook_called(self) -> None:
+        """Test that async hooks are awaited."""
 
-        @service()
-        class Svc:
-            @after_init
-            def hook(self) -> None:
-                calls.append("after_init")
+        class MyService(ServiceBase):
+            def __init__(self) -> None:
+                super().__init__()
+                self.after_config_called = False
 
-        inst = Svc()
-        await inst.configure()  # type: ignore[attr-defined]
-        await inst.init()  # type: ignore[attr-defined]
-        assert "after_init" in calls
+            async def after_config(self) -> None:
+                self.after_config_called = True
 
-    async def test_before_startup(self) -> None:
-        calls: list[str] = []
+        setattr(MyService.after_config, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_CONFIG], True)
 
-        @service()
-        class Svc:
-            @before_startup
-            def hook(self) -> None:
-                calls.append("before_startup")
+        service = MyService()
+        await service.configure(None)
+        assert service.after_config_called
 
-        inst = Svc()
-        await inst.configure()  # type: ignore[attr-defined]
-        await inst.init()  # type: ignore[attr-defined]
-        await inst.startup()  # type: ignore[attr-defined]
-        assert "before_startup" in calls
+    @pytest.mark.asyncio
+    async def test_hook_error_wrapped(self) -> None:
+        """Test that hook errors are wrapped in LifecycleHookError."""
 
-    async def test_before_shutdown(self) -> None:
-        calls: list[str] = []
+        class MyService(ServiceBase):
+            def after_config(self) -> None:
+                raise ValueError("Test error")
 
-        @service()
-        class Svc:
-            @before_shutdown
-            def hook(self) -> None:
-                calls.append("before_shutdown")
+        setattr(MyService.after_config, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_CONFIG], True)
 
-        inst = Svc()
-        await inst.configure()  # type: ignore[attr-defined]
-        await inst.init()  # type: ignore[attr-defined]
-        await inst.startup()  # type: ignore[attr-defined]
-        await inst.shutdown()  # type: ignore[attr-defined]
-        assert "before_shutdown" in calls
+        service = MyService()
 
-    async def test_config_loaded(self) -> None:
-        class AppConfig:
-            name: str = "canary"
-
-        captured: dict[str, str] = {}
-
-        @service()
-        class Svc:
-            @after_config
-            def hook(self) -> None:
-                captured["name"] = self.config.name  # type: ignore[attr-defined]
-
-        inst = Svc()
-        await inst.configure(AppConfig())  # type: ignore[attr-defined]
-        assert captured.get("name") == "canary"
+        with pytest.raises(LifecycleHookError):
+            await service.configure(None)

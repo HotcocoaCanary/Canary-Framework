@@ -1,73 +1,118 @@
-"""Unit tests for web routing decorators."""
+"""Unit tests for core.router module."""
 
-from __future__ import annotations
+import pytest
+from starlette.responses import JSONResponse, PlainTextResponse
 
-from canary_framework.common import ROUTE_ATTR, RouterMeta, get_service_meta, is_cf_router
-from canary_framework.core import RouterBase
-from canary_framework.decorators import get, router
-
-
-class TestHTTPMethodDecorators:
-    def test_get_decorator(self) -> None:
-        @get("/items")
-        async def handler(self, request):  # type: ignore[no-untyped-def]
-            pass
-
-        info = getattr(handler, ROUTE_ATTR)
-        assert info["method"] == "GET"
-        assert info["path"] == "/items"
+from canary_framework.core.router import (
+    RouterBase,
+    _auto_response,
+    _convert_param,
+    _parse_route_path,
+)
 
 
-class TestRouterDecorator:
-    def test_router_injects_router_base(self) -> None:
-        @router(prefix="/api")
-        class ApiRouter:
-            pass
+@pytest.mark.unit
+class TestParseRoutePath:
+    """Tests for _parse_route_path function."""
 
-        assert issubclass(ApiRouter, RouterBase)
+    def test_simple_path(self) -> None:
+        """Test simple path with no params."""
+        path, path_params, query_params = _parse_route_path("/simple")
+        assert path == "/simple"
+        assert path_params == []
+        assert query_params == []
 
-    def test_is_cf_router(self) -> None:
-        @router()
-        class R:
-            pass
+    def test_path_with_path_params(self) -> None:
+        """Test path with path params."""
+        path, path_params, query_params = _parse_route_path("/items/{item_id}")
+        assert path == "/items/{item_id}"
+        assert path_params == ["item_id"]
+        assert query_params == []
 
-        assert is_cf_router(R) is True
+    def test_path_with_query_params(self) -> None:
+        """Test path with query params."""
+        path, path_params, query_params = _parse_route_path("/items?page={page}&limit={limit}")
+        assert path == "/items"
+        assert path_params == []
+        assert query_params == ["page", "limit"]
 
-        class Plain:
-            pass
-
-        assert is_cf_router(Plain) is False
-
-    def test_router_meta(self) -> None:
-        @router(prefix="/v1", tags=["api"])
-        class V1:
-            pass
-
-        meta = get_service_meta(V1)
-        assert isinstance(meta, RouterMeta)
-        assert meta.prefix == "/v1"
-        assert meta.tags == ["api"]
-
-    def test_router_collects_routes(self) -> None:
-        @router()
-        class Collector:
-            @get("/hello")
-            async def hello(self, request):  # type: ignore[no-untyped-def]
-                return {"msg": "hi"}
-
-        meta = get_service_meta(Collector)
-        assert isinstance(meta, RouterMeta)
-        assert len(meta.routes) == 1
+    def test_path_with_hash_params(self) -> None:
+        """Test path with hash params."""
+        path, path_params, query_params = _parse_route_path("/items#section={section}")
+        assert path == "/items"
+        assert path_params == []
+        assert query_params == ["section"]
 
 
+@pytest.mark.unit
+class TestConvertParam:
+    """Tests for _convert_param function."""
+
+    def test_convert_to_int(self) -> None:
+        """Test convert to int."""
+        assert _convert_param("123", int) == 123
+
+    def test_convert_to_float(self) -> None:
+        """Test convert to float."""
+        assert _convert_param("123.45", float) == 123.45
+
+    def test_convert_to_bool(self) -> None:
+        """Test convert to bool."""
+        assert _convert_param("true", bool) is True
+        assert _convert_param("false", bool) is False
+
+    def test_no_conversion(self) -> None:
+        """Test no conversion."""
+        assert _convert_param("test", str) == "test"
+        assert _convert_param("test", None) == "test"
+
+
+@pytest.mark.unit
+class TestAutoResponse:
+    """Tests for _auto_response function."""
+
+    def test_response_passthrough(self) -> None:
+        """Test Response is passed through."""
+        response = PlainTextResponse("test")
+        result = _auto_response(response)
+        assert result is response
+
+    def test_dict_to_json(self) -> None:
+        """Test dict becomes JSONResponse."""
+        data = {"key": "value"}
+        result = _auto_response(data)
+        assert isinstance(result, JSONResponse)
+
+    def test_list_to_json(self) -> None:
+        """Test list becomes JSONResponse."""
+        data = [1, 2, 3]
+        result = _auto_response(data)
+        assert isinstance(result, JSONResponse)
+
+    def test_string_to_plaintext(self) -> None:
+        """Test string becomes PlainTextResponse."""
+        result = _auto_response("test")
+        assert isinstance(result, PlainTextResponse)
+
+    def test_other_to_plaintext(self) -> None:
+        """Test other types become PlainTextResponse."""
+        result = _auto_response(123)
+        assert isinstance(result, PlainTextResponse)
+
+
+@pytest.mark.unit
 class TestRouterBase:
-    async def test_asgi_app(self) -> None:
-        @router()
-        class TestRouter:
-            @get("/ping")
-            async def ping(self, request):  # type: ignore[no-untyped-def]
-                return {"pong": True}
+    """Tests for RouterBase class."""
 
-        inst = TestRouter()
-        app = inst.asgi_app  # type: ignore[attr-defined]
-        assert app is not None
+    def test_initialization(self) -> None:
+        """Test initialization."""
+        router = RouterBase()
+        assert router._starlette_router is None
+
+    def test_asgi_app_lazy_loaded(self) -> None:
+        """Test asgi_app is lazily loaded."""
+        router = RouterBase()
+        assert router._starlette_router is None
+        app = router.asgi_app
+        assert router._starlette_router is not None
+        assert app is router._starlette_router

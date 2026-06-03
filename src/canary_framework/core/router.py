@@ -26,6 +26,7 @@ from starlette.routing import Router as StarletteRouter
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from canary_framework.common import ROUTE_ATTR, HookFunction
+from canary_framework.common.markers import get_router_meta
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.logging import get_logger
 
@@ -106,6 +107,7 @@ def _auto_response(result: object) -> Response:
     根据返回值类型自动选择合适的响应类型：
     - Response对象：直接返回
     - dict或list：返回JSONResponse
+    - Pydantic BaseModel：返回JSONResponse（调用model_dump）
     - str：返回PlainTextResponse
     - 其他类型：转换为字符串后返回PlainTextResponse
 
@@ -120,6 +122,7 @@ def _auto_response(result: object) -> Response:
     Automatically selects the appropriate response type based on the return value:
     - Response object: returned directly
     - dict or list: JSONResponse
+    - Pydantic BaseModel: JSONResponse (via model_dump)
     - str: PlainTextResponse
     - other types: PlainTextResponse with string representation
 
@@ -131,11 +134,33 @@ def _auto_response(result: object) -> Response:
     """
     if isinstance(result, Response):
         return result
-    if isinstance(result, (dict, list)):
-        return JSONResponse(result)
     if isinstance(result, str):
         return PlainTextResponse(result)
+    if isinstance(result, BaseModel):
+        return JSONResponse(result.model_dump())
+    if isinstance(result, (dict, list)):
+        # 递归转换dict或list中的Pydantic模型
+        converted = _convert_to_dicts(result)
+        return JSONResponse(converted)
     return PlainTextResponse(str(result))
+
+
+def _convert_to_dicts(obj: object) -> object:
+    """递归转换对象中的Pydantic模型为字典。
+
+    Args:
+        obj: 待转换的对象。
+
+    Returns:
+        转换后的对象。
+    """
+    if isinstance(obj, BaseModel):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return {k: _convert_to_dicts(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_convert_to_dicts(item) for item in obj]
+    return obj
 
 
 def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
@@ -185,6 +210,11 @@ def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
 
     # 解析路径，提取路径参数和查询参数
     starlette_path, path_param_names, query_param_names = _parse_route_path(path)
+
+    # 应用路由器前缀
+    router_meta = get_router_meta(cls)
+    if router_meta and router_meta.prefix:
+        starlette_path = router_meta.prefix + starlette_path
 
     sig = inspect.signature(attr)
     try:
