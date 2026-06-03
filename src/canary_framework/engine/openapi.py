@@ -7,7 +7,9 @@ Generates OpenAPI 3.0.3-compliant schemas from RouterMeta lists.
 
 from __future__ import annotations
 
+import inspect
 import json
+import re
 from typing import cast
 
 from pydantic import BaseModel
@@ -20,6 +22,68 @@ _TYPE_MAP: dict[str, str] = {
     "bool": "boolean",
     "float": "number",
 }
+
+
+def _parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
+    """解析路由路径，提取路径参数和查询参数。
+
+    路径格式：
+    - 路径参数：{param}，如 /op/{kb_id}
+    - 查询参数：?param={param} 或 #param={param}
+
+    Args:
+        path: 路由路径，如 "/op/{kb_id}?count={count}#page={page}"
+
+    Returns:
+        (starlette_path, path_params, query_params)
+        - starlette_path: Starlette兼容的路径，如 "/op/{kb_id}"
+        - path_params: 路径参数名称列表，如 ["kb_id"]
+        - query_params: 查询参数名称列表，如 ["count", "page"]
+    """
+    pattern = r"\{(\w+)\}"
+
+    # 分离路径部分和查询参数部分
+    base_path = path.split("?")[0].split("#")[0]
+
+    # 提取路径参数（在基础路径中的 {param}）
+    path_params = re.findall(pattern, base_path)
+
+    # 提取查询参数（在 ? 或 # 后面的 {param}）
+    query_params: list[str] = []
+
+    # 查找 ? 后的查询参数
+    if "?" in path:
+        query_part = path.split("?")[1]
+        # 去掉 # 后面的部分
+        if "#" in query_part:
+            query_part = query_part.split("#")[0]
+        query_params.extend(re.findall(pattern, query_part))
+
+    # 查找 # 后的查询参数
+    if "#" in path:
+        hash_part = path.split("#")[1]
+        # 去掉 ? 后面的部分（如果 # 在 ? 前面）
+        if "?" in hash_part:
+            hash_part = hash_part.split("?")[0]
+        query_params.extend(re.findall(pattern, hash_part))
+
+    return base_path, path_params, query_params
+
+
+def _get_type_name(param_type: type | None) -> str:
+    """获取类型名称。
+
+    Args:
+        param_type: 参数类型
+
+    Returns:
+        类型名称字符串
+    """
+    if param_type is inspect.Parameter.empty or param_type is None:
+        return "string"
+    if hasattr(param_type, "__name__"):
+        return param_type.__name__
+    return str(param_type)
 
 
 def generate_openapi_schema(
@@ -108,36 +172,37 @@ def generate_openapi_schema(
                 operation["tags"] = merged_tags
 
             parameters: list[dict[str, object]] = []
-            path_params = cast("dict[str, object]", raw_info.get("path_params") or {})
-            for param_name, param_info in path_params.items():
-                param_info_dict = cast("dict[str, object]", param_info)
-                param_type = _TYPE_MAP.get(
-                    cast(str, param_info_dict.get("type", "string")), "string"
-                )
+
+            # 解析路径，提取路径参数和查询参数
+            starlette_path, path_param_names, query_param_names = _parse_route_path(path)
+
+            sig = inspect.signature(route_fn)
+            param_types = {
+                name: param.annotation for name, param in sig.parameters.items() if name != "self"
+            }
+
+            # 生成路径参数的OpenAPI定义
+            for param_name in path_param_names:
+                param_type = _get_type_name(param_types.get(param_name))
+                openapi_type = _TYPE_MAP.get(param_type, "string")
                 path_param: dict[str, object] = {
                     "name": param_name,
                     "in": "path",
-                    "required": param_info_dict.get("required", True),
-                    "schema": {"type": param_type},
+                    "required": True,
+                    "schema": {"type": openapi_type},
                 }
-                if param_info_dict.get("description"):
-                    path_param["description"] = param_info_dict["description"]
                 parameters.append(path_param)
 
-            query_params = cast("dict[str, object]", raw_info.get("query_params") or {})
-            for param_name, param_info in query_params.items():
-                param_info_dict = cast("dict[str, object]", param_info)
-                param_type = _TYPE_MAP.get(
-                    cast(str, param_info_dict.get("type", "string")), "string"
-                )
+            # 生成查询参数的OpenAPI定义
+            for param_name in query_param_names:
+                param_type = _get_type_name(param_types.get(param_name))
+                openapi_type = _TYPE_MAP.get(param_type, "string")
                 query_param: dict[str, object] = {
                     "name": param_name,
                     "in": "query",
-                    "required": param_info_dict.get("required", False),
-                    "schema": {"type": param_type},
+                    "required": False,
+                    "schema": {"type": openapi_type},
                 }
-                if param_info_dict.get("description"):
-                    query_param["description"] = param_info_dict["description"]
                 parameters.append(query_param)
 
             if parameters:
@@ -180,8 +245,8 @@ def generate_openapi_schema(
 
             operation["responses"] = responses
 
-            _ = paths.setdefault(path, {})
-            cast("dict[str, object]", paths[path])[method] = operation
+            _ = paths.setdefault(starlette_path, {})
+            cast("dict[str, object]", paths[starlette_path])[method] = operation
 
     return schema
 
