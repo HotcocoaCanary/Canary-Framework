@@ -30,8 +30,6 @@ def _http_method(
     description: str | None = None,
     response_model: type | None = None,
     request_model: type | None = None,
-    path_params: dict[str, object] | None = None,
-    query_params: dict[str, object] | None = None,
     tags: list[str] | None = None,
     deprecated: bool = False,
     operation_id: str | None = None,
@@ -41,9 +39,17 @@ def _http_method(
 
     存储完整的OpenAPI路由元数据到ROUTE_ATTR中。
 
+    参数自动从函数签名和路径中提取：
+    - 路径参数：从URL路径提取，如 `/op/{kb_id}`
+    - 查询参数：从函数签名自动识别
+
     Creates an HTTP method decorator.
 
     Stores full OpenAPI route metadata in ROUTE_ATTR.
+
+    Parameters are automatically extracted from function signature and path:
+    - Path parameters: extracted from URL path, e.g., `/op/{kb_id}`
+    - Query parameters: automatically recognized from function signature
     """
 
     def decorator(fn: HookFunction) -> HookFunction:
@@ -59,10 +65,6 @@ def _http_method(
             info["response_model"] = response_model
         if request_model is not None:
             info["request_model"] = request_model
-        if path_params is not None:
-            info["path_params"] = path_params
-        if query_params is not None:
-            info["query_params"] = query_params
         if tags is not None:
             info["tags"] = tags
         if deprecated:
@@ -84,8 +86,6 @@ def get(
     description: str | None = None,
     response_model: type | None = None,
     request_model: type | None = None,
-    path_params: dict[str, object] | None = None,
-    query_params: dict[str, object] | None = None,
     tags: list[str] | None = None,
     deprecated: bool = False,
     operation_id: str | None = None,
@@ -93,7 +93,15 @@ def get(
 ) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为GET路由处理器。
 
+    参数自动从函数签名和路径中提取：
+    - 路径参数：从URL路径提取，如 `/op/{kb_id}`
+    - 查询参数：从函数签名自动识别
+
     Mark an async method as a GET route handler.
+
+    Parameters are automatically extracted from function signature and path:
+    - Path parameters: extracted from URL path, e.g., `/op/{kb_id}`
+    - Query parameters: automatically recognized from function signature
     """
     return _http_method(
         "GET",
@@ -102,8 +110,6 @@ def get(
         description=description,
         response_model=response_model,
         request_model=request_model,
-        path_params=path_params,
-        query_params=query_params,
         tags=tags,
         deprecated=deprecated,
         operation_id=operation_id,
@@ -118,8 +124,6 @@ def post(
     description: str | None = None,
     response_model: type | None = None,
     request_model: type | None = None,
-    path_params: dict[str, object] | None = None,
-    query_params: dict[str, object] | None = None,
     tags: list[str] | None = None,
     deprecated: bool = False,
     operation_id: str | None = None,
@@ -127,7 +131,15 @@ def post(
 ) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为POST路由处理器。
 
+    参数自动从函数签名和路径中提取：
+    - 路径参数：从URL路径提取，如 `/op/{kb_id}`
+    - 查询参数：从函数签名自动识别
+
     Mark an async method as a POST route handler.
+
+    Parameters are automatically extracted from function signature and path:
+    - Path parameters: extracted from URL path, e.g., `/op/{kb_id}`
+    - Query parameters: automatically recognized from function signature
     """
     return _http_method(
         "POST",
@@ -136,8 +148,6 @@ def post(
         description=description,
         response_model=response_model,
         request_model=request_model,
-        path_params=path_params,
-        query_params=query_params,
         tags=tags,
         deprecated=deprecated,
         operation_id=operation_id,
@@ -152,8 +162,6 @@ def put(
     description: str | None = None,
     response_model: type | None = None,
     request_model: type | None = None,
-    path_params: dict[str, object] | None = None,
-    query_params: dict[str, object] | None = None,
     tags: list[str] | None = None,
     deprecated: bool = False,
     operation_id: str | None = None,
@@ -161,7 +169,15 @@ def put(
 ) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为PUT路由处理器。
 
+    参数自动从函数签名和路径中提取：
+    - 路径参数：从URL路径提取，如 `/op/{kb_id}`
+    - 查询参数：从函数签名自动识别
+
     Mark an async method as a PUT route handler.
+
+    Parameters are automatically extracted from function signature and path:
+    - Path parameters: extracted from URL path, e.g., `/op/{kb_id}`
+    - Query parameters: automatically recognized from function signature
     """
     return _http_method(
         "PUT",
@@ -170,8 +186,6 @@ def put(
         description=description,
         response_model=response_model,
         request_model=request_model,
-        path_params=path_params,
-        query_params=query_params,
         tags=tags,
         deprecated=deprecated,
         operation_id=operation_id,
@@ -186,8 +200,6 @@ def delete(
     description: str | None = None,
     response_model: type | None = None,
     request_model: type | None = None,
-    path_params: dict[str, object] | None = None,
-    query_params: dict[str, object] | None = None,
     tags: list[str] | None = None,
     deprecated: bool = False,
     operation_id: str | None = None,
@@ -195,7 +207,15 @@ def delete(
 ) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为DELETE路由处理器。
 
+    参数自动从函数签名和路径中提取：
+    - 路径参数：从URL路径提取，如 `/op/{kb_id}`
+    - 查询参数：从函数签名自动识别
+
     Mark an async method as a DELETE route handler.
+
+    Parameters are automatically extracted from function signature and path:
+    - Path parameters: extracted from URL path, e.g., `/op/{kb_id}`
+    - Query parameters: automatically recognized from function signature
     """
     return _http_method(
         "DELETE",
@@ -204,8 +224,6 @@ def delete(
         description=description,
         response_model=response_model,
         request_model=request_model,
-        path_params=path_params,
-        query_params=query_params,
         tags=tags,
         deprecated=deprecated,
         operation_id=operation_id,
@@ -220,8 +238,6 @@ def patch(
     description: str | None = None,
     response_model: type | None = None,
     request_model: type | None = None,
-    path_params: dict[str, object] | None = None,
-    query_params: dict[str, object] | None = None,
     tags: list[str] | None = None,
     deprecated: bool = False,
     operation_id: str | None = None,
@@ -229,7 +245,15 @@ def patch(
 ) -> Callable[[HookFunction], HookFunction]:
     """将异步方法标记为PATCH路由处理器。
 
+    参数自动从函数签名和路径中提取：
+    - 路径参数：从URL路径提取，如 `/op/{kb_id}`
+    - 查询参数：从函数签名自动识别
+
     Mark an async method as a PATCH route handler.
+
+    Parameters are automatically extracted from function signature and path:
+    - Path parameters: extracted from URL path, e.g., `/op/{kb_id}`
+    - Query parameters: automatically recognized from function signature
     """
     return _http_method(
         "PATCH",
@@ -238,8 +262,6 @@ def patch(
         description=description,
         response_model=response_model,
         request_model=request_model,
-        path_params=path_params,
-        query_params=query_params,
         tags=tags,
         deprecated=deprecated,
         operation_id=operation_id,

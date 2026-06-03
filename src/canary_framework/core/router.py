@@ -12,6 +12,8 @@ endpoints inside a @router class.
 
 from __future__ import annotations
 
+import inspect
+import re
 from collections.abc import Awaitable, Callable
 from types import FunctionType
 from typing import cast
@@ -26,6 +28,74 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from canary_framework.common import ROUTE_ATTR, HookFunction
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.logging import get_logger
+
+
+def _parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
+    """解析路由路径，提取路径参数和查询参数。
+
+    路径格式：
+    - 路径参数：{param}，如 /op/{kb_id}
+    - 查询参数：?param={param} 或 #param={param}
+
+    Args:
+        path: 路由路径，如 "/op/{kb_id}?count={count}#page={page}"
+
+    Returns:
+        (starlette_path, path_params, query_params)
+        - starlette_path: Starlette兼容的路径，如 "/op/{kb_id}"
+        - path_params: 路径参数名称列表，如 ["kb_id"]
+        - query_params: 查询参数名称列表，如 ["count", "page"]
+    """
+    pattern = r"\{(\w+)\}"
+
+    # 分离路径部分和查询参数部分
+    base_path = path.split("?")[0].split("#")[0]
+
+    # 提取路径参数（在基础路径中的 {param}）
+    path_params = re.findall(pattern, base_path)
+
+    # 提取查询参数（在 ? 或 # 后面的 {param}）
+    query_params: list[str] = []
+
+    # 查找 ? 后的查询参数
+    if "?" in path:
+        query_part = path.split("?")[1]
+        # 去掉 # 后面的部分
+        if "#" in query_part:
+            query_part = query_part.split("#")[0]
+        query_params.extend(re.findall(pattern, query_part))
+
+    # 查找 # 后的查询参数
+    if "#" in path:
+        hash_part = path.split("#")[1]
+        # 去掉 ? 后面的部分（如果 # 在 ? 前面）
+        if "?" in hash_part:
+            hash_part = hash_part.split("?")[0]
+        query_params.extend(re.findall(pattern, hash_part))
+
+    return base_path, path_params, query_params
+
+
+def _convert_param(value: str, param_type: type | None) -> object:
+    """将字符串参数转换为目标类型。
+
+    Args:
+        value: 原始字符串值
+        param_type: 目标类型
+
+    Returns:
+        转换后的值
+    """
+    if param_type is None or param_type is str:
+        return value
+    if param_type is int:
+        return int(value)
+    if param_type is float:
+        return float(value)
+    if param_type is bool:
+        return value.lower() == "true"
+    return value
+
 
 _log = get_logger("router")
 
@@ -71,7 +141,12 @@ def _auto_response(result: object) -> Response:
 def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
     """创建路由处理函数。
 
-    从类方法创建一个Starlette Route对象，自动处理响应转换。
+    从类方法创建一个Starlette Route对象，自动处理响应转换和参数解析。
+
+    支持自动参数绑定：
+    - 路径参数：从URL路径提取，如 `/op/{kb_id}` 自动绑定到 `kb_id` 参数
+    - 查询参数：从URL路径提取，如 `/op?count={count}#page={page}` 自动绑定到 `count` 和 `page` 参数
+    - 请求体：通过request_model指定，自动解析为Pydantic模型
 
     Args:
         instance: 路由器实例。
@@ -84,7 +159,12 @@ def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
     Create a route handler.
 
     Creates a Starlette Route object from a class method with automatic
-    response conversion.
+    response conversion and parameter parsing.
+
+    Supports automatic parameter binding:
+    - Path parameters: extracted from URL path, e.g., `/op/{kb_id}` binds to `kb_id`
+    - Query parameters: extracted from URL path, e.g., `/op?count={count}#page={page}` binds to `count` and `page`
+    - Request body: parsed via request_model as Pydantic model
 
     Args:
         instance: The router instance.
@@ -103,17 +183,42 @@ def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
         cast(FunctionType, attr).__get__(instance, cls),
     )
 
+    # 解析路径，提取路径参数和查询参数
+    starlette_path, path_param_names, query_param_names = _parse_route_path(path)
+
+    sig = inspect.signature(attr)
+    param_types = {
+        name: param.annotation if param.annotation is not inspect.Parameter.empty else None
+        for name, param in sig.parameters.items()
+        if name != "self"
+    }
+
     async def endpoint(request: Request) -> Response:
+        kwargs: dict[str, object] = {}
+
+        # 处理路径参数
+        for param_name in path_param_names:
+            if param_name in request.path_params:
+                param_type = param_types.get(param_name)
+                kwargs[param_name] = _convert_param(request.path_params[param_name], param_type)
+
+        # 处理查询参数
+        for param_name in query_param_names:
+            if param_name in request.query_params:
+                param_type = param_types.get(param_name)
+                kwargs[param_name] = _convert_param(request.query_params[param_name], param_type)
+
         if request_model is not None:
             body = cast("dict[str, object]", await request.json())
             model_cls = cast("type[BaseModel]", request_model)
             parsed = model_cls(**body)
-            result = await handler(request, parsed)
+            result = await handler(parsed, **kwargs)
         else:
-            result = await handler(request)
+            result = await handler(**kwargs)
+
         return _auto_response(result)
 
-    return Route(path, endpoint=endpoint, methods=[method])
+    return Route(starlette_path, endpoint=endpoint, methods=[method])
 
 
 def _collect_routes(instance: object) -> list[Route]:

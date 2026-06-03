@@ -182,9 +182,9 @@ class TestOpenAPISchema:
         )
 
     def test_generate_schema_with_path_params(self) -> None:
-        """Test generating schema with path parameters."""
+        """Test generating schema with path parameters from function signature."""
 
-        def sample_route() -> None:
+        def sample_route(user_id: int) -> None:
             pass
 
         setattr(
@@ -193,9 +193,6 @@ class TestOpenAPISchema:
             {
                 "method": "GET",
                 "path": "/users/{user_id}",
-                "path_params": {
-                    "user_id": {"type": "int", "description": "User ID", "required": True}
-                },
             },
         )
 
@@ -215,9 +212,9 @@ class TestOpenAPISchema:
         assert params[0]["schema"]["type"] == "integer"
 
     def test_generate_schema_with_query_params(self) -> None:
-        """Test generating schema with query parameters."""
+        """Test generating schema with query parameters from URL path."""
 
-        def sample_route() -> None:
+        def sample_route(page: int, limit: int) -> None:
             pass
 
         setattr(
@@ -225,11 +222,7 @@ class TestOpenAPISchema:
             ROUTE_ATTR,
             {
                 "method": "GET",
-                "path": "/users",
-                "query_params": {
-                    "page": {"type": "int", "description": "Page number", "required": False},
-                    "limit": {"type": "int", "description": "Items per page", "required": False},
-                },
+                "path": "/users?page={page}#limit={limit}",
             },
         )
 
