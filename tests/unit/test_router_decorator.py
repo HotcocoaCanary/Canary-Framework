@@ -46,7 +46,6 @@ class TestRouterDecorator:
         meta = get_router_meta(MyRouter)
         assert meta is not None
         assert meta.name == "MyRouterRouter"
-        assert meta.deps == []
         assert meta.prefix == ""
         assert meta.tags == []
         assert meta.routes == []
@@ -72,20 +71,6 @@ class TestRouterDecorator:
         meta = get_router_meta(MyRouter)
         assert meta is not None
         assert meta.tags == ["api", "v1"]
-
-    def test_router_decorator_with_deps(self) -> None:
-        """Test @router with dependencies."""
-
-        class Dep:
-            pass
-
-        @router(deps=[Dep])
-        class MyRouter:
-            pass
-
-        meta = get_router_meta(MyRouter)
-        assert meta is not None
-        assert meta.deps == [Dep]
 
     def test_router_decorator_collects_routes(self) -> None:
         """Test @router collects routes."""

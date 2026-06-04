@@ -18,9 +18,9 @@ class TestDependencyInjection:
             def get_value(self) -> str:
                 return "dependency value"
 
-        @service(deps=[Dependency])
+        @service()
         class MyService:
-            pass
+            dependency: Dependency
 
         @module(services=[MyService])
         class MyModule:
@@ -30,8 +30,8 @@ class TestDependencyInjection:
         await app.configure()  # type: ignore[attr-defined]
 
         # Check that dependency is injected
-        assert hasattr(app.my_service, "dependency")  # type: ignore[attr-defined]
-        assert app.my_service.dependency.get_value() == "dependency value"  # type: ignore[attr-defined]
+        assert hasattr(app.MyService, "dependency")  # type: ignore[attr-defined]
+        assert app.MyService.dependency.get_value() == "dependency value"  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_multiple_dependencies(self) -> None:
@@ -47,9 +47,10 @@ class TestDependencyInjection:
             def get_value(self) -> str:
                 return "dep2"
 
-        @service(deps=[Dep1, Dep2])
+        @service()
         class MyService:
-            pass
+            dep1: Dep1
+            dep2: Dep2
 
         @module(services=[MyService])
         class MyModule:
@@ -58,10 +59,10 @@ class TestDependencyInjection:
         app = MyModule()
         await app.configure()  # type: ignore[attr-defined]
 
-        assert hasattr(app.my_service, "dep1")  # type: ignore[attr-defined]
-        assert hasattr(app.my_service, "dep2")  # type: ignore[attr-defined]
-        assert app.my_service.dep1.get_value() == "dep1"  # type: ignore[attr-defined]
-        assert app.my_service.dep2.get_value() == "dep2"  # type: ignore[attr-defined]
+        assert hasattr(app.MyService, "dep1")  # type: ignore[attr-defined]
+        assert hasattr(app.MyService, "dep2")  # type: ignore[attr-defined]
+        assert app.MyService.dep1.get_value() == "dep1"  # type: ignore[attr-defined]
+        assert app.MyService.dep2.get_value() == "dep2"  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_nested_dependencies(self) -> None:
@@ -72,13 +73,13 @@ class TestDependencyInjection:
             def get_value(self) -> str:
                 return "deep"
 
-        @service(deps=[DeepDep])
+        @service()
         class MiddleDep:
-            pass
+            deep_dep: DeepDep
 
-        @service(deps=[MiddleDep])
+        @service()
         class MyService:
-            pass
+            middle_dep: MiddleDep
 
         @module(services=[MyService])
         class MyModule:
@@ -87,6 +88,6 @@ class TestDependencyInjection:
         app = MyModule()
         await app.configure()  # type: ignore[attr-defined]
 
-        assert hasattr(app.my_service, "middle_dep")  # type: ignore[attr-defined]
-        assert hasattr(app.my_service.middle_dep, "deep_dep")  # type: ignore[attr-defined]
-        assert app.my_service.middle_dep.deep_dep.get_value() == "deep"  # type: ignore[attr-defined]
+        assert hasattr(app.MyService, "middle_dep")  # type: ignore[attr-defined]
+        assert hasattr(app.MyService.middle_dep, "deep_dep")  # type: ignore[attr-defined]
+        assert app.MyService.middle_dep.deep_dep.get_value() == "deep"  # type: ignore[attr-defined]

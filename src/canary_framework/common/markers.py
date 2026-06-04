@@ -171,6 +171,40 @@ def get_router_meta(cls: type) -> RouterMeta | None:
     return None
 
 
+def resolve_deps(cls: type) -> dict[str, type]:
+    """从类的类型注解中解析依赖映射。
+
+    返回 {属性名: 依赖类型}，只包含被@service/@module/@router装饰的类型。
+
+    Args:
+        cls: 要解析依赖的类。
+
+    Returns:
+        属性名到依赖类型的映射。
+
+    Resolve dependency mapping from class type annotations.
+
+    Returns {attr_name: dep_type} for types decorated with @service, @module, or @router.
+
+    Args:
+        cls: The class to resolve dependencies from.
+
+    Returns:
+        Mapping of attribute names to dependency types.
+    """
+    from typing import get_type_hints
+
+    try:
+        hints = get_type_hints(cls)
+    except Exception:
+        return {}
+    return {
+        name: tp
+        for name, tp in hints.items()
+        if isinstance(tp, type) and hasattr(tp, CF_SERVICE_MARKER)
+    }
+
+
 __all__ = [
     "CF_HOOK_MARKER_MAP",
     "CF_MODULE_MARKER",
@@ -180,8 +214,10 @@ __all__ = [
     "CF_SERVICE_META",
     "ROUTE_ATTR",
     "get_module_meta",
+    "get_router_meta",
     "get_service_meta",
     "is_cf_module",
     "is_cf_router",
     "is_cf_service",
+    "resolve_deps",
 ]

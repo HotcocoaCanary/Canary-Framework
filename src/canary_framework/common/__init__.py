@@ -22,6 +22,7 @@ from canary_framework.common.markers import (
     is_cf_module,
     is_cf_router,
     is_cf_service,
+    resolve_deps,
 )
 from canary_framework.common.routing import parse_route_path
 from canary_framework.common.types import (
@@ -62,4 +63,5 @@ __all__ = [
     "is_cf_router",
     "is_cf_service",
     "parse_route_path",
+    "resolve_deps",
 ]

@@ -18,7 +18,7 @@ class TestRegistry:
         class TestService:
             pass
 
-        meta = ServiceMeta(name="test_service", deps=[])
+        meta = ServiceMeta(name="test_service")
 
         reg.register(TestService, meta=meta)
 
@@ -33,7 +33,7 @@ class TestRegistry:
         class TestService:
             pass
 
-        meta = ServiceMeta(name="test_service", deps=[])
+        meta = ServiceMeta(name="test_service")
 
         reg.register(TestService, meta=meta)
 
@@ -65,7 +65,7 @@ class TestRegistry:
         class TestService:
             pass
 
-        meta = ServiceMeta(name="test_service", deps=[])
+        meta = ServiceMeta(name="test_service")
 
         assert reg.has(TestService) is False
         reg.register(TestService, meta=meta)
@@ -81,8 +81,8 @@ class TestRegistry:
         class Service2:
             pass
 
-        meta1 = ServiceMeta(name="same_name", deps=[])
-        meta2 = ServiceMeta(name="same_name", deps=[])
+        meta1 = ServiceMeta(name="same_name")
+        meta2 = ServiceMeta(name="same_name")
 
         reg.register(Service1, meta=meta1)
         with pytest.raises(ValueError):
@@ -95,7 +95,7 @@ class TestRegistry:
         class TestService:
             pass
 
-        meta = ServiceMeta(name="test_service", deps=[])
+        meta = ServiceMeta(name="test_service")
 
         reg.register(TestService, meta=meta)
         reg.register(TestService, meta=meta)  # Should not raise
@@ -111,8 +111,8 @@ class TestRegistry:
         class B:
             pass
 
-        reg.register(A, meta=ServiceMeta(name="a", deps=[]))
-        reg.register(B, meta=ServiceMeta(name="b", deps=[]))
+        reg.register(A, meta=ServiceMeta(name="a"))
+        reg.register(B, meta=ServiceMeta(name="b"))
 
         entries = reg.all_entries()
         assert len(entries) == 2
@@ -127,8 +127,8 @@ class TestRegistry:
         class B:
             pass
 
-        reg.register(A, meta=ServiceMeta(name="a", deps=[]))
-        reg.register(B, meta=ServiceMeta(name="b", deps=[]))
+        reg.register(A, meta=ServiceMeta(name="a"))
+        reg.register(B, meta=ServiceMeta(name="b"))
 
         names = reg.names()
         assert set(names) == {"a", "b"}
@@ -144,9 +144,9 @@ class TestRegistry:
             pass
 
         assert len(reg.all_entries()) == 0
-        reg.register(A, meta=ServiceMeta(name="a", deps=[]))
+        reg.register(A, meta=ServiceMeta(name="a"))
         assert len(reg.all_entries()) == 1
-        reg.register(B, meta=ServiceMeta(name="b", deps=[]))
+        reg.register(B, meta=ServiceMeta(name="b"))
         assert len(reg.all_entries()) == 2
 
     def test_contains(self) -> None:
@@ -159,7 +159,7 @@ class TestRegistry:
         class B:
             pass
 
-        reg.register(A, meta=ServiceMeta(name="a", deps=[]))
+        reg.register(A, meta=ServiceMeta(name="a"))
 
         assert reg.has(A) is True
         assert reg.has(B) is False
@@ -172,7 +172,7 @@ class TestRegistry:
         class ParentService:
             pass
 
-        parent.register(ParentService, meta=ServiceMeta(name="parent_service", deps=[]))
+        parent.register(ParentService, meta=ServiceMeta(name="parent_service"))
 
         assert child.has(ParentService) is True
         entry = child.get_by_class(ParentService)

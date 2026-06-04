@@ -23,16 +23,15 @@ from canary_framework.engine import make_subclass
 
 def module(
     *,
-    deps: list[type] | None = None,
     services: list[type] | None = None,
 ) -> Callable[[type], type[ModuleBase]]:
     """声明一个类为模块。
 
     添加模块标记和元数据，修改类的基类使其继承自ModuleBase。
     模块名称自动生成为``类名 + Module``。
+    依赖通过类的类型注解自动检测。
 
     Args:
-        deps: 模块依赖的其他模块/服务类列表。
         services: 模块直接包含的子服务类列表。
 
     Raises:
@@ -45,9 +44,9 @@ def module(
 
     Adds module marker and metadata, modifies the class to inherit from ModuleBase.
     The module name is auto-generated as ``ClassName + Module``.
+    Dependencies are auto-detected from class type annotations.
 
     Args:
-        deps: Dependency classes.
         services: Direct child services.
 
     Raises:
@@ -56,7 +55,6 @@ def module(
     Returns:
         The decorated class.
     """
-    _deps = list(deps or ())
     _services = list(services or ())
 
     def decorator(cls: type) -> type[ModuleBase]:
@@ -68,7 +66,7 @@ def module(
                     f"is not decorated with @service or @module."
                 )
 
-        meta = ModuleMeta(name=name, deps=_deps, services=_services)
+        meta = ModuleMeta(name=name, services=_services)
 
         return cast(
             "type[ModuleBase]",

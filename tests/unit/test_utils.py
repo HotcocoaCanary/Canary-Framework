@@ -20,7 +20,7 @@ class TestMakeSubclass:
         class Base:
             pass
 
-        meta = ServiceMeta(name="test", deps=[])
+        meta = ServiceMeta(name="test")
 
         new_cls = make_subclass(Original, Base, meta, "test_name")
 
@@ -39,7 +39,7 @@ class TestMakeSubclass:
         class Base:
             pass
 
-        meta = ServiceMeta(name="test", deps=[])
+        meta = ServiceMeta(name="test")
         extra_marker = "__extra_marker__"
 
         new_cls = make_subclass(Original, Base, meta, "test_name", extra_marker=extra_marker)
@@ -55,7 +55,7 @@ class TestMakeSubclass:
         class Base:
             pass
 
-        meta = ServiceMeta(name="test", deps=[])
+        meta = ServiceMeta(name="test")
 
         new_cls = make_subclass(Original, Base, meta, "test_name")
 
@@ -70,7 +70,7 @@ class TestMakeSubclass:
         class Base:
             pass
 
-        meta = ServiceMeta(name="test", deps=[])
+        meta = ServiceMeta(name="test")
 
         new_cls = make_subclass(Original, Base, meta, "test_name")
 
