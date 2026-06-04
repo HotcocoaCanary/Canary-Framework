@@ -154,3 +154,64 @@ class TestInjectDeps:
 
         with pytest.raises(DependencyInjectionError):
             inject_deps(service_instance, entry, reg)
+
+    def test_annotation_name_override(self) -> None:
+        """Test that annotation name takes priority over to_snake."""
+        reg = Registry()
+
+        class KbService:
+            pass
+
+        class MyRouter:
+            kb: KbService  # User-declared name differs from to_snake("KbService") → "kb_service"
+
+        reg.register(KbService, meta=ServiceMeta(name="kb_service", deps=[]))
+        reg.register(MyRouter, meta=ServiceMeta(name="my_router", deps=[KbService]))
+
+        kb_instance = KbService()
+        router_instance = MyRouter()
+
+        reg.get_by_class(KbService).instance = kb_instance
+
+        entry = ServiceEntry(
+            cls=MyRouter,
+            name="my_router",
+            instance=router_instance,
+            deps=[KbService],
+        )
+
+        inject_deps(router_instance, entry, reg)
+
+        assert hasattr(router_instance, "kb")
+        assert not hasattr(router_instance, "kb_service")
+        assert router_instance.kb is kb_instance
+
+    def test_annotation_fallback_to_snake(self) -> None:
+        """Test fallback to to_snake when no annotation is present."""
+        reg = Registry()
+
+        class Dep:
+            pass
+
+        class Service:
+            pass  # No annotation at all
+
+        reg.register(Dep, meta=ServiceMeta(name="dep", deps=[]))
+        reg.register(Service, meta=ServiceMeta(name="service", deps=[Dep]))
+
+        dep_instance = Dep()
+        service_instance = Service()
+
+        reg.get_by_class(Dep).instance = dep_instance
+
+        entry = ServiceEntry(
+            cls=Service,
+            name="service",
+            instance=service_instance,
+            deps=[Dep],
+        )
+
+        inject_deps(service_instance, entry, reg)
+
+        assert hasattr(service_instance, "dep")
+        assert service_instance.dep is dep_instance

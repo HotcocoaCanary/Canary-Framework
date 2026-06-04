@@ -111,7 +111,7 @@ def topological_sort(registry: Registry) -> list[str]:
 def inject_deps(instance: object, entry: ServiceEntry, registry: Registry) -> None:
     """将依赖注入到服务实例中。
 
-    将声明的依赖作为snake_case属性注入到实例上。
+    优先使用类注解中声明的属性名；如果注解不存在，回退到snake_case命名。
 
     Args:
         instance: 要注入依赖的服务实例。
@@ -121,7 +121,10 @@ def inject_deps(instance: object, entry: ServiceEntry, registry: Registry) -> No
     Raises:
         DependencyInjectionError: 如果依赖实例为None。
 
-    Inject declared dependencies as snake_case attributes on *instance*.
+    Inject declared dependencies onto *instance*.
+
+    Prefers the attribute name declared in the class annotation;
+    falls back to snake_case naming when no annotation is found.
 
     Args:
         instance: The service instance to inject dependencies into.
@@ -132,6 +135,14 @@ def inject_deps(instance: object, entry: ServiceEntry, registry: Registry) -> No
         DependencyInjectionError: If a dependency instance is None.
     """
     _log.debug("Injecting dependencies into: %s", entry.name)
+
+    name_to_attr: dict[str, str] = {}
+    for base in type(instance).__mro__:
+        for attr_name, annotation in getattr(base, "__annotations__", {}).items():
+            key = annotation if isinstance(annotation, str) else annotation.__name__
+            if key not in name_to_attr:
+                name_to_attr[key] = attr_name
+
     for dep_cls in entry.deps:
         dep_entry = registry.get_by_class(dep_cls)
         if dep_entry.instance is None:
@@ -139,7 +150,7 @@ def inject_deps(instance: object, entry: ServiceEntry, registry: Registry) -> No
                 f"Cannot inject '{dep_cls.__name__}' into '{entry.name}': "
                 f"the dependency instance is None."
             )
-        attr_name = to_snake(dep_cls.__name__)
+        attr_name = name_to_attr.get(dep_cls.__name__, to_snake(dep_cls.__name__))
         setattr(instance, attr_name, dep_entry.instance)
         _log.debug("  %s  →  self.%s", dep_cls.__name__, attr_name)
 
