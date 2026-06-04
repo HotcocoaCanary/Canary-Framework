@@ -14,13 +14,14 @@ from canary_framework import (
     # Config
     CanaryConfig,
 
-    # Base Classes
-    ServiceBase, ModuleBase, RouterBase,
+    # Base Classes (RouterBase is re-exported; ServiceBase/ModuleBase from canary_framework.core)
+    RouterBase,
 
     # Exceptions
     CanaryFrameworkError,
     DependencyInjectionError,
     CircularDependencyError,
+    ConfigurationError,
     LifecycleHookError,
     ServiceNotFoundError,
 
@@ -28,8 +29,15 @@ from canary_framework import (
     LifecycleHook,
 
     # Version
-    __version__
+    __version__,
 )
+```
+
+For `ServiceBase` and `ModuleBase`, import from `canary_framework.core`:
+
+```python
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
 ```
 
 ---
@@ -52,6 +60,9 @@ The service name is auto-generated as `ClassName` + `"Service"`. Dependencies ar
 
 **Example:**
 ```python
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+
 @service()
 class Database(ServiceBase):
     pass
@@ -67,17 +78,20 @@ Marks a class as a module container.
 ```python
 def module(
     *,
-    services: List[type] = None
+    services: list[type] | None = None,
 ) -> Callable[[type], type[ModuleBase]]
 ```
 
 **Parameters:**
-- `services` (List[type], keyword-only): Services, routers, and sub-modules this module contains
+- `services` (list[type], keyword-only): Services, routers, and sub-modules this module contains
 
 The `name` and `deps` parameters have been removed. The module name is auto-generated as `ClassName` + `"Module"`.
 
 **Example:**
 ```python
+from canary_framework import module
+from canary_framework.core.module import ModuleBase
+
 @module(services=[Database, Auth, Api])
 class App(ModuleBase):
     pass
@@ -94,18 +108,21 @@ Marks a class as a router.
 def router(
     prefix: str = "",
     *,
-    tags: List[str] = None
+    tags: list[str] | None = None,
 ) -> Callable[[type], type[RouterBase]]
 ```
 
 **Parameters:**
 - `prefix` (str, positional, default `""`): URL prefix for all routes
-- `tags` (List[str], keyword-only): OpenAPI tags for documentation
+- `tags` (list[str], keyword-only): OpenAPI tags for documentation
 
-The `name` and `deps` parameters have been removed. The router name is auto-generated as `ClassName` + `"Router"`. Dependencies are declared via type annotations.
+The `name`, `deps`, and `docs` parameters have been removed. The router name is auto-generated as `ClassName` + `"Router"`. Dependencies are declared via type annotations. OpenAPI documentation is auto-enabled by default.
 
 **Example:**
 ```python
+from canary_framework import router
+from canary_framework.core.router import RouterBase
+
 @router(prefix="/api", tags=["API"])
 class Api(RouterBase):
     pass
@@ -130,8 +147,8 @@ def patch(path: str, **kwargs) -> Callable
 - `path` (str, required): URL path for the route
 - `summary` (str): Short summary for OpenAPI
 - `description` (str): Detailed description for OpenAPI
-- `request_model` (Pydantic BaseModel): Auto-parse request body into this model. Passed as `body` parameter.
-- `response_model` (Pydantic BaseModel): Response data model for OpenAPI
+- `request_model` (BaseModel): Auto-parse request body into this model. Passed as `body` parameter.
+- `response_model` (BaseModel): Response data model for OpenAPI
 - `responses` (dict): Custom response definitions
 - `tags` (list[str]): OpenAPI tags
 - `deprecated` (bool): Mark as deprecated
@@ -147,12 +164,10 @@ Route handlers do **not** receive a `request` parameter. Path parameters, query 
 class Users(RouterBase):
     @get("/{user_id}")
     async def get_user(self, user_id: int):
-        # user_id auto-bound from URL path
         pass
 
     @post("/", request_model=UserCreate)
     async def create_user(self, body: UserCreate):
-        # body auto-parsed from request
         pass
 ```
 
@@ -169,7 +184,7 @@ def config() -> Callable[[type], type[CanaryConfig]]
 
 **Parameters:** None.
 
-The config class must inherit from `CanaryConfig`.
+The config class must inherit from `CanaryConfig`. Sets `CF_CONFIG_MARKER` on the class.
 
 **Example:**
 ```python
@@ -199,6 +214,9 @@ def before_shutdown(func) -> HookFunction
 
 **Example:**
 ```python
+from canary_framework import service, after_config, before_shutdown
+from canary_framework.core.service import ServiceBase
+
 @service()
 class Database(ServiceBase):
     @after_config
@@ -225,79 +243,96 @@ from canary_framework.common.config import CanaryConfig
 **Fields (all optional, with defaults):**
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
+|---|---|---|---|
 | `host` | `str` | `"127.0.0.1"` | Server bind address |
 | `port` | `int` | `8000` | Server port (1-65535) |
 | `log_level` | `Literal["DEBUG","INFO","WARNING","ERROR","CRITICAL"]` | `"INFO"` | Framework log level |
-| `openapi_title` | `str` | `"Canary Framework API"` | API title |
-| `openapi_version` | `str` | `"1.0.0"` | API version |
-| `openapi_description` | `str` | `""` | API description |
-| `openapi_servers` | `list[dict]` | `[]` | OpenAPI servers |
-| `openapi_security_schemes` | `dict` | `{}` | Security schemes |
-| `docs_openapi_path` | `str` | `"/openapi.json"` | OpenAPI JSON path |
+| `openapi_title` | `str` | `"Canary Framework API"` | API title for OpenAPI schema |
+| `openapi_version` | `str` | `"1.0.0"` | API version for OpenAPI schema |
+| `openapi_description` | `str` | `""` | API description for OpenAPI schema |
+| `openapi_servers` | `list[dict[str,str]]` | `[]` | OpenAPI server URLs |
+| `openapi_security_schemes` | `dict[str,dict[str,object]]` | `{}` | OpenAPI security schemes |
+| `docs_openapi_path` | `str` | `"/openapi.json"` | OpenAPI JSON endpoint path |
 | `docs_swagger_path` | `str` | `"/docs"` | Swagger UI path |
 | `docs_redoc_path` | `str` | `"/redoc"` | ReDoc path |
-| `docs_swagger_css_cdn` | `str` | Swagger CSS CDN | CSS CDN URL |
-| `docs_swagger_js_cdn` | `str` | Swagger JS CDN | JS CDN URL |
-| `docs_redoc_cdn` | `str` | ReDoc JS CDN | ReDoc CDN URL |
+| `docs_swagger_css_cdn` | `str` | Swagger CSS CDN URL | CSS CDN URL |
+| `docs_swagger_js_cdn` | `str` | Swagger JS CDN URL | JS CDN URL |
+| `docs_redoc_cdn` | `str` | ReDoc JS CDN URL | ReDoc CDN URL |
 
 Extra fields are allowed — you can add any custom configuration fields.
+
+---
 
 ### ServiceBase
 
 Base class for services.
 
+**Import:**
+```python
+from canary_framework.core.service import ServiceBase
+```
+
 **Attributes:**
-- `config`: Configuration object (set during configure phase)
-- `_cf_hooks`: Internal hook registry
-- `_cf_parent_registry`: Parent registry reference
+- `config`: Configuration object (`CanaryConfig | None`), set during configure phase
+- `_cf_hooks`: Internal hook registry (lazily populated)
+- `_cf_parent_registry`: Parent registry reference (set by parent module)
 
 **Methods:**
-- `async configure(config_instance: CanaryConfig | None = None)`: Configure the service
-- `async init()`: Initialize the service
-- `async startup()`: Start the service
-- `async shutdown()`: Shutdown the service
-- `async __call__(scope, receive, send)`: ASGI app interface (handles lifespan events)
-- `async _handle_lifespan(receive, send)`: Handle ASGI lifespan events
-- `async _invoke_hook(hook)`: Invoke a lifecycle hook
+- `async configure(config_instance: CanaryConfig | None = None)`: Configure the service. Sets `self.config` and invokes `AFTER_CONFIG` hook. Raises `TypeError` if `config_instance` is not `CanaryConfig` or `None`.
+- `async init()`: Initialize the service. Invokes `AFTER_INIT` hook.
+- `async startup()`: Start the service. Invokes `BEFORE_STARTUP` hook.
+- `async shutdown()`: Shutdown the service. Invokes `BEFORE_SHUTDOWN` hook.
+- `async __call__(scope, receive, send)`: ASGI 3 interface. Handles lifespan events and delegates other requests to `self.asgi_app`.
+- `async _handle_lifespan(receive, send)`: Internal ASGI lifespan protocol handler.
+- `async _invoke_hook(hook: LifecycleHook)`: Lazy hook discovery and invocation.
 
 ---
 
 ### ModuleBase
 
-Base class for modules, extends ServiceBase.
+Base class for modules, extends `ServiceBase`.
+
+**Import:**
+```python
+from canary_framework.core.module import ModuleBase
+```
 
 **Attributes:**
-- `config`: Configuration object
+- `config`: Configuration object (`CanaryConfig | None`)
 - `_cf_parent_registry`: Parent registry (if any)
-- `_cf_registry`: Service registry
-- `_cf_startup_order`: Sorted startup order
-- `_cf_asgi_app`: Cached ASGI app
+- `_cf_registry`: Service registry for this module
+- `_cf_startup_order`: List of service names in topological order
+- `_cf_asgi_app`: Cached ASGI Starlette Router (lazily built)
 
 **Properties:**
-- `asgi_app`: Starlette router with mounted child services
+- `asgi_app`: Starlette `Router` with mounted child ASGI apps and root routes
 
 **Methods:**
-- `async configure(config_instance: CanaryConfig | None = None)`: Configure module and all services
-- `async init()`: Initialize module and all services
-- `async startup()`: Start module and all services
-- `async shutdown()`: Shutdown module and all services
-- `_register_entry_with_deps(cls, registry)`: Recursively register services with annotation-resolved deps
+- `async configure(config_instance: CanaryConfig | None = None)`: Register services recursively, topological sort, instantiate, DI wire, configure children
+- `async init()`: Initialize module and all children in topological order
+- `async startup()`: Start module and all children in topological order
+- `async shutdown()`: Shutdown module and all children in reverse topological order
+- `_register_entry_with_deps(cls, registry)`: Recursively register services with annotation-resolved dependencies
 
 ---
 
 ### RouterBase
 
-Base class for routers, extends ServiceBase.
+Base class for routers, extends `ServiceBase`.
+
+**Import:**
+```python
+from canary_framework.core.router import RouterBase
+```
 
 **Properties:**
-- `asgi_app`: Starlette router with collected routes
+- `asgi_app`: Starlette `Router` with collected routes (lazily built)
 
 **Methods:**
-- `async configure(config_instance: CanaryConfig | None = None)`: Configure the router
-- `async startup()`: Start the router (auto-registers OpenAPI documentation)
-- `get_mount_path()`: Get the mount path for this router
-- `_cf_get_root_routes()`: Get root routes for the ASGI app
+- `async configure(config_instance: CanaryConfig | None = None)`: Configure the router (inherited from `ServiceBase`)
+- `async startup()`: Overrides `ServiceBase.startup()`. Auto-generates OpenAPI schema from sibling routers, builds documentation endpoints, registers root routes. First-wins registration for docs across sibling routers.
+- `get_mount_path()`: Returns `meta.prefix` if set, otherwise `"/{name}"`
+- `_cf_get_root_routes()`: Returns documentation root routes (`/docs`, `/redoc`, `/openapi.json`) when in a module context
 
 ---
 
@@ -308,10 +343,10 @@ Base class for routers, extends ServiceBase.
 Lifecycle hook phases.
 
 **Values:**
-- `LifecycleHook.AFTER_CONFIG`: "after_config"
-- `LifecycleHook.AFTER_INIT`: "after_init"
-- `LifecycleHook.BEFORE_STARTUP`: "before_startup"
-- `LifecycleHook.BEFORE_SHUTDOWN`: "before_shutdown"
+- `LifecycleHook.AFTER_CONFIG`: `"after_config"`
+- `LifecycleHook.AFTER_INIT`: `"after_init"`
+- `LifecycleHook.BEFORE_STARTUP`: `"before_startup"`
+- `LifecycleHook.BEFORE_SHUTDOWN`: `"before_shutdown"`
 
 ---
 
@@ -325,11 +360,11 @@ Base exception for all framework errors.
 ```
 Exception
 └── CanaryFrameworkError
-    ├── DependencyInjectionError
-    ├── CircularDependencyError
-    ├── LifecycleHookError
-    ├── ConfigurationError
-    └── ServiceNotFoundError
+    ├── ConfigurationError       # Config load/validation failure
+    ├── ServiceNotFoundError     # Service lookup failure
+    ├── CircularDependencyError  # Topological sort cycle detected
+    ├── DependencyInjectionError # DI wiring failure
+    └── LifecycleHookError       # Hook raised unhandled exception
 ```
 
 ---
@@ -342,13 +377,13 @@ Error during dependency injection.
 
 ### CircularDependencyError
 
-Circular dependency detected.
+Circular dependency detected during topological sort.
 
 ---
 
 ### LifecycleHookError
 
-Error in a lifecycle hook.
+Error in a lifecycle hook. Wraps the original exception.
 
 ---
 
@@ -360,7 +395,7 @@ Service not found in registry.
 
 ### ConfigurationError
 
-Configuration error.
+Configuration validation or loading error.
 
 ---
 
@@ -371,17 +406,21 @@ Configuration error.
 Constants and helpers for identifying framework classes.
 
 **Constants:**
-- `CF_SERVICE_MARKER`: `"__cf_service__"`
-- `CF_NAME_ATTR`: `"__cf_name__"`
-- `ROUTE_ATTR`: `"__cf_route__"`
-- `CF_HOOK_MARKER_MAP`: Mapping of LifecycleHook to marker strings
+- `CF_SERVICE_MARKER`: `"__cf_service__"` — set to `True` on all decorated classes
+- `CF_SERVICE_META`: `"__cf_service_meta__"` — stores `ServiceMeta`/`ModuleMeta`/`RouterMeta`
+- `CF_NAME_ATTR`: `"__cf_name__"` — auto-generated service/module/router name
+- `ROUTE_ATTR`: `"__cf_route__"` — route metadata dict on handler methods
+- `CF_CONFIG_MARKER`: `"__cf_config__"` — set to `True` on `@config` classes
+- `CF_HOOK_MARKER_MAP`: Mapping of `LifecycleHook` to marker strings
 
 **Functions:**
-- `is_cf_service(cls)`: Check if a class is a service
-- `is_cf_module(cls)`: Check if a class is a module
-- `is_cf_router(cls)`: Check if a class is a router
+- `is_cf_service(cls)`: Check if a class has `CF_SERVICE_MARKER`
+- `is_cf_module(cls)`: Check if a class has `ModuleMeta` in `CF_SERVICE_META` (isinstance check)
+- `is_cf_router(cls)`: Check if a class has `RouterMeta` in `CF_SERVICE_META` (isinstance check)
 - `get_service_meta(cls)`: Get service metadata
 - `get_module_meta(cls)`: Get module metadata
+- `get_router_meta(cls)`: Get router metadata
+- `resolve_deps(cls) -> dict[str, type]`: Read `__annotations__` and return entries whose types have `CF_SERVICE_MARKER`
 
 ---
 
@@ -391,34 +430,34 @@ Data classes and type aliases.
 
 **ServiceMeta:**
 ```python
-@dataclass
+@dataclass(slots=True)
 class ServiceMeta:
-    name: str                       # Auto-generated service name (e.g., "DatabaseService")
+    name: str  # Auto-generated: "DatabaseService"
 ```
 
 **ModuleMeta:**
 ```python
-@dataclass
+@dataclass(slots=True)
 class ModuleMeta(ServiceMeta):
-    services: List[type] = []       # Child services/modules
+    services: list[type] = []  # Child service classes
 ```
 
 **RouterMeta:**
 ```python
-@dataclass
+@dataclass(slots=True)
 class RouterMeta(ServiceMeta):
-    prefix: str = ""                # URL prefix
-    tags: List[str] = []            # OpenAPI tags
-    routes: List[Callable] = []     # Route handler methods
+    prefix: str = ""              # URL prefix
+    tags: list[str] = []          # OpenAPI tags
+    routes: list[Callable] = []   # Route handler methods
 ```
 
 **ServiceEntry:**
 ```python
-@dataclass
+@dataclass(slots=True)
 class ServiceEntry:
-    cls: type                       # The service class
-    name: str                       # Auto-generated name
-    instance: object = None         # Service instance (None until configured)
+    cls: type             # Service class
+    name: str             # Auto-generated name
+    instance: object = None  # Instance (None until configured)
 ```
 
 **Type Aliases:**
@@ -430,16 +469,16 @@ class ServiceEntry:
 
 ### Registry
 
-Service registry class.
+Service registry with parent chaining.
 
 **Methods:**
 - `__init__(parent: Registry = None)`: Create registry with optional parent
-- `register(cls, *, meta=None)`: Register a service
-- `get_by_name(name)`: Get service entry by name
-- `get_by_class(cls)`: Get service entry by class
-- `has(cls)`: Check if service is registered
-- `all_entries()`: Get all service entries
-- `names()`: Get all service names
+- `register(cls, *, meta: ServiceMeta)`: Register a service (idempotent)
+- `get_by_name(name: str) -> ServiceEntry`: Lookup by name
+- `get_by_class(cls: type) -> ServiceEntry`: Lookup by class (searches parent chain)
+- `has(cls: type) -> bool`: Check if registered (searches parent chain)
+- `all_entries() -> list[ServiceEntry]`: Get all entries in this registry
+- `names() -> list[str]`: Get all service names
 
 ---
 
@@ -448,8 +487,8 @@ Service registry class.
 Dependency resolution utilities.
 
 **Functions:**
-- `resolve_deps(cls) -> Dict[str, type]`: Read a class's `__annotations__` and return entries whose types are marked with `CF_SERVICE_MARKER`. This replaces the old `deps` list. Each returned key is the annotation attribute name that will be used for `setattr` injection.
-- `topological_sort(registry) -> List[ServiceEntry]`: Sort services in dependency order using Kahn's algorithm. Uses `resolve_deps()` internally to build the dependency graph.
+- `resolve_deps(cls) -> dict[str, type]`: Read `cls.__annotations__` and return entries whose types have `CF_SERVICE_MARKER`. Each key is the annotation attribute name used for `setattr` injection.
+- `topological_sort(registry: Registry) -> list[str]`: Sort services in dependency order using Kahn's algorithm. Uses `resolve_deps()` internally. Raises `CircularDependencyError` on cycles.
 
 ---
 
@@ -459,7 +498,7 @@ Lifecycle hook utilities.
 
 **HookDict:**
 ```python
-HookDict = Dict[LifecycleHook, Optional[Callable[..., object]]]
+HookDict = dict[LifecycleHook, Callable[..., object] | None]
 ```
 
 **LifecycleAware Protocol:**
@@ -472,13 +511,18 @@ class LifecycleAware(Protocol):
 ```
 
 **Functions:**
-- `find_hooks(instance)`: Find all lifecycle hooks on an instance
+- `find_hooks(instance: object) -> HookDict`: Traverse MRO to find lifecycle hook methods
 
 ---
 
-### Utils
+### Routing
 
-Utility functions.
+Route path parsing.
+
+**Functions:**
+- `parse_route_path(path: str) -> tuple[str, list[str], list[str]]`: Parse a route path, returning `(starlette_path, path_params, query_params)`. Supports `?param={param}&param2={param2}` syntax for query parameters:
+  - Input: `"/op/{kb_id}?count={count}&page={page}"`
+  - Output: `("/op/{kb_id}", ["kb_id"], ["count", "page"])`
 
 ---
 
@@ -496,9 +540,9 @@ Current version of Canary Framework.
 
 Decorated classes have these internal attributes set:
 
-- `__cf_service__`: `True` if decorated with `@service()`
-- `__cf_service_meta__`: Metadata object (ServiceMeta/ModuleMeta/RouterMeta)
-- `__cf_name__`: Auto-generated service/module/router name
+- `__cf_service__`: `True` if decorated with `@service()`, `@module()`, or `@router()`
+- `__cf_service_meta__`: Metadata object (`ServiceMeta`/`ModuleMeta`/`RouterMeta`)
+- `__cf_name__`: Auto-generated name (e.g., `"DatabaseService"`)
 
 Hook methods have:
 - `__cf_after_config__`: `True`
@@ -508,6 +552,9 @@ Hook methods have:
 
 Route methods have:
 - `__cf_route__`: `{"method": "GET", "path": "/path", ...}`
+
+Config classes have:
+- `__cf_config__`: `True`
 
 ---
 
@@ -522,10 +569,13 @@ Key changes from the old API:
 | `@module(name="app", services=[...])` | `@module(services=[...])` — auto-named |
 | `@module(name="app", deps=[...])` | Dependencies declared via annotations |
 | `@router(name="api", prefix="/api", deps=[Svc])` | `@router(prefix="/api")` with `svc: Svc` annotation |
+| `@router(docs=True)` | Docs auto-enabled by default |
 | `self.database_service` (snake_case injection) | `self.db`, `self.cache` (annotation key name) |
 | `async def handler(self, request)` | `async def handler(self, ...)` — params auto-bound |
 | `request.path_params["user_id"]` | `def handler(self, user_id: int)` |
 | `request.query_params.get("page")` | `def handler(self, page: int = 1)` |
 | `data = await request.json()` | `def handler(self, body: MyModel)` with `request_model` |
-| `app.auth_module` / `app.auth_service` | `app.AuthModule` / `app.AuthService` (class name access) |
-| `inject_deps(instance, entry, registry)` | `setattr(instance, key, resolved)` via annotation keys |
+| `uvicorn.run("main:App")` | `uvicorn.run(app, lifespan="on")` |
+| Plain dict passed to `configure()` | `CanaryConfig` subclass required |
+| `make_subclass()` utility | Removed — explicit inheritance |
+| `CF_MODULE_MARKER` / `CF_ROUTER_MARKER` | Removed — `isinstance` checks on meta types |

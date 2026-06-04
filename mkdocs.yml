@@ -1,5 +1,5 @@
 site_name: Canary Framework
-site_description: Lightweight decorator-driven Python service framework
+site_description: Lightweight decorator-driven Python async service framework with dependency injection
 site_author: 张文博 (Canary)
 copyright: Copyright &copy; 2026 张文博 (Canary)
 
@@ -65,16 +65,14 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quick Start: quickstart.md
-  - Core Package:
-      - Overview: core.md
+  - Core:
       - Services: services.md
       - Modules: modules.md
+      - Routers: web.md
       - Configuration: configuration.md
       - Lifecycle: lifecycle.md
       - Dependency Injection: dependency-injection.md
-  - Web Package:
-      - Overview: web.md
-      - FastAPI Integration: fastapi.md
+  - Architecture: core.md
   - API Reference: api-reference.md
 
 extra:
