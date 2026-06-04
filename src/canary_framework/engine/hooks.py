@@ -10,7 +10,6 @@ Provides find_hooks function for discovering lifecycle hooks on service instance
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol
 
 from canary_framework.common import CF_HOOK_MARKER_MAP, LifecycleHook
 
@@ -19,22 +18,6 @@ HookDict = dict[LifecycleHook, Callable[..., object] | None]
 
 Type alias for lifecycle hook dictionary.
 """
-
-
-class LifecycleAware(Protocol):
-    """生命周期感知接口。
-
-    定义服务和模块必须实现的生命周期方法。
-
-    Lifecycle-aware interface.
-
-    Defines lifecycle methods that services and modules must implement.
-    """
-
-    async def configure(self, config_instance: object = None) -> None: ...
-    async def init(self) -> None: ...
-    async def startup(self) -> None: ...
-    async def shutdown(self) -> None: ...
 
 
 def find_hooks(instance: object) -> HookDict:
@@ -77,4 +60,4 @@ def find_hooks(instance: object) -> HookDict:
     return hooks
 
 
-__all__ = ["HookDict", "LifecycleAware", "find_hooks"]
+__all__ = ["HookDict", "find_hooks"]

@@ -13,15 +13,11 @@ Provides service registration, lookup, and iteration with parent-child inheritan
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 from canary_framework.common import (
     CF_NAME_ATTR,
     ServiceEntry,
     ServiceMeta,
     ServiceNotFoundError,
-    get_module_meta,
-    get_service_meta,
 )
 from canary_framework.engine.logging import get_logger
 
@@ -52,14 +48,14 @@ class Registry:
         self._by_name: dict[str, ServiceEntry] = {}
         self._by_class: dict[type, ServiceEntry] = {}
 
-    def register(self, cls: type, *, meta: ServiceMeta | None = None) -> None:
+    def register(self, cls: type, *, meta: ServiceMeta) -> None:
         """注册一个服务（幂等操作）。
 
         如果类已注册，则跳过。
 
         Args:
             cls: 服务类。
-            meta: 服务元数据（可选）。
+            meta: 服务元数据。
 
         Raises:
             ValueError: 如果同名服务已注册。
@@ -68,17 +64,13 @@ class Registry:
 
         Args:
             cls: The service class.
-            meta: Service metadata (optional).
+            meta: Service metadata.
 
         Raises:
             ValueError: If a service with the same name is already registered.
         """
         if cls in self._by_class:
             return
-
-        if meta is None:
-            mod_meta = get_module_meta(cls)
-            meta = mod_meta if mod_meta.name else get_service_meta(cls)
 
         name: str = meta.name
         if name in self._by_name:
@@ -159,31 +151,6 @@ class Registry:
                 current = current.parent
         raise ServiceNotFoundError(f"'{cls.__name__}' is not registered.") from None
 
-    def get_instance(self, cls: type) -> object:
-        """获取服务实例。
-
-        Args:
-            cls: 服务类。
-
-        Returns:
-            服务实例。
-
-        Raises:
-            ServiceNotFoundError: 如果服务未找到。
-
-        Get the service instance.
-
-        Args:
-            cls: The service class.
-
-        Returns:
-            Service instance.
-
-        Raises:
-            ServiceNotFoundError: If the service is not found.
-        """
-        return self.get_by_class(cls).instance
-
     def has(self, cls: type) -> bool:
         """检查服务是否已注册。
 
@@ -233,51 +200,6 @@ class Registry:
             List of all service names in the current registry.
         """
         return list(self._by_name.keys())
-
-    def __len__(self) -> int:
-        """返回注册表中的服务数量。
-
-        Returns:
-            服务数量。
-
-        Return the number of services in the registry.
-
-        Returns:
-            Number of services.
-        """
-        return len(self._by_name)
-
-    def __contains__(self, cls: type) -> bool:
-        """检查服务是否在注册表中。
-
-        Args:
-            cls: 服务类。
-
-        Returns:
-            如果服务在注册表中则返回True，否则返回False。
-
-        Check if a service is in the registry.
-
-        Args:
-            cls: The service class.
-
-        Returns:
-            True if the service is in the registry, False otherwise.
-        """
-        return self.has(cls)
-
-    def __iter__(self) -> Iterator[ServiceEntry]:
-        """返回服务条目的迭代器。
-
-        Returns:
-            服务条目迭代器。
-
-        Return an iterator over service entries.
-
-        Returns:
-            Iterator over service entries.
-        """
-        return iter(self._by_name.values())
 
 
 __all__ = ["Registry"]

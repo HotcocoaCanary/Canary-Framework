@@ -41,23 +41,6 @@ def make_subclass(
     setattr(new_cls, CF_NAME_ATTR, name)
     if extra_marker is not None:
         setattr(new_cls, extra_marker, True)
-
-    if meta.deps:
-        from canary_framework.engine.injector import to_snake
-
-        annotations = dict(getattr(cls, "__annotations__", {}))
-        for dep_cls in meta.deps:
-            attr_name = to_snake(dep_cls.__name__)
-            if attr_name not in annotations:
-                annotations[attr_name] = dep_cls
-                # Create a class-level placeholder attribute so IDE recognizes
-                # the instance attribute declaration and provides type hints.
-                # The actual instance attribute is set at runtime by inject_deps.
-                setattr(new_cls, attr_name, None)
-
-        if annotations:
-            new_cls.__annotations__ = annotations
-
     return new_cls
 
 

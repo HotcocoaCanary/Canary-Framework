@@ -1,47 +1,43 @@
 """Unit tests for engine.openapi module."""
 
-import json
 from typing import Any, cast
 
 import pytest
 
 from canary_framework.common.markers import ROUTE_ATTR
+from canary_framework.common.routing import parse_route_path
 from canary_framework.common.types import RouterMeta
-from canary_framework.engine.openapi import (
-    _parse_route_path,
-    generate_openapi_schema,
-    get_openapi_json,
-)
+from canary_framework.engine.openapi import generate_openapi_schema
 
 
 @pytest.mark.unit
 class TestParseRoutePath:
-    """Tests for _parse_route_path function."""
+    """Tests for parse_route_path function."""
 
     def test_parse_simple_path(self) -> None:
         """Test parse simple path with no params."""
-        path, path_params, query_params = _parse_route_path("/simple")
+        path, path_params, query_params = parse_route_path("/simple")
         assert path == "/simple"
         assert path_params == []
         assert query_params == []
 
     def test_parse_path_with_params(self) -> None:
         """Test parse path with path params."""
-        path, path_params, query_params = _parse_route_path("/items/{item_id}")
+        path, path_params, query_params = parse_route_path("/items/{item_id}")
         assert path == "/items/{item_id}"
         assert path_params == ["item_id"]
         assert query_params == []
 
     def test_parse_with_query_params(self) -> None:
         """Test parse with query params."""
-        path, path_params, query_params = _parse_route_path("/items?page={page}&limit={limit}")
+        path, path_params, query_params = parse_route_path("/items?page={page}&limit={limit}")
         assert path == "/items"
         assert path_params == []
         assert query_params == ["page", "limit"]
 
     def test_parse_with_hash_params(self) -> None:
         """Test parse with hash params."""
-        path, path_params, query_params = _parse_route_path("/items#section={section}")
+        path, path_params, query_params = parse_route_path("/items#section={section}")
         assert path == "/items"
         assert path_params == []
         assert query_params == ["section"]
@@ -90,16 +86,3 @@ class TestGenerateOpenAPISchema:
         paths = cast(dict[str, Any], schema["paths"])
         assert "/api/test" in paths
         assert "get" in paths["/api/test"]
-
-
-@pytest.mark.unit
-class TestGetOpenAPIJSON:
-    """Tests for get_openapi_json function."""
-
-    def test_returns_json_string(self) -> None:
-        """Test returns JSON string."""
-        json_str = get_openapi_json([])
-        assert isinstance(json_str, str)
-        # Should be valid JSON
-        parsed = json.loads(json_str)
-        assert "openapi" in parsed

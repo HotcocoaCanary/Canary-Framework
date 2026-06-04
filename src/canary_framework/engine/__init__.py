@@ -1,8 +1,8 @@
 """Framework engine — registry, DI injector, hook discovery, logging, and OpenAPI."""
 
+from canary_framework.common.types import LifecycleAware
 from canary_framework.engine.hooks import (
     HookDict,
-    LifecycleAware,
     find_hooks,
 )
 from canary_framework.engine.injector import (
@@ -11,10 +11,7 @@ from canary_framework.engine.injector import (
     topological_sort,
 )
 from canary_framework.engine.logging import ensure_logging, get_logger
-from canary_framework.engine.openapi import (
-    generate_openapi_schema,
-    get_openapi_json,
-)
+from canary_framework.engine.openapi import generate_openapi_schema
 from canary_framework.engine.registry import Registry
 from canary_framework.engine.utils import make_subclass
 
@@ -26,7 +23,6 @@ __all__ = [
     "find_hooks",
     "generate_openapi_schema",
     "get_logger",
-    "get_openapi_json",
     "inject_deps",
     "make_subclass",
     "to_snake",

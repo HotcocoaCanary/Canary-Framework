@@ -99,7 +99,7 @@ class TestRegistry:
 
         reg.register(TestService, meta=meta)
         reg.register(TestService, meta=meta)  # Should not raise
-        assert len(reg) == 1
+        assert len(reg.all_entries()) == 1
 
     def test_all_entries(self) -> None:
         """Test all_entries returns all entries."""
@@ -134,7 +134,7 @@ class TestRegistry:
         assert set(names) == {"a", "b"}
 
     def test_len(self) -> None:
-        """Test __len__ returns correct count."""
+        """Test all_entries returns correct count."""
         reg = Registry()
 
         class A:
@@ -143,14 +143,14 @@ class TestRegistry:
         class B:
             pass
 
-        assert len(reg) == 0
+        assert len(reg.all_entries()) == 0
         reg.register(A, meta=ServiceMeta(name="a", deps=[]))
-        assert len(reg) == 1
+        assert len(reg.all_entries()) == 1
         reg.register(B, meta=ServiceMeta(name="b", deps=[]))
-        assert len(reg) == 2
+        assert len(reg.all_entries()) == 2
 
     def test_contains(self) -> None:
-        """Test __contains__ works correctly."""
+        """Test has works correctly."""
         reg = Registry()
 
         class A:
@@ -161,8 +161,8 @@ class TestRegistry:
 
         reg.register(A, meta=ServiceMeta(name="a", deps=[]))
 
-        assert A in reg
-        assert B not in reg
+        assert reg.has(A) is True
+        assert reg.has(B) is False
 
     def test_parent_registry_lookup(self) -> None:
         """Test lookup in parent registry."""
@@ -177,18 +177,3 @@ class TestRegistry:
         assert child.has(ParentService) is True
         entry = child.get_by_class(ParentService)
         assert entry.cls is ParentService
-
-    def test_get_instance(self) -> None:
-        """Test get_instance returns the instance."""
-        reg = Registry()
-
-        class TestService:
-            pass
-
-        meta = ServiceMeta(name="test_service", deps=[])
-        reg.register(TestService, meta=meta)
-
-        instance = TestService()
-        reg.get_by_class(TestService).instance = instance
-
-        assert reg.get_instance(TestService) is instance

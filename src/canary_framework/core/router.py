@@ -13,7 +13,6 @@ endpoints inside a @router class.
 from __future__ import annotations
 
 import inspect
-import re
 from collections.abc import Awaitable, Callable
 from types import FunctionType
 from typing import cast, get_type_hints
@@ -27,54 +26,9 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from canary_framework.common import ROUTE_ATTR, HookFunction
 from canary_framework.common.markers import get_router_meta
+from canary_framework.common.routing import parse_route_path
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.logging import get_logger
-
-
-def _parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
-    """解析路由路径，提取路径参数和查询参数。
-
-    路径格式：
-    - 路径参数：{param}，如 /op/{kb_id}
-    - 查询参数：?param={param} 或 #param={param}
-
-    Args:
-        path: 路由路径，如 "/op/{kb_id}?count={count}#page={page}"
-
-    Returns:
-        (starlette_path, path_params, query_params)
-        - starlette_path: Starlette兼容的路径，如 "/op/{kb_id}"
-        - path_params: 路径参数名称列表，如 ["kb_id"]
-        - query_params: 查询参数名称列表，如 ["count", "page"]
-    """
-    pattern = r"\{(\w+)\}"
-
-    # 分离路径部分和查询参数部分
-    base_path = path.split("?")[0].split("#")[0]
-
-    # 提取路径参数（在基础路径中的 {param}）
-    path_params = re.findall(pattern, base_path)
-
-    # 提取查询参数（在 ? 或 # 后面的 {param}）
-    query_params: list[str] = []
-
-    # 查找 ? 后的查询参数
-    if "?" in path:
-        query_part = path.split("?")[1]
-        # 去掉 # 后面的部分
-        if "#" in query_part:
-            query_part = query_part.split("#")[0]
-        query_params.extend(re.findall(pattern, query_part))
-
-    # 查找 # 后的查询参数
-    if "#" in path:
-        hash_part = path.split("#")[1]
-        # 去掉 ? 后面的部分（如果 # 在 ? 前面）
-        if "?" in hash_part:
-            hash_part = hash_part.split("?")[0]
-        query_params.extend(re.findall(pattern, hash_part))
-
-    return base_path, path_params, query_params
 
 
 def _convert_param(value: str, param_type: type | None) -> object:
@@ -209,7 +163,7 @@ def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
     )
 
     # 解析路径，提取路径参数和查询参数
-    starlette_path, path_param_names, query_param_names = _parse_route_path(path)
+    starlette_path, path_param_names, query_param_names = parse_route_path(path)
 
     # 应用路由器前缀
     router_meta = get_router_meta(cls)
