@@ -187,7 +187,24 @@ Key changes from the old API:
 - No more `self, request` — parameters are injected automatically
 - No `deps` parameter — dependencies declared via annotations (`db: Database`, `auth: Auth`)
 
-## 6. Main Application Module
+## 6. Configuration
+
+Create a configuration class using `@config` and `CanaryConfig`:
+
+```python
+# config.py
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8080
+    openapi_title: str = "My Blog API"
+    log_level: str = "DEBUG"
+```
+
+## 7. Main Application Module
 
 Now, let's compose everything into our main module:
 
@@ -198,29 +215,32 @@ from canary_framework.core.module import ModuleBase
 from services.database import Database
 from services.auth import Auth
 from services.posts import Posts
+from config import AppConfig
 
 @module(services=[Database, Auth, Posts])
 class BlogApp(ModuleBase):
     pass
 
 async def setup():
+    cfg = AppConfig()
     app = BlogApp()
-    await app.configure()
+    await app.configure(cfg)
     await app.init()
-    return app
+    return app, cfg
 
 if __name__ == "__main__":
     import asyncio
     import uvicorn
 
-    app = asyncio.run(setup())
-    uvicorn.run(app, lifespan="on")
+    app, cfg = asyncio.run(setup())
+    uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
 ```
 
 - `@module(services=[...])` — no `name=` parameter; auto-named `BlogAppModule`
+- `configure()` accepts a `CanaryConfig` subclass — plain dicts are rejected
 - Module children are accessible as `app.Database`, `app.Auth`, `app.Posts` (class attribute names)
 
-## 7. Run the Application
+## 8. Run the Application
 
 ```bash
 python main.py
@@ -249,7 +269,7 @@ curl -X PUT http://localhost:8000/api/posts/2 \
 curl -X DELETE http://localhost:8000/api/posts/2
 ```
 
-## 8. Access OpenAPI Documentation
+## 9. Access OpenAPI Documentation
 
 After starting the application, you can access these endpoints:
 
@@ -268,33 +288,14 @@ After starting the application, you can access these endpoints:
 - How to use Pydantic models for request validation
 - **Framework logging is auto-configured** — no `logging.basicConfig()` needed.
   Set `log_level` on your config object to control the verbosity (default: `"INFO"`)
-- **Configuration** — Use `@config` with `CanaryConfig` to customize host, port, log level, OpenAPI settings, and more:
-  ```python
-  from canary_framework import config
-  from canary_framework.common.config import CanaryConfig
-
-  @config
-  class AppConfig(CanaryConfig):
-      host: str = "0.0.0.0"
-      port: int = 8080
-      openapi_title: str = "My Blog API"
-      log_level: str = "DEBUG"
-
-  async def setup():
-      cfg = AppConfig()
-      app = BlogApp()
-      await app.configure(cfg)
-      await app.init()
-      return app, cfg
-  ```
-
 ## Next Steps
 
 Explore the detailed documentation:
+- [Configuration](./configuration.md)
 - [Services](./services.md)
 - [Modules](./modules.md)
-- [Web Routing](./web.md)
+- [Routers & HTTP](./web.md)
 - [Dependency Injection](./dependency-injection.md)
 - [Lifecycle](./lifecycle.md)
-- [Core Concepts](./core.md)
+- [Architecture & Internals](./core.md)
 - [API Reference](./api-reference.md)
