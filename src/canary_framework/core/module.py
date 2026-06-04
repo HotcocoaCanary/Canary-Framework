@@ -20,6 +20,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from canary_framework.common import (
     DependencyInjectionError,
+    LifecycleAware,
     LifecycleHook,
     RouterMeta,
     get_module_meta,
@@ -30,7 +31,6 @@ from canary_framework.common import (
     is_cf_service,
 )
 from canary_framework.core.service import ServiceBase
-from canary_framework.engine.hooks import LifecycleAware
 from canary_framework.engine.injector import inject_deps, to_snake, topological_sort
 from canary_framework.engine.logging import ensure_logging, get_logger
 from canary_framework.engine.openapi import generate_openapi_schema

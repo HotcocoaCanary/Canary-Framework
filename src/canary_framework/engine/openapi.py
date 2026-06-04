@@ -8,13 +8,12 @@ Generates OpenAPI 3.0.3-compliant schemas from RouterMeta lists.
 from __future__ import annotations
 
 import inspect
-import json
-import re
 from typing import cast
 
 from pydantic import BaseModel
 
 from canary_framework.common import ROUTE_ATTR, RouterMeta
+from canary_framework.common.routing import parse_route_path
 
 _TYPE_MAP: dict[str, str] = {
     "int": "integer",
@@ -22,68 +21,6 @@ _TYPE_MAP: dict[str, str] = {
     "bool": "boolean",
     "float": "number",
 }
-
-
-def _parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
-    """解析路由路径，提取路径参数和查询参数。
-
-    路径格式：
-    - 路径参数：{param}，如 /op/{kb_id}
-    - 查询参数：?param={param} 或 #param={param}
-
-    Args:
-        path: 路由路径，如 "/op/{kb_id}?count={count}#page={page}"
-
-    Returns:
-        (starlette_path, path_params, query_params)
-        - starlette_path: Starlette兼容的路径，如 "/op/{kb_id}"
-        - path_params: 路径参数名称列表，如 ["kb_id"]
-        - query_params: 查询参数名称列表，如 ["count", "page"]
-    """
-    pattern = r"\{(\w+)\}"
-
-    # 分离路径部分和查询参数部分
-    base_path = path.split("?")[0].split("#")[0]
-
-    # 提取路径参数（在基础路径中的 {param}）
-    path_params = re.findall(pattern, base_path)
-
-    # 提取查询参数（在 ? 或 # 后面的 {param}）
-    query_params: list[str] = []
-
-    # 查找 ? 后的查询参数
-    if "?" in path:
-        query_part = path.split("?")[1]
-        # 去掉 # 后面的部分
-        if "#" in query_part:
-            query_part = query_part.split("#")[0]
-        query_params.extend(re.findall(pattern, query_part))
-
-    # 查找 # 后的查询参数
-    if "#" in path:
-        hash_part = path.split("#")[1]
-        # 去掉 ? 后面的部分（如果 # 在 ? 前面）
-        if "?" in hash_part:
-            hash_part = hash_part.split("?")[0]
-        query_params.extend(re.findall(pattern, hash_part))
-
-    return base_path, path_params, query_params
-
-
-def _get_type_name(param_type: type | None) -> str:
-    """获取类型名称。
-
-    Args:
-        param_type: 参数类型
-
-    Returns:
-        类型名称字符串
-    """
-    if param_type is inspect.Parameter.empty or param_type is None:
-        return "string"
-    if hasattr(param_type, "__name__"):
-        return param_type.__name__
-    return str(param_type)
 
 
 def generate_openapi_schema(
@@ -173,18 +110,22 @@ def generate_openapi_schema(
 
             parameters: list[dict[str, object]] = []
 
-            # 解析路径，提取路径参数和查询参数
-            starlette_path, path_param_names, query_param_names = _parse_route_path(path)
+            starlette_path, path_param_names, query_param_names = parse_route_path(path)
 
             sig = inspect.signature(route_fn)
             param_types = {
                 name: param.annotation for name, param in sig.parameters.items() if name != "self"
             }
 
-            # 生成路径参数的OpenAPI定义
             for param_name in path_param_names:
-                param_type = _get_type_name(param_types.get(param_name))
-                openapi_type = _TYPE_MAP.get(param_type, "string")
+                annotation = param_types.get(param_name)
+                if annotation is inspect.Parameter.empty or annotation is None:
+                    type_name = "string"
+                elif hasattr(annotation, "__name__"):
+                    type_name = annotation.__name__
+                else:
+                    type_name = str(annotation)
+                openapi_type = _TYPE_MAP.get(type_name, "string")
                 path_param: dict[str, object] = {
                     "name": param_name,
                     "in": "path",
@@ -193,10 +134,15 @@ def generate_openapi_schema(
                 }
                 parameters.append(path_param)
 
-            # 生成查询参数的OpenAPI定义
             for param_name in query_param_names:
-                param_type = _get_type_name(param_types.get(param_name))
-                openapi_type = _TYPE_MAP.get(param_type, "string")
+                annotation = param_types.get(param_name)
+                if annotation is inspect.Parameter.empty or annotation is None:
+                    type_name = "string"
+                elif hasattr(annotation, "__name__"):
+                    type_name = annotation.__name__
+                else:
+                    type_name = str(annotation)
+                openapi_type = _TYPE_MAP.get(type_name, "string")
                 query_param: dict[str, object] = {
                     "name": param_name,
                     "in": "query",
@@ -251,45 +197,4 @@ def generate_openapi_schema(
     return schema
 
 
-def get_openapi_json(
-    router_metas: list[RouterMeta],
-    title: str = "Canary Framework API",
-    version: str = "1.0.0",
-    description: str = "",
-) -> str:
-    """获取OpenAPI JSON字符串。
-
-    生成OpenAPI schema并返回JSON字符串。
-
-    Args:
-        router_metas: 路由器元数据列表。
-        title: API标题。
-        version: API版本。
-        description: API描述。
-
-    Returns:
-        OpenAPI JSON字符串。
-
-    Get OpenAPI JSON string.
-
-    Generates OpenAPI schema and returns JSON string.
-
-    Args:
-        router_metas: List of router metadata.
-        title: API title.
-        version: API version.
-        description: API description.
-
-    Returns:
-        OpenAPI JSON string.
-    """
-    return json.dumps(
-        generate_openapi_schema(router_metas, title, version, description),
-        ensure_ascii=False,
-    )
-
-
-__all__ = [
-    "generate_openapi_schema",
-    "get_openapi_json",
-]
+__all__ = ["generate_openapi_schema"]

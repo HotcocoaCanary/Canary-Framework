@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Protocol
 
 
 class LifecycleHook(StrEnum):
@@ -45,6 +46,22 @@ Type alias for hook functions.
 
 Represents a function that can accept any arguments and return any type.
 """
+
+
+class LifecycleAware(Protocol):
+    """生命周期感知接口。
+
+    定义服务和模块必须实现的生命周期方法。
+
+    Lifecycle-aware interface.
+
+    Defines lifecycle methods that services and modules must implement.
+    """
+
+    async def configure(self, config_instance: object = None) -> None: ...
+    async def init(self) -> None: ...
+    async def startup(self) -> None: ...
+    async def shutdown(self) -> None: ...
 
 
 @dataclass(slots=True)
@@ -154,6 +171,7 @@ class ServiceEntry:
 
 __all__ = [
     "HookFunction",
+    "LifecycleAware",
     "LifecycleHook",
     "ModuleMeta",
     "RouterMeta",

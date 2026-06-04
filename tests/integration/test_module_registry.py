@@ -30,8 +30,8 @@ class TestModuleRegistry:
 
         # Check that registry has both services
         assert app._cf_registry is not None  # type: ignore[attr-defined]
-        assert Service1 in app._cf_registry  # type: ignore[attr-defined]
-        assert Service2 in app._cf_registry  # type: ignore[attr-defined]
+        assert app._cf_registry.has(Service1)  # type: ignore[attr-defined]
+        assert app._cf_registry.has(Service2)  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_service_instances_created(self) -> None:
