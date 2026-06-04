@@ -2,7 +2,7 @@
 
 import pytest
 
-from canary_framework.common.markers import get_service_meta, is_cf_service
+from canary_framework.common import get_service_meta, is_cf_service
 from canary_framework.core.service import ServiceBase
 from canary_framework.decorators.service import service
 
@@ -15,7 +15,7 @@ class TestServiceDecorator:
         """Test @service marks class as service."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             pass
 
         assert is_cf_service(MyService)
@@ -24,7 +24,7 @@ class TestServiceDecorator:
         """Test @service makes class inherit from ServiceBase."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             pass
 
         assert issubclass(MyService, ServiceBase)
@@ -33,7 +33,7 @@ class TestServiceDecorator:
         """Test @service sets metadata."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             pass
 
         meta = get_service_meta(MyService)

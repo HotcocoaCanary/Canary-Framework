@@ -38,9 +38,10 @@ First, let's create a database service:
 ```python
 # services/database.py
 from canary_framework import service, after_config, before_shutdown
+from canary_framework.core.service import ServiceBase
 
 @service()
-class Database:
+class Database(ServiceBase):
     def __init__(self):
         self.connection = None
 
@@ -68,10 +69,11 @@ Now, let's create an auth service that depends on the database:
 ```python
 # services/auth.py
 from canary_framework import service, after_init
+from canary_framework.core.service import ServiceBase
 from .database import Database
 
 @service()
-class Auth:
+class Auth(ServiceBase):
     db: Database  # Declare dependency via annotation
 
     def __init__(self):
@@ -101,6 +103,7 @@ Let's build a web router for our blog posts:
 ```python
 # services/posts.py
 from canary_framework import router, get, post, put, delete
+from canary_framework.core.router import RouterBase
 from pydantic import BaseModel, Field
 from .auth import Auth
 from .database import Database
@@ -117,7 +120,7 @@ class PostResponse(BaseModel):
     author: str = Field(description="Author name")
 
 @router(prefix="/api/posts", tags=["Posts"])
-class Posts:
+class Posts(RouterBase):
     db: Database  # Auto-injected
     auth: Auth    # Auto-injected
 
@@ -191,17 +194,27 @@ Now, let's compose everything into our main module:
 ```python
 # main.py
 from canary_framework import module
+from canary_framework.core.module import ModuleBase
 from services.database import Database
 from services.auth import Auth
 from services.posts import Posts
 
 @module(services=[Database, Auth, Posts])
-class BlogApp:
+class BlogApp(ModuleBase):
     pass
 
+async def setup():
+    app = BlogApp()
+    await app.configure()
+    await app.init()
+    return app
+
 if __name__ == "__main__":
+    import asyncio
     import uvicorn
-    uvicorn.run("main:BlogApp", host="0.0.0.0", port=8000, reload=True)
+
+    app = asyncio.run(setup())
+    uvicorn.run(app, lifespan="on")
 ```
 
 - `@module(services=[...])` — no `name=` parameter; auto-named `BlogAppModule`
@@ -254,7 +267,26 @@ After starting the application, you can access these endpoints:
 - How to use lifecycle hooks for initialization and cleanup
 - How to use Pydantic models for request validation
 - **Framework logging is auto-configured** — no `logging.basicConfig()` needed.
-  Set `cf_log_level` on your config object to control the verbosity (default: `"INFO"`)
+  Set `log_level` on your config object to control the verbosity (default: `"INFO"`)
+- **Configuration** — Use `@config` with `CanaryConfig` to customize host, port, log level, OpenAPI settings, and more:
+  ```python
+  from canary_framework import config
+  from canary_framework.common.config import CanaryConfig
+
+  @config
+  class AppConfig(CanaryConfig):
+      host: str = "0.0.0.0"
+      port: int = 8080
+      openapi_title: str = "My Blog API"
+      log_level: str = "DEBUG"
+
+  async def setup():
+      cfg = AppConfig()
+      app = BlogApp()
+      await app.configure(cfg)
+      await app.init()
+      return app, cfg
+  ```
 
 ## Next Steps
 

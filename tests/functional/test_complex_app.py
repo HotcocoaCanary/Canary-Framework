@@ -5,6 +5,9 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
 from canary_framework import get, module, post, router, service
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.functional
@@ -22,8 +25,9 @@ class TestComplexApp:
             email: str
 
         @service()
-        class UserService:
+        class UserService(ServiceBase):
             def __init__(self) -> None:
+                super().__init__()
                 self.users: list[User] = []
 
             def create(self, user: User) -> User:
@@ -35,7 +39,7 @@ class TestComplexApp:
                 return self.users
 
         @router()
-        class UserRouter:
+        class UserRouter(RouterBase):
             user_service: UserService
 
             @get("/users")
@@ -47,7 +51,7 @@ class TestComplexApp:
                 return self.user_service.create(user)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
 
         @module(services=[UserService, UserRouter])
-        class UserModule:
+        class UserModule(ModuleBase):
             pass
 
         # Product module
@@ -57,8 +61,9 @@ class TestComplexApp:
             price: float
 
         @service()
-        class ProductService:
+        class ProductService(ServiceBase):
             def __init__(self) -> None:
+                super().__init__()
                 self.products: list[Product] = []
 
             def create(self, product: Product) -> Product:
@@ -70,7 +75,7 @@ class TestComplexApp:
                 return self.products
 
         @router()
-        class ProductRouter:
+        class ProductRouter(RouterBase):
             product_service: ProductService
 
             @get("/products")
@@ -82,21 +87,21 @@ class TestComplexApp:
                 return self.product_service.create(product)
 
         @module(services=[ProductService, ProductRouter])
-        class ProductModule:
+        class ProductModule(ModuleBase):
             pass
 
         # Main app module
         @module(services=[UserModule, ProductModule])
-        class MainApp:
+        class MainApp(ModuleBase):
             pass
 
         # Create and configure app
         app = MainApp()
-        await app.configure()  # type: ignore[attr-defined]
+        await app.configure()
 
         # Test both modules
         async with AsyncClient(
-            transport=ASGITransport(app=app),  # type: ignore[arg-type]
+            transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
             # Test user module

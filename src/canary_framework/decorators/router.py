@@ -10,16 +10,16 @@ Provides routing definition functionality with GET, POST, PUT, DELETE, PATCH met
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
 
 from canary_framework.common import (
-    CF_ROUTER_MARKER,
+    CF_NAME_ATTR,
+    CF_SERVICE_MARKER,
+    CF_SERVICE_META,
     ROUTE_ATTR,
     HookFunction,
     RouterMeta,
 )
 from canary_framework.core import RouterBase
-from canary_framework.engine import make_subclass
 
 
 def _http_method(
@@ -303,6 +303,11 @@ def router(
     _tags = list(tags or [])
 
     def decorator(cls: type) -> type[RouterBase]:
+        if not issubclass(cls, RouterBase):
+            raise TypeError(
+                f"@router '{cls.__name__}': must inherit from RouterBase. "
+                f"Did you forget 'class {cls.__name__}(RouterBase):'?"
+            )
         name = cls.__name__ + "Router"
         routes: list[HookFunction] = []
         for attr_name in dir(cls):
@@ -317,10 +322,10 @@ def router(
             routes=routes,
         )
 
-        return cast(
-            "type[RouterBase]",
-            make_subclass(cls, RouterBase, meta, name, extra_marker=CF_ROUTER_MARKER),
-        )
+        setattr(cls, CF_SERVICE_MARKER, True)
+        setattr(cls, CF_SERVICE_META, meta)
+        setattr(cls, CF_NAME_ATTR, name)
+        return cls
 
     return decorator
 

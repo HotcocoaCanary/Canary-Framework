@@ -8,14 +8,15 @@ Use the `@module()` decorator to define a module:
 
 ```python
 from canary_framework import module
+from canary_framework.core.module import ModuleBase
 
 @module(services=[Database, UserRepo, AuthApi])
-class Auth:
+class Auth(ModuleBase):
     pass
 ```
 
 - `@module(services=[...])` — only `services` parameter needed
-- No `name` or `deps` parameters — name is auto-derived (`ClassName` + `"Module"`)
+- Name is auto-generated from the class name (`ClassName` + `"Module"`)
 - Module is automatically named `AuthModule`
 
 ## Module Composition
@@ -24,46 +25,49 @@ Modules can contain services and other modules, creating a hierarchical structur
 
 ```python
 from canary_framework import module, service, router
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
 
 # Core services
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class Cache:
+class Cache(ServiceBase):
     pass
 
 # Auth module
 @service()
-class AuthService:
+class AuthService(ServiceBase):
     db: Database
 
 @router(prefix="/auth")
-class AuthApi:
+class AuthApi(RouterBase):
     auth: AuthService
 
 @module(services=[AuthService, AuthApi])
-class Auth:
+class Auth(ModuleBase):
     pass
 
 # Posts module
 @service()
-class PostsService:
+class PostsService(ServiceBase):
     db: Database
     cache: Cache
 
 @router(prefix="/posts")
-class PostsApi:
+class PostsApi(RouterBase):
     posts: PostsService
 
 @module(services=[PostsService, PostsApi])
-class Posts:
+class Posts(ModuleBase):
     pass
 
 # Main application module
 @module(services=[Database, Cache, Auth, Posts])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -109,9 +113,26 @@ await app.shutdown()
 A module can be used directly as an ASGI application. It automatically mounts all child routers:
 
 ```python
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+async def setup():
+    cfg = AppConfig()
+    app = App()
+    await app.configure(cfg)
+    await app.init()
+    return app, cfg
+
+import asyncio
 import uvicorn
 
-uvicorn.run("main:App", host="0.0.0.0", port=8000)
+app, cfg = asyncio.run(setup())
+uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
 ```
 
 The module will:
@@ -121,7 +142,7 @@ The module will:
 
 ## Module Base Class
 
-When you decorate a class with `@module()`, it automatically inherits from `ModuleBase`, which provides:
+Classes decorated with `@module()` must explicitly inherit from `ModuleBase`, which provides:
 
 - `config` attribute: Access to configuration
 - `configure(config_instance=None)` method: Configures the module and all services
@@ -136,19 +157,19 @@ Services in a module share dependencies. If multiple services depend on the same
 
 ```python
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class ServiceA:
+class ServiceA(ServiceBase):
     db: Database
 
 @service()
-class ServiceB:
+class ServiceB(ServiceBase):
     db: Database
 
 @module(services=[Database, ServiceA, ServiceB])
-class App:
+class App(ModuleBase):
     pass
 
 # Both ServiceA and ServiceB receive the same Database instance
@@ -158,24 +179,27 @@ class App:
 
 ```python
 from canary_framework import module, service, router, get
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
 
 # Services
 @service()
-class Database:
+class Database(ServiceBase):
     async def query(self, sql):
         pass
 
 @service()
-class UserRepo:
+class UserRepo(ServiceBase):
     db: Database
 
 @service()
-class UserService:
+class UserService(ServiceBase):
     repo: UserRepo
 
 # Router
 @router(prefix="/api/users")
-class Users:
+class Users(RouterBase):
     user: UserService
 
     @get("/")
@@ -184,11 +208,11 @@ class Users:
 
 # Modules
 @module(services=[UserRepo, UserService, Users])
-class UsersModule:
+class UsersModule(ModuleBase):
     pass
 
 @module(services=[Database, UsersModule])
-class App:
+class App(ModuleBase):
     pass
 ```
 

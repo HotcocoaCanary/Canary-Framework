@@ -10,15 +10,15 @@ Marks classes as modules, sets metadata, and modifies base class chain.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
 
 from canary_framework.common import (
-    CF_MODULE_MARKER,
+    CF_NAME_ATTR,
+    CF_SERVICE_MARKER,
+    CF_SERVICE_META,
     ModuleMeta,
     is_cf_service,
 )
 from canary_framework.core import ModuleBase
-from canary_framework.engine import make_subclass
 
 
 def module(
@@ -58,6 +58,11 @@ def module(
     _services = list(services or ())
 
     def decorator(cls: type) -> type[ModuleBase]:
+        if not issubclass(cls, ModuleBase):
+            raise TypeError(
+                f"@module '{cls.__name__}': must inherit from ModuleBase. "
+                f"Did you forget 'class {cls.__name__}(ModuleBase):'?"
+            )
         name = cls.__name__ + "Module"
         for svc_cls in _services:
             if not is_cf_service(svc_cls):
@@ -67,11 +72,10 @@ def module(
                 )
 
         meta = ModuleMeta(name=name, services=_services)
-
-        return cast(
-            "type[ModuleBase]",
-            make_subclass(cls, ModuleBase, meta, name, extra_marker=CF_MODULE_MARKER),
-        )
+        setattr(cls, CF_SERVICE_MARKER, True)
+        setattr(cls, CF_SERVICE_META, meta)
+        setattr(cls, CF_NAME_ATTR, name)
+        return cls
 
     return decorator
 

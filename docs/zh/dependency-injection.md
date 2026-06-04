@@ -15,16 +15,19 @@ Canary 框架具有内置的依赖注入（DI）系统，通过 Python 类型注
 通过类型注解声明依赖（不再使用 `deps` 参数）：
 
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class Cache:
+class Cache(ServiceBase):
     pass
 
 @service()
-class UserRepository:
+class UserRepository(ServiceBase):
     db: DatabaseService
     cache: CacheService
 
@@ -51,16 +54,19 @@ class UserRepository:
 框架通过 `resolve_deps()` 读取类型注解构建依赖图，并确保服务按正确顺序初始化：
 
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class A:
+class A(ServiceBase):
     pass
 
 @service()
-class B:
+class B(ServiceBase):
     a: AService
 
 @service()
-class C:
+class C(ServiceBase):
     b: BService
 
 # 启动顺序：A → B → C
@@ -72,12 +78,15 @@ class C:
 
 ```python
 # ❌ 这将抛出 CircularDependencyError
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class A:
+class A(ServiceBase):
     b: "BService"
 
 @service()
-class B:
+class B(ServiceBase):
     a: "AService"
 ```
 
@@ -86,21 +95,24 @@ class B:
 服务在其模块中是单例 — 只创建和共享一个实例：
 
 ```python
+from canary_framework import service, module
+from canary_framework.core import ServiceBase, ModuleBase
+
 @service()
-class Database:
+class Database(ServiceBase):
     def __init__(self):
         print("Database created")  # 只打印一次
 
 @service()
-class Service1:
+class Service1(ServiceBase):
     db: DatabaseService
 
 @service()
-class Service2:
+class Service2(ServiceBase):
     db: DatabaseService
 
 @module(services=[DatabaseService, Service1, Service2])
-class App:
+class App(ModuleBase):
     pass
 
 # Service1 和 Service2 都获得同一个 Database 实例
@@ -111,28 +123,31 @@ class App:
 模块可以具有父注册表，允许服务在模块之间共享：
 
 ```python
+from canary_framework import service, module
+from canary_framework.core import ServiceBase, ModuleBase
+
 @service()
-class SharedDatabase:
+class SharedDatabase(ServiceBase):
     pass
 
 @service()
-class AuthService:
+class AuthService(ServiceBase):
     db: SharedDatabaseService
 
 @service()
-class ProductService:
+class ProductService(ServiceBase):
     db: SharedDatabaseService
 
 @module(services=[AuthService])
-class AuthModule:
+class AuthModule(ModuleBase):
     pass
 
 @module(services=[ProductService])
-class ProductsModule:
+class ProductsModule(ModuleBase):
     pass
 
 @module(services=[SharedDatabaseService, AuthModule, ProductsModule])
-class App:
+class App(ModuleBase):
     pass
 
 # AuthService 和 ProductService 共享同一个 SharedDatabase 实例
@@ -143,7 +158,7 @@ class App:
 ```
 1. 收集模块的 services 列表中的所有服务类
    ↓
-2. 递归注册：对每个服务，调用 _register_entry_with_deps()
+2. 递归注册（_register_entry_with_deps）
    ├─ 检查是否已在注册表中（幂等）
    ├─ 注册到 Registry
    └─ 通过 resolve_deps(cls) 读取类型注解
@@ -170,7 +185,7 @@ class App:
 `resolve_deps(cls)` 是 DI 系统的核心：
 
 ```python
-from canary_framework.common.markers import resolve_deps
+from canary_framework.common import resolve_deps
 
 def resolve_deps(cls: type) -> dict[str, type]:
     """从类的类型注解中解析依赖映射。
@@ -191,8 +206,11 @@ def resolve_deps(cls: type) -> dict[str, type]:
 模块在配置完成后，其子服务通过原始类名（PascalCase）作为属性可访问：
 
 ```python
+from canary_framework import module
+from canary_framework.core import ModuleBase
+
 @module(services=[DatabaseService, AuthService])
-class App:
+class App(ModuleBase):
     pass
 
 app = App()
@@ -210,15 +228,16 @@ app.AuthService       # Auth 服务实例
 
 ```python
 from canary_framework import module, service
+from canary_framework.core import ServiceBase, ModuleBase
 
 # 第 1 层：基础设施
 @service()
-class Database:
+class Database(ServiceBase):
     async def query(self, sql):
         return f"Query: {sql}"
 
 @service()
-class Cache:
+class Cache(ServiceBase):
     async def get(self, key):
         return None
 
@@ -227,7 +246,7 @@ class Cache:
 
 # 第 2 层：仓库
 @service()
-class UserRepository:
+class UserRepository(ServiceBase):
     db: DatabaseService
     cache: CacheService
 
@@ -242,7 +261,7 @@ class UserRepository:
 
 # 第 3 层：服务
 @service()
-class UserService:
+class UserService(ServiceBase):
     repo: UserRepositoryService
 
     async def get_profile(self, user_id):
@@ -251,7 +270,7 @@ class UserService:
 
 # 第 4 层：组合
 @module(services=[DatabaseService, CacheService, UserRepositoryService, UserService])
-class App:
+class App(ModuleBase):
     pass
 ```
 

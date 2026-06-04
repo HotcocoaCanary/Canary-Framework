@@ -13,60 +13,27 @@ from __future__ import annotations
 
 from typing import cast, override
 
-from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.routing import Router as StarletteRouter
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp
 
 from canary_framework.common import (
     DependencyInjectionError,
     LifecycleAware,
     LifecycleHook,
-    RouterMeta,
     get_module_meta,
-    get_router_meta,
     get_service_meta,
     is_cf_module,
-    is_cf_router,
     is_cf_service,
+    resolve_deps,
 )
-from canary_framework.common.markers import resolve_deps
+from canary_framework.common.config import CanaryConfig
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.injector import topological_sort
 from canary_framework.engine.logging import ensure_logging, get_logger
-from canary_framework.engine.openapi import generate_openapi_schema
 from canary_framework.engine.registry import Registry
 
 _log = get_logger("module")
-
-_SWAGGER_UI_HTML = """<!DOCTYPE html>
-<html>
-<head>
-    <title>Swagger UI</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
-</head>
-<body>
-    <div id="swagger-ui"></div>
-    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-    <script>
-        SwaggerUIBundle({ url: "/openapi.json", dom_id: "#swagger-ui" });
-    </script>
-</body>
-</html>"""
-
-_REDOC_HTML = """<!DOCTYPE html>
-<html>
-<head>
-    <title>ReDoc</title>
-</head>
-<body>
-    <div id="redoc"></div>
-    <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"></script>
-    <script>
-        Redoc.init("/openapi.json", {}, document.getElementById("redoc"));
-    </script>
-</body>
-</html>"""
 
 
 class ModuleBase(ServiceBase):
@@ -74,6 +41,15 @@ class ModuleBase(ServiceBase):
 
     协调子服务生命周期——实例化、依赖注入、按拓扑顺序执行
     configure/init/startup/shutdown。
+
+    支持通过 config 对象配置文档端点：
+    - cf_docs_path: OpenAPI JSON 端点路径（默认 /openapi.json）
+    - cf_swagger_path: Swagger UI 路径（默认 /docs）
+    - cf_redoc_path: ReDoc 路径（默认 /redoc）
+    - cf_swagger_cdn: Swagger UI CDN 基 URL
+    - cf_redoc_cdn: ReDoc CDN 基 URL
+    - cf_servers: OpenAPI servers 列表
+    - cf_security_schemes: OpenAPI security schemes
 
     Auto-injected base for @module-decorated classes.
 
@@ -91,10 +67,10 @@ class ModuleBase(ServiceBase):
         self._cf_registry: Registry | None = None
         self._cf_startup_order: list[str] = []
         self._cf_asgi_app: StarletteRouter | None = None
-        self.config: object = None
+        self.config: CanaryConfig | None = None
 
     @override
-    async def configure(self, config_instance: object = None) -> None:
+    async def configure(self, config_instance: CanaryConfig | None = None) -> None:
         """配置模块及其所有子服务。
 
         设置配置实例，创建注册表，注册所有服务及其依赖，
@@ -121,8 +97,8 @@ class ModuleBase(ServiceBase):
         _log.info("Configuring module: %s", type(self).__name__)
         self.config = config_instance
 
-        cf_log_level = getattr(config_instance, "cf_log_level", "INFO")
-        ensure_logging(cf_log_level)
+        cfg = config_instance if isinstance(config_instance, CanaryConfig) else CanaryConfig()
+        ensure_logging(cfg.log_level)
 
         meta = get_module_meta(type(self))
         if not meta.services:
@@ -149,7 +125,7 @@ class ModuleBase(ServiceBase):
                 raise DependencyInjectionError(f"Service '{name}' instance is None during wiring.")
             for attr_name, dep_cls in resolve_deps(type(inst)).items():
                 setattr(inst, attr_name, registry.get_by_class(dep_cls).instance)
-            if isinstance(inst, ModuleBase):
+            if isinstance(inst, ServiceBase):
                 inst._cf_parent_registry = registry
             setattr(self, entry.cls.__name__, inst)
 
@@ -197,23 +173,20 @@ class ModuleBase(ServiceBase):
     def asgi_app(self) -> StarletteRouter:
         """获取ASGI应用。
 
-        懒加载创建Starlette路由器，挂载所有具有asgi_app属性的子服务，
-        以及Swagger UI、ReDoc和OpenAPI JSON文档端点。
+        懒加载创建Starlette路由器，挂载所有具有asgi_app属性的子服务。
+        同时收集子服务提供的根路径路由。
 
         Returns:
-            StarletteRouter实例，包含所有子路由器的挂载点和文档端点。
+            StarletteRouter实例。
 
         Get the ASGI application.
 
         Lazily creates the Starlette router with mounts for all child services
-        that have an asgi_app attribute, plus Swagger UI, ReDoc, and OpenAPI
-        JSON documentation endpoints.
-
-        Returns:
-            StarletteRouter instance with mounts for child routers and docs.
+        that have an asgi_app attribute, plus root-level routes from children.
         """
         if self._cf_asgi_app is None:
-            routes: list[Route | Mount] = []
+            routes: list[Mount | Route] = []
+            mount_paths: set[str] = set()
             registry = self._cf_registry
             if registry is not None:
                 for name in self._cf_startup_order:
@@ -222,32 +195,25 @@ class ModuleBase(ServiceBase):
                     asgi = getattr(inst, "asgi_app", None)
                     if asgi is not None:
                         app = cast(ASGIApp, asgi)
-                        routes.append(Mount(f"/{name}", app=app))
-
-            router_metas: list[RouterMeta] = []
-            if registry is not None:
-                for name in self._cf_startup_order:
-                    entry = registry.get_by_name(name)
-                    if is_cf_router(entry.cls):
-                        meta = get_router_meta(entry.cls)
-                        if meta is not None:
-                            router_metas.append(meta)
-
-            openapi_schema = generate_openapi_schema(router_metas)
-
-            async def openapi_endpoint(_request: object) -> JSONResponse:
-                return JSONResponse(openapi_schema)
-
-            async def swagger_endpoint(_request: object) -> HTMLResponse:
-                return HTMLResponse(_SWAGGER_UI_HTML)
-
-            async def redoc_endpoint(_request: object) -> HTMLResponse:
-                return HTMLResponse(_REDOC_HTML)
-
-            routes.append(Route("/openapi.json", endpoint=openapi_endpoint, methods=["GET"]))
-            routes.append(Route("/docs", endpoint=swagger_endpoint, methods=["GET"]))
-            routes.append(Route("/redoc", endpoint=redoc_endpoint, methods=["GET"]))
-
+                        if hasattr(inst, "get_mount_path"):
+                            mount_path = inst.get_mount_path()
+                        else:
+                            mount_path = f"/{name}"
+                        if mount_path in mount_paths:
+                            raise ValueError(
+                                f"Mount path collision: '{mount_path}' is already in use."
+                            )
+                        routes.append(Mount(mount_path, app=app))
+                        mount_paths.add(mount_path)
+                    if hasattr(inst, "_cf_get_root_routes"):
+                        root_routes = inst._cf_get_root_routes()
+                        for route in root_routes:
+                            if route.path in mount_paths:
+                                raise ValueError(
+                                    f"Root route path collision: '{route.path}' is already in use."
+                                )
+                            routes.append(route)
+                            mount_paths.add(route.path)
             self._cf_asgi_app = StarletteRouter(routes)
         assert self._cf_asgi_app is not None
         return self._cf_asgi_app
@@ -309,58 +275,6 @@ class ModuleBase(ServiceBase):
                         f"Service '{name}' instance is None during shutdown."
                     )
                 await cast(LifecycleAware, child).shutdown()
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """ASGI应用入口点。
-
-        如果是生命周期请求，则处理startup/shutdown；否则委托给asgi_app。
-
-        Args:
-            scope: ASGI scope字典。
-            receive: 接收消息的异步函数。
-            send: 发送消息的异步函数。
-
-        ASGI application entry point.
-
-        Handles startup/shutdown for lifecycle requests, otherwise delegates
-        to the asgi_app.
-
-        Args:
-            scope: ASGI scope dictionary.
-            receive: Async function to receive messages.
-            send: Async function to send messages.
-        """
-        if scope["type"] == "lifespan":
-            await self._handle_lifespan(receive, send)
-        else:
-            await self.asgi_app(scope, receive, send)
-
-    async def _handle_lifespan(self, receive: Receive, send: Send) -> None:
-        """处理ASGI生命周期协议。
-
-        监听startup和shutdown消息，并调用相应的方法。
-
-        Args:
-            receive: 接收消息的异步函数。
-            send: 发送消息的异步函数。
-
-        Handle ASGI lifespan protocol.
-
-        Listens for startup and shutdown messages and calls the appropriate methods.
-
-        Args:
-            receive: Async function to receive messages.
-            send: Async function to send messages.
-        """
-        while True:
-            message = await receive()
-            if message["type"] == "lifespan.startup":
-                await self.startup()
-                await send({"type": "lifespan.startup.complete"})
-            elif message["type"] == "lifespan.shutdown":
-                await self.shutdown()
-                await send({"type": "lifespan.shutdown.complete"})
-                return
 
     def _register_entry_with_deps(self, cls: type, registry: Registry) -> None:
         """递归注册服务及其依赖。

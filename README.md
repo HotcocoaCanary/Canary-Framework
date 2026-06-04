@@ -16,7 +16,7 @@ Canary Framework is a **decorator-driven** async service framework for Python. C
 
 ## Core Features
 
-- **Decorator-Driven** — Use `@service`, `@module`, `@router` decorators, zero inheritance required
+- **Decorator-Driven** — Use `@service`, `@module`, `@router` decorators with explicit base class inheritance
 - **Annotation-Based DI** — Declare dependencies with type annotations: `db: DatabaseService`, no boilerplate
 - **Topological Startup** — Kahn's algorithm ensures dependencies start first
 - **Lifecycle Management** — `@after_config`/`@after_init`/`@before_startup`/`@before_shutdown` hooks
@@ -34,22 +34,25 @@ pip install canary-framework
 
 ```python
 from canary_framework import module, service, router, get, post, after_config
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
 
 @service()
-class DatabaseService:
+class DatabaseService(ServiceBase):
     @after_config
     async def connect(self):
         self.conn = "connected"
 
 @service()
-class UserService:
+class UserService(ServiceBase):
     db: DatabaseService
 
     async def get_user(self, user_id: int):
         return {"id": user_id, "name": "Alice"}
 
 @router(prefix="/api", tags=["users"])
-class ApiRouter:
+class ApiRouter(RouterBase):
     user_service: UserService
 
     @get("/users/{user_id}")
@@ -61,17 +64,54 @@ class ApiRouter:
         return {"id": 1, **body}
 
 @module(services=[DatabaseService, UserService, ApiRouter])
-class App:
+class App(ModuleBase):
     pass
 
-# Run with uvicorn
-# uvicorn main:App --host 0.0.0.0 --port 8000 --reload
+# ---- Entry Point ----
+
+async def setup():
+    app = App()
+    await app.configure()
+    await app.init()
+    return app
+
+if __name__ == "__main__":
+    import asyncio
+    import uvicorn
+
+    app = asyncio.run(setup())
+    uvicorn.run(app, lifespan="on")
+```
+
+## Configuration
+
+Use `@config` with `CanaryConfig` to customize framework behavior:
+
+```python
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8080
+    openapi_title: str = "My API"
+    log_level: str = "DEBUG"
+
+async def setup():
+    cfg = AppConfig()
+    app = App()
+    await app.configure(cfg)
+    await app.init()
+    return app, cfg
 ```
 
 ## Web Example with OpenAPI
 
 ```python
 from canary_framework import module, router, get, post
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
 from pydantic import BaseModel, Field
 
 class UserRequest(BaseModel):
@@ -84,7 +124,7 @@ class UserResponse(BaseModel):
     email: str
 
 @router(prefix="/users", tags=["Users"])
-class UsersRouter:
+class UsersRouter(RouterBase):
     @get("/", summary="List users", description="Get all users")
     async def list_users(self) -> list[UserResponse]:
         return []
@@ -98,7 +138,7 @@ class UsersRouter:
         return UserResponse(id=1, name=user.name, email=user.email)
 
 @module(services=[UsersRouter])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -115,13 +155,12 @@ Access automatically generated documentation:
 src/canary_framework/
 ├── common/              # Shared infrastructure
 │   ├── errors.py        # Framework exceptions
-│   ├── markers.py       # Metadata markers, resolve_deps()
 │   ├── routing.py       # Route path parsing
-│   └── types.py         # Data classes and type aliases
+│   └── types.py         # Data classes, markers, and type aliases
 ├── core/                # Base classes
 │   ├── module.py        # ModuleBase — orchestration and DI
-│   ├── service.py       # ServiceBase — lifecycle management
-│   └── router.py        # RouterBase — ASGI routing
+│   ├── service.py       # ServiceBase — lifecycle and ASGI
+│   └── router.py        # RouterBase — ASGI routing + OpenAPI docs
 ├── decorators/          # Decorator implementations
 │   ├── module.py        # @module
 │   ├── service.py       # @service
@@ -132,7 +171,7 @@ src/canary_framework/
     ├── injector.py      # Topological sort
     ├── hooks.py         # Lifecycle hook discovery
     ├── openapi.py       # OpenAPI schema generation
-    ├── utils.py         # make_subclass()
+    ├── params.py        # Route parameter resolution
     └── logging.py       # Framework logging
 ```
 

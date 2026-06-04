@@ -1,5 +1,6 @@
 """Framework-wide shared infrastructure — types, errors, and markers."""
 
+from canary_framework.common.config import CF_CONFIG_MARKER, CanaryConfig
 from canary_framework.common.errors import (
     CanaryFrameworkError,
     CircularDependencyError,
@@ -8,14 +9,20 @@ from canary_framework.common.errors import (
     LifecycleHookError,
     ServiceNotFoundError,
 )
-from canary_framework.common.markers import (
+from canary_framework.common.routing import parse_route_path
+from canary_framework.common.types import (
     CF_HOOK_MARKER_MAP,
-    CF_MODULE_MARKER,
     CF_NAME_ATTR,
-    CF_ROUTER_MARKER,
     CF_SERVICE_MARKER,
     CF_SERVICE_META,
     ROUTE_ATTR,
+    HookFunction,
+    LifecycleAware,
+    LifecycleHook,
+    ModuleMeta,
+    RouterMeta,
+    ServiceEntry,
+    ServiceMeta,
     get_module_meta,
     get_router_meta,
     get_service_meta,
@@ -24,25 +31,15 @@ from canary_framework.common.markers import (
     is_cf_service,
     resolve_deps,
 )
-from canary_framework.common.routing import parse_route_path
-from canary_framework.common.types import (
-    HookFunction,
-    LifecycleAware,
-    LifecycleHook,
-    ModuleMeta,
-    RouterMeta,
-    ServiceEntry,
-    ServiceMeta,
-)
 
 __all__ = [
+    "CF_CONFIG_MARKER",
     "CF_HOOK_MARKER_MAP",
-    "CF_MODULE_MARKER",
     "CF_NAME_ATTR",
-    "CF_ROUTER_MARKER",
     "CF_SERVICE_MARKER",
     "CF_SERVICE_META",
     "ROUTE_ATTR",
+    "CanaryConfig",
     "CanaryFrameworkError",
     "CircularDependencyError",
     "ConfigurationError",

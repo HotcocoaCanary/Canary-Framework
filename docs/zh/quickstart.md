@@ -38,9 +38,10 @@ my_blog/
 ```python
 # services/database.py
 from canary_framework import service, after_config, before_shutdown
+from canary_framework.core import ServiceBase
 
 @service()
-class Database:
+class Database(ServiceBase):
     def __init__(self):
         self.connection = None
 
@@ -65,11 +66,12 @@ class Database:
 ```python
 # services/auth.py
 from canary_framework import service, after_init
-from .database import DatabaseService
+from canary_framework.core import ServiceBase
+from .database import Database
 
 @service()
-class Auth:
-    db: DatabaseService
+class Auth(ServiceBase):
+    db: Database
 
     def __init__(self):
         self.users = {}
@@ -95,9 +97,10 @@ class Auth:
 ```python
 # services/posts.py
 from canary_framework import router, get, post, put, delete
+from canary_framework.core import RouterBase
 from pydantic import BaseModel, Field
-from .auth import AuthService
-from .database import DatabaseService
+from .auth import Auth
+from .database import Database
 
 class PostCreate(BaseModel):
     title: str = Field(description="文章标题")
@@ -111,9 +114,9 @@ class PostResponse(BaseModel):
     author: str = Field(description="作者")
 
 @router(prefix="/api/posts", tags=["Posts"])
-class PostsRouter:
-    db: DatabaseService
-    auth: AuthService
+class PostsRouter(RouterBase):
+    db: Database
+    auth: Auth
 
     def __init__(self):
         self.posts = [
@@ -178,17 +181,27 @@ class PostsRouter:
 ```python
 # main.py
 from canary_framework import module
-from services.database import DatabaseService
-from services.auth import AuthService
+from canary_framework.core import ModuleBase
+from services.database import Database
+from services.auth import Auth
 from services.posts import PostsRouter
 
-@module(services=[DatabaseService, AuthService, PostsRouter])
-class BlogApp:
+@module(services=[Database, Auth, PostsRouter])
+class BlogApp(ModuleBase):
     pass
 
+async def setup():
+    app = BlogApp()
+    await app.configure()
+    await app.init()
+    return app
+
 if __name__ == "__main__":
+    import asyncio
     import uvicorn
-    uvicorn.run("main:BlogApp", host="0.0.0.0", port=8000, reload=True)
+
+    app = asyncio.run(setup())
+    uvicorn.run(app, lifespan="on")
 ```
 
 ## 7. 运行应用
@@ -232,14 +245,33 @@ curl -X DELETE http://localhost:8000/api/posts/2
 
 - 使用 `@service()` 无参数定义服务（名称自动为 `ClassName + "Service"`）
 - 使用 `@router(prefix=..., tags=...)` 创建路由（名称自动为 `ClassName + "Router"`）
-- 通过类型注解 `db: DatabaseService` 声明依赖，替代旧的 `deps` 参数
+- 通过类型注解 `db: Database` 声明依赖，替代旧的 `deps` 参数
 - 路由处理器无需 `request` 参数 — 路径参数、查询参数和请求体自动绑定
 - 使用 `@module(services=[...])` 组合所有内容（名称自动为 `ClassName + "Module"`）
 - 使用生命周期钩子进行初始化和清理
 - 使用 Pydantic 模型进行请求验证
 - 自动生成 OpenAPI 文档
 - **框架日志自动配置** — 无需手动调用 `logging.basicConfig()`。
-  在配置对象上设置 `cf_log_level` 来控制详细程度（默认：`"INFO"`）
+  在配置对象上设置 `log_level` 来控制详细程度（默认：`"INFO"`）
+- **配置** — 使用 `@config` 装饰器和 `CanaryConfig` 自定义主机、端口、日志级别、OpenAPI 设置等：
+  ```python
+  from canary_framework import config
+  from canary_framework.common.config import CanaryConfig
+
+  @config
+  class AppConfig(CanaryConfig):
+      host: str = "0.0.0.0"
+      port: int = 8080
+      openapi_title: str = "我的博客 API"
+      log_level: str = "DEBUG"
+
+  async def setup():
+      cfg = AppConfig()
+      app = BlogApp()
+      await app.configure(cfg)
+      await app.init()
+      return app, cfg
+  ```
 
 ## 下一步
 

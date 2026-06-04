@@ -3,6 +3,7 @@
 import pytest
 
 from canary_framework.common import CF_HOOK_MARKER_MAP, LifecycleHook
+from canary_framework.common.config import CanaryConfig
 from canary_framework.common.errors import LifecycleHookError
 from canary_framework.core.service import ServiceBase
 
@@ -21,7 +22,7 @@ class TestServiceBase:
     async def test_configure_sets_config(self) -> None:
         """Test configure sets the config."""
         service = ServiceBase()
-        config = {"key": "value"}
+        config = CanaryConfig(host="0.0.0.0", port=3000)
         await service.configure(config)
         assert service.config == config
 

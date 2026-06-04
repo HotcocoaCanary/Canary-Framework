@@ -6,6 +6,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from canary_framework import after_config, before_startup, get, module, router, service
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.functional
@@ -19,7 +22,7 @@ class TestAsyncOperations:
         events: list[str] = []
 
         @service()
-        class AsyncService:
+        class AsyncService(ServiceBase):
             @after_config
             async def async_config(self) -> None:
                 await asyncio.sleep(0.01)
@@ -31,12 +34,12 @@ class TestAsyncOperations:
                 events.append("async-startup")
 
         @module(services=[AsyncService])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         app = MyModule()
-        await app.configure()  # type: ignore[attr-defined]
-        await app.startup()  # type: ignore[attr-defined]
+        await app.configure()
+        await app.startup()
 
         assert "async-config" in events
         assert "async-startup" in events
@@ -46,8 +49,9 @@ class TestAsyncOperations:
         """Test concurrent requests."""
 
         @service()
-        class CounterService:
+        class CounterService(ServiceBase):
             def __init__(self) -> None:
+                super().__init__()
                 self.count = 0
 
             async def increment(self) -> int:
@@ -57,7 +61,7 @@ class TestAsyncOperations:
                 return self.count
 
         @router()
-        class CounterRouter:
+        class CounterRouter(RouterBase):
             counter_service: CounterService
 
             @get("/increment")
@@ -66,15 +70,15 @@ class TestAsyncOperations:
                 return {"count": result}
 
         @module(services=[CounterRouter])
-        class CounterApp:
+        class CounterApp(ModuleBase):
             pass
 
         app = CounterApp()
-        await app.configure()  # type: ignore[attr-defined]
+        await app.configure()
 
         # Make concurrent requests
         async with AsyncClient(
-            transport=ASGITransport(app=app),  # type: ignore[arg-type]
+            transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
             requests = [client.get("/CounterRouterRouter/increment") for _ in range(5)]
@@ -92,13 +96,13 @@ class TestAsyncOperations:
         """Test long running operations."""
 
         @service()
-        class LongTaskService:
+        class LongTaskService(ServiceBase):
             async def do_work(self, seconds: float) -> dict[str, str | float]:
                 await asyncio.sleep(seconds)
                 return {"status": "done", "duration": seconds}
 
         @router()
-        class TaskRouter:
+        class TaskRouter(RouterBase):
             long_task_service: LongTaskService
 
             @get("/task?seconds={seconds}")
@@ -106,14 +110,14 @@ class TestAsyncOperations:
                 return await self.long_task_service.do_work(seconds)
 
         @module(services=[TaskRouter])
-        class TaskApp:
+        class TaskApp(ModuleBase):
             pass
 
         app = TaskApp()
-        await app.configure()  # type: ignore[attr-defined]
+        await app.configure()
 
         async with AsyncClient(
-            transport=ASGITransport(app=app),  # type: ignore[arg-type]
+            transport=ASGITransport(app=app),
             base_url="http://test",
             timeout=5.0,
         ) as client:

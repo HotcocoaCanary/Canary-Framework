@@ -16,7 +16,7 @@ The service instance is created with `__init__()`:
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     def __init__(self):
         self.connected = False
         self.data = []
@@ -28,7 +28,7 @@ The `configure(config_instance)` method is called, where you can set up connecti
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     async def configure(self, config_instance=None):
         if config_instance:
             self.config = config_instance
@@ -40,7 +40,7 @@ Use `@after_config` hook to run code after configuration:
 from canary_framework import after_config
 
 @service()
-class Database:
+class Database(ServiceBase):
     @after_config
     async def connect(self):
         self.connection = await connect_to_db(self.config.db_url)
@@ -52,7 +52,7 @@ The `init()` method is called after all services are configured:
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     async def init(self):
         pass
 ```
@@ -63,7 +63,7 @@ Use `@after_init` hook to run code after initialization:
 from canary_framework import after_init
 
 @service()
-class UserService:
+class UserService(ServiceBase):
     @after_init
     async def seed_default_users(self):
         if not await self.db.has_users():
@@ -76,7 +76,7 @@ The `startup()` method is called when the application is ready to start:
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     async def startup(self):
         pass
 ```
@@ -87,7 +87,7 @@ Use `@before_startup` hook to run code before startup:
 from canary_framework import before_startup
 
 @service()
-class Server:
+class Server(ServiceBase):
     @before_startup
     async def verify_connections(self):
         assert self.db.connection is not None
@@ -100,7 +100,7 @@ The `shutdown()` method is called when the application is stopping:
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     async def shutdown(self):
         pass
 ```
@@ -111,7 +111,7 @@ Use `@before_shutdown` hook to run code before shutdown:
 from canary_framework import before_shutdown
 
 @service()
-class Database:
+class Database(ServiceBase):
     @before_shutdown
     async def disconnect(self):
         await self.connection.close()
@@ -134,7 +134,7 @@ Hooks can be either synchronous or asynchronous:
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     @after_config
     def sync_hook(self):
         print("Configured")
@@ -150,7 +150,7 @@ Modules coordinate the lifecycle of their child services:
 
 ```python
 @module(services=[ServiceA, ServiceB])
-class App:
+class App(ModuleBase):
     pass
 
 app = App()
@@ -183,11 +183,13 @@ from canary_framework import (
     service, module,
     after_config, after_init, before_startup, before_shutdown
 )
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
 
 calls = []
 
 @service()
-class A:
+class A(ServiceBase):
     @after_config
     def config_a(self):
         calls.append("A: after_config")
@@ -205,7 +207,7 @@ class A:
         calls.append("A: before_shutdown")
 
 @service()
-class B:
+class B(ServiceBase):
     a: A  # B depends on A
 
     @after_config
@@ -225,7 +227,7 @@ class B:
         calls.append("B: before_shutdown")
 
 @module(services=[A, B])
-class App:
+class App(ModuleBase):
     pass
 
 # Run lifecycle
@@ -248,19 +250,40 @@ await app.shutdown()
 
 ## ASGI Lifecycle
 
-When running as an ASGI application, the framework automatically handles the lifecycle:
+When running as an ASGI application, the framework handles the lifecycle through `ServiceBase.__call__`:
 
 ```python
-import uvicorn
+from canary_framework import module
+from canary_framework.core.module import ModuleBase
+
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8000
 
 @module(services=[...])
-class App:
+class App(ModuleBase):
     pass
 
-uvicorn.run("main:App", lifespan="on")
+async def setup():
+    cfg = AppConfig()
+    app = App()
+    await app.configure(cfg)
+    await app.init()
+    return app, cfg
+
+if __name__ == "__main__":
+    import asyncio
+    import uvicorn
+
+    app, cfg = asyncio.run(setup())
+    uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
 ```
 
-The ASGI lifespan protocol will:
+`ServiceBase.__call__` handles the ASGI lifespan:
 1. Call `startup()` when the server starts
 2. Call `shutdown()` when the server stops
 
@@ -269,13 +292,16 @@ The ASGI lifespan protocol will:
 Pass configuration during the configure phase:
 
 ```python
-class AppConfig:
-    def __init__(self):
-        self.database_url = "sqlite:///mydb.db"
-        self.debug = True
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    database_url: str = "sqlite:///mydb.db"
+    debug: bool = True
 
 @service()
-class Database:
+class Database(ServiceBase):
     @after_config
     async def connect(self):
         url = self.config.database_url
@@ -297,12 +323,15 @@ The framework automatically configures logging during `configure()`. No manual
 from canary_framework import module
 
 @module(services=[...])
-class App:
+class App(ModuleBase):
     pass
 
-class AppConfig:
-    def __init__(self):
-        self.database_url = "sqlite:///mydb.db"
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    database_url: str = "sqlite:///mydb.db"
 
 app = App()
 await app.configure(AppConfig())
@@ -310,12 +339,13 @@ await app.configure(AppConfig())
 # [2026-06-02 13:00:00] cf.module             INFO     Configuring module: AppModule
 ```
 
-**Custom log level**: Set `cf_log_level` on your config object to control the
+**Custom log level**: Set `log_level` on your config object to control the
 framework log level:
 
 ```python
-class AppConfig:
-    cf_log_level: str = "DEBUG"  # Show debug-level framework logs
+@config
+class AppConfig(CanaryConfig):
+    log_level: str = "DEBUG"  # Show debug-level framework logs
     # ... other config fields ...
 ```
 

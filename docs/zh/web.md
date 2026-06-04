@@ -4,13 +4,14 @@ Canary 框架与 Starlette 集成，提供强大的 Web 路由功能。
 
 ## 定义路由
 
-使用 `@router` 装饰器定义路由。路由名称自动生成为 `类名 + "Router"`：
+使用 `@router` 装饰器定义路由。类必须显式继承 `RouterBase`。路由名称自动生成为 `类名 + "Router"`：
 
 ```python
 from canary_framework import router
+from canary_framework.core import RouterBase
 
 @router(prefix="/api")
-class ApiRouter:
+class ApiRouter(RouterBase):
     pass
 ```
 
@@ -37,9 +38,10 @@ class ApiRouter:
 
 ```python
 from canary_framework import router, get, post, put, delete, patch
+from canary_framework.core import RouterBase
 
 @router(prefix="/items")
-class ItemsRouter:
+class ItemsRouter(RouterBase):
     @get("/")
     async def list_items(self):
         return {"items": []}
@@ -71,9 +73,11 @@ class ItemsRouter:
 
 ```python
 from starlette.responses import JSONResponse, PlainTextResponse, HTMLResponse, Response
+from canary_framework import router, get
+from canary_framework.core import RouterBase
 
 @router()
-class ResponseExamples:
+class ResponseExamples(RouterBase):
     @get("/dict")
     async def return_dict(self):
         # 自动转换为 JSONResponse
@@ -102,8 +106,11 @@ class ResponseExamples:
 路径参数从 URL 模式自动提取并绑定到函数参数：
 
 ```python
+from canary_framework import router, get
+from canary_framework.core import RouterBase
+
 @router()
-class UsersRouter:
+class UsersRouter(RouterBase):
     @get("/users/{user_id}")
     async def get_user(self, user_id: int):
         return {"user_id": user_id}
@@ -118,8 +125,11 @@ class UsersRouter:
 查询参数从 URL 自动提取并绑定到函数参数：
 
 ```python
+from canary_framework import router, get
+from canary_framework.core import RouterBase
+
 @router()
-class SearchRouter:
+class SearchRouter(RouterBase):
     @get("/search")
     async def search(self, q: str = "", page: int = 1, limit: int = 10):
         return {
@@ -132,8 +142,11 @@ class SearchRouter:
 查询参数定义在路径后，使用 `?param={param}` 或 `#param={param}` 语法：
 
 ```python
+from canary_framework import router, get
+from canary_framework.core import RouterBase
+
 @router()
-class DataRouter:
+class DataRouter(RouterBase):
     @get("/data?page={page}#section={section}")
     async def get_data(self, page: int = 1, section: str = ""):
         return {"page": page, "section": section}
@@ -145,13 +158,15 @@ class DataRouter:
 
 ```python
 from pydantic import BaseModel
+from canary_framework import router, post
+from canary_framework.core import RouterBase
 
 class ItemCreate(BaseModel):
     name: str
     price: float
 
 @router()
-class DataRouter:
+class DataRouter(RouterBase):
     @post("/submit")
     async def submit(self, data: dict):
         # 无 request_model 时，将从请求体自动解析为 dict
@@ -168,13 +183,16 @@ class DataRouter:
 路由通过类型注解声明对服务的依赖：
 
 ```python
+from canary_framework import service, router, get
+from canary_framework.core import ServiceBase, RouterBase
+
 @service()
-class UserService:
+class UserService(ServiceBase):
     async def get_user(self, user_id):
         return {"id": user_id, "name": "User"}
 
 @router()
-class UsersRouter:
+class UsersRouter(RouterBase):
     svc: UserService  # 类型注解声明依赖
 
     @get("/{user_id}")
@@ -188,8 +206,11 @@ class UsersRouter:
 当您将路由包含在模块的 `services` 列表中时，它会自动挂载。路由根据其服务名称挂载在路径上：
 
 ```python
+from canary_framework import module
+from canary_framework.core import ModuleBase
+
 @module(services=[UsersRouter, ItemsRouter])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -231,6 +252,7 @@ HTTP 方法装饰器支持以下 OpenAPI 文档参数：
 ```python
 from pydantic import BaseModel, Field
 from canary_framework import router, get, post, put, delete
+from canary_framework.core import RouterBase
 
 class UserRequest(BaseModel):
     name: str = Field(description="用户名")
@@ -242,7 +264,7 @@ class UserResponse(BaseModel):
     email: str = Field(description="用户邮箱")
 
 @router(prefix="/users", tags=["Users"])
-class UsersRouter:
+class UsersRouter(RouterBase):
     @get("/",
          summary="获取用户列表",
          description="获取系统中所有用户的列表",
@@ -293,8 +315,11 @@ class UsersRouter:
 路由级别和方法级别的 tags 会自动合并：
 
 ```python
+from canary_framework import router, get
+from canary_framework.core import RouterBase
+
 @router(tags=["API"])
-class ApiRouter:
+class ApiRouter(RouterBase):
     @get("/users", tags=["Users"])
     async def get_users(self):
         # 合并后的 tags: ["API", "Users"]
@@ -307,6 +332,8 @@ class ApiRouter:
 
 ```python
 from starlette.middleware.base import BaseHTTPMiddleware
+from canary_framework import module
+from canary_framework.core import ModuleBase
 
 class CustomMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
@@ -316,7 +343,7 @@ class CustomMiddleware(BaseHTTPMiddleware):
         return response
 
 @module(services=[TodosRouter])
-class App:
+class App(ModuleBase):
     def __init__(self):
         self.middleware = [CustomMiddleware]
 ```
@@ -327,9 +354,11 @@ class App:
 
 ```python
 from starlette.middleware.cors import CORSMiddleware
+from canary_framework import module
+from canary_framework.core import ModuleBase
 
 @module(services=[ApiRouter])
-class App:
+class App(ModuleBase):
     def __init__(self):
         self.middleware = [
             CORSMiddleware(
@@ -345,6 +374,7 @@ class App:
 
 ```python
 from canary_framework import module, service, router, get, post, put, delete
+from canary_framework.core import ServiceBase, ModuleBase, RouterBase
 from pydantic import BaseModel, Field
 from typing import Dict, List
 
@@ -358,7 +388,7 @@ class TodoCreate(BaseModel):
     completed: bool = Field(description="是否完成", default=False)
 
 @service()
-class DataStore:
+class DataStore(ServiceBase):
     def __init__(self):
         self.todos: List[Dict] = []
 
@@ -383,7 +413,7 @@ class DataStore:
         self.todos = [t for t in self.todos if t["id"] != todo_id]
 
 @router(prefix="/todos", tags=["Todos"])
-class TodosRouter:
+class TodosRouter(RouterBase):
     store: DataStoreService
 
     @get("/", summary="获取待办列表", description="获取所有待办事项")
@@ -429,7 +459,7 @@ class TodosRouter:
         return {"message": "Todo deleted"}
 
 @module(services=[DataStoreService, TodosRouter])
-class App:
+class App(ModuleBase):
     pass
 ```
 

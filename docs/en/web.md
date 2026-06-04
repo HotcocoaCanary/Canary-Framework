@@ -8,9 +8,10 @@ Use the `@router()` decorator to define a router:
 
 ```python
 from canary_framework import router
+from canary_framework.core.router import RouterBase
 
 @router(prefix="/api")
-class Api:
+class Api(RouterBase):
     pass
 ```
 
@@ -18,8 +19,8 @@ class Api:
 
 - `prefix`: (optional) URL prefix applied to all routes in this router
 - `tags`: (optional) OpenAPI tags for documentation. Use keyword argument: `tags=["Users"]`
-- No `name` parameter — name is auto-derived as `ClassName` + `"Router"`
-- No `deps` parameter — dependencies declared via type annotations
+- Name is auto-generated from the class name (`ClassName` + `"Router"`)
+- Dependencies are declared via type annotations
 
 ## HTTP Method Decorators
 
@@ -27,9 +28,10 @@ Use the HTTP method decorators to define route handlers:
 
 ```python
 from canary_framework import router, get, post, put, delete, patch
+from canary_framework.core.router import RouterBase
 
 @router(prefix="/items")
-class Items:
+class Items(RouterBase):
     @get("/")
     async def list_items(self):
         return {"items": []}
@@ -63,7 +65,7 @@ Path parameters in the route pattern are automatically bound to function paramet
 
 ```python
 @router(prefix="/users")
-class Users:
+class Users(RouterBase):
     @get("/users/{user_id}")
     async def get_user(self, user_id: int):
         # user_id auto-bound from URL path
@@ -81,7 +83,7 @@ Query parameters are defined as function parameters (not path parameters):
 
 ```python
 @router(prefix="/search")
-class Search:
+class Search(RouterBase):
     @get("/search")
     async def search(self, q: str = "", page: int = 1, limit: int = 10):
         # q, page, limit auto-bound from query string
@@ -100,7 +102,7 @@ Use `request_model` on the route decorator to auto-parse the request body:
 
 ```python
 @router(prefix="/data")
-class Data:
+class Data(RouterBase):
     @post("/submit")
     async def submit(self, body: dict):
         # Raw body parsed as dict
@@ -128,12 +130,12 @@ Dependencies are declared via type annotations — no `deps` list:
 
 ```python
 @service()
-class UserService:
+class UserService(ServiceBase):
     async def get_user(self, user_id):
         return {"id": user_id, "name": "User"}
 
 @router(prefix="/users")
-class Users:
+class Users(RouterBase):
     user: UserService  # Auto-injected
 
     @get("/{user_id}")
@@ -148,7 +150,7 @@ When you include a router in a module, it's automatically mounted at its prefix:
 
 ```python
 @module(services=[Users, Items])
-class App:
+class App(ModuleBase):
     pass
 
 # Users router at prefix="/users"
@@ -200,8 +202,7 @@ class UserResponse(BaseModel):
     email: str = Field(description="User email")
 
 @router(prefix="/users", tags=["Users"])
-class Users:
-    @get("/",
+class Users(RouterBase):    @get("/",
          summary="List users",
          description="Get all users in the system",
          tags=["Users", "List"],
@@ -258,7 +259,7 @@ Router-level and method-level tags are automatically merged:
 
 ```python
 @router(prefix="/api", tags=["API"])
-class Api:
+class Api(RouterBase):
     @get("/users", tags=["Users"])
     async def get_users(self):
         # Merged tags: ["API", "Users"]
@@ -280,7 +281,7 @@ class CustomMiddleware(BaseHTTPMiddleware):
         return response
 
 @module(services=[Todos])
-class App:
+class App(ModuleBase):
     def __init__(self):
         self.middleware = [CustomMiddleware]
 ```
@@ -293,12 +294,12 @@ You can easily serve static files:
 from starlette.staticfiles import StaticFiles
 
 @router(prefix="")
-class Static:
+class Static(RouterBase):
     def __init__(self):
         self.asgi_app = StaticFiles(directory="static", html=True)
 
 @module(services=[Static, Api])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -310,7 +311,7 @@ Use Starlette's CORS middleware:
 from starlette.middleware.cors import CORSMiddleware
 
 @module(services=[Api])
-class App:
+class App(ModuleBase):
     def __init__(self):
         self.middleware = [
             CORSMiddleware(
@@ -330,7 +331,7 @@ Canary Framework supports WebSocket:
 from starlette.websockets import WebSocket
 
 @router(prefix="/ws")
-class WebSocketEndpoint:
+class WebSocketEndpoint(RouterBase):
     @get("/ws")
     async def websocket_endpoint(self, websocket: WebSocket):
         await websocket.accept()
@@ -343,6 +344,9 @@ class WebSocketEndpoint:
 
 ```python
 from canary_framework import module, service, router, get, post, put, delete
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
 from pydantic import BaseModel, Field
 from typing import List
 
@@ -356,7 +360,7 @@ class TodoCreate(BaseModel):
     completed: bool = Field(description="Whether completed", default=False)
 
 @service()
-class DataStore:
+class DataStore(ServiceBase):
     def __init__(self):
         self.todos: List[dict] = []
 
@@ -381,7 +385,7 @@ class DataStore:
         self.todos = [t for t in self.todos if t["id"] != todo_id]
 
 @router(prefix="/todos", tags=["Todos"])
-class Todos:
+class Todos(RouterBase):
     store: DataStore
 
     @get("/", summary="List todos", description="Get all todos")
@@ -427,7 +431,7 @@ class Todos:
         return {"message": "Todo deleted"}
 
 @module(services=[DataStore, Todos])
-class App:
+class App(ModuleBase):
     pass
 ```
 

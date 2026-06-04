@@ -19,10 +19,10 @@ def parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
 
     路径格式：
     - 路径参数：{param}，如 /op/{kb_id}
-    - 查询参数：?param={param} 或 #param={param}
+    - 查询参数：?param={param}&param2={param2}，如 ?count={count}&page={page}
 
     Args:
-        path: 路由路径，如 "/op/{kb_id}?count={count}#page={page}"
+        path: 路由路径，如 "/op/{kb_id}?count={count}&page={page}"
 
     Returns:
         (starlette_path, path_params, query_params)
@@ -34,10 +34,10 @@ def parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
 
     Path format:
     - Path parameters: {param}, e.g., /op/{kb_id}
-    - Query parameters: ?param={param} or #param={param}
+    - Query parameters: ?param={param}&param2={param2}, e.g., ?count={count}&page={page}
 
     Args:
-        path: Route path, e.g., "/op/{kb_id}?count={count}#page={page}"
+        path: Route path, e.g., "/op/{kb_id}?count={count}&page={page}"
 
     Returns:
         (starlette_path, path_params, query_params)
@@ -45,23 +45,13 @@ def parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
         - path_params: List of path parameter names, e.g., ["kb_id"]
         - query_params: List of query parameter names, e.g., ["count", "page"]
     """
-    base_path = path.split("?")[0].split("#")[0]
-
+    base_path = path.split("?")[0]
     path_params = re.findall(_PARAM_PATTERN, base_path)
 
     query_params: list[str] = []
-
     if "?" in path:
-        query_part = path.split("?")[1]
-        if "#" in query_part:
-            query_part = query_part.split("#")[0]
-        query_params.extend(re.findall(_PARAM_PATTERN, query_part))
-
-    if "#" in path:
-        hash_part = path.split("#")[1]
-        if "?" in hash_part:
-            hash_part = hash_part.split("?")[0]
-        query_params.extend(re.findall(_PARAM_PATTERN, hash_part))
+        query_part = path.split("?", 1)[1]
+        query_params = re.findall(_PARAM_PATTERN, query_part)
 
     return base_path, path_params, query_params
 

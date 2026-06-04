@@ -10,7 +10,7 @@ The framework uses decorators to keep your code clean and declarative:
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     pass
 ```
 
@@ -22,7 +22,7 @@ Everything is built around async/await for high performance:
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     async def do_something(self):
         await some_async_operation()
 ```
@@ -33,7 +33,7 @@ Dependencies are declared with Python type annotations, not separate lists:
 
 ```python
 @service()
-class UserService:
+class UserService(ServiceBase):
     db: Database      # Auto-resolved and injected
     cache: Cache      # Auto-resolved and injected
 ```
@@ -52,7 +52,7 @@ Build complex systems by composing simple modules:
 
 ```python
 @module(services=[AuthModule, PostsModule, CommentsModule])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -95,7 +95,7 @@ Decorators transform plain classes into framework-aware components:
 
 ### 2. Base Classes
 
-Decorated classes automatically inherit from base classes:
+Classes decorated with `@service()`, `@module()`, or `@router()` must explicitly inherit from base classes:
 
 - `ServiceBase`: Base for services with lifecycle methods
 - `ModuleBase`: Base for modules that coordinate services
@@ -139,7 +139,7 @@ whose type is decorated with `CF_SERVICE_MARKER`. For example:
 
 ```python
 @service()
-class Auth:
+class Auth(ServiceBase):
     db: Database   # ✓ CF_SERVICE_MARKER — included
     x: int         # ✗ Not a service — excluded
 
@@ -159,7 +159,7 @@ Dependencies are injected using the annotation key name — no snake_case conver
 
 ```python
 @service()
-class UserService:
+class UserService(ServiceBase):
     db: Database   # Injected as self.db
     repo: UserRepo # Injected as self.repo
 ```
@@ -177,7 +177,7 @@ app = App()
 ### Step 2: Configuration
 
 ```python
-await app.configure(config)
+await app.configure(config)  # config must be CanaryConfig | None
 ```
 
 1. Collects all services from the module's `services` list
@@ -230,7 +230,7 @@ The framework stores metadata on decorated classes:
 
 ```python
 @service()
-class MyService:
+class MyService(ServiceBase):
     pass
 
 hasattr(MyService, "__cf_service__")     # True
@@ -244,11 +244,11 @@ Metadata classes:
 
 ## Marker System
 
-Markers identify what type a class is:
+The framework uses `CF_SERVICE_MARKER` to identify service classes. Type checking is done using `isinstance` against the base classes:
 
-- `CF_SERVICE_MARKER` (`__cf_service__`): Identifies a service class
-- `CF_MODULE_MARKER` (`__cf_module__`): Identifies a module class
-- `CF_ROUTER_MARKER` (`__cf_router__`): Identifies a router class
+- `isinstance(obj, ServiceBase)`: Check if an object is a framework service
+- `isinstance(obj, ModuleBase)`: Check if an object is a framework module
+- `isinstance(obj, RouterBase)`: Check if an object is a framework router
 
 Helper functions:
 - `is_cf_service(cls)`: Check if a class is a framework service
@@ -262,7 +262,7 @@ The framework integrates with Starlette for ASGI support:
 1. `RouterBase` collects route handlers with auto-bound parameter info
 2. Converts them to Starlette `Route` objects
 3. Creates a Starlette `Router`
-4. `ModuleBase` mounts child routers
+4. `ModuleBase` and `RouterBase` inherit `ServiceBase.__call__` which handles ASGI requests and lifespan events
 5. The module acts as an ASGI application
 
 ## Error Handling

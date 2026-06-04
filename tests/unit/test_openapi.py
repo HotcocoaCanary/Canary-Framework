@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from canary_framework.common.markers import ROUTE_ATTR
+from canary_framework.common import ROUTE_ATTR
 from canary_framework.common.routing import parse_route_path
 from canary_framework.common.types import RouterMeta
 from canary_framework.engine.openapi import generate_openapi_schema
@@ -35,12 +35,14 @@ class TestParseRoutePath:
         assert path_params == []
         assert query_params == ["page", "limit"]
 
-    def test_parse_with_hash_params(self) -> None:
-        """Test parse with hash params."""
-        path, path_params, query_params = parse_route_path("/items#section={section}")
-        assert path == "/items"
-        assert path_params == []
-        assert query_params == ["section"]
+    def test_parse_with_path_and_query_params(self) -> None:
+        """Test parse with both path and query params."""
+        path, path_params, query_params = parse_route_path(
+            "/items/{item_id}?page={page}&limit={limit}"
+        )
+        assert path == "/items/{item_id}"
+        assert path_params == ["item_id"]
+        assert query_params == ["page", "limit"]
 
 
 @pytest.mark.unit

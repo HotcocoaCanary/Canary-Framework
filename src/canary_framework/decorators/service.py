@@ -10,11 +10,14 @@ Marks classes as injectable services, sets metadata, and modifies base class cha
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
 
-from canary_framework.common import ServiceMeta
+from canary_framework.common import (
+    CF_NAME_ATTR,
+    CF_SERVICE_MARKER,
+    CF_SERVICE_META,
+    ServiceMeta,
+)
 from canary_framework.core import ServiceBase
-from canary_framework.engine import make_subclass
 
 
 def service() -> Callable[[type], type[ServiceBase]]:
@@ -38,9 +41,17 @@ def service() -> Callable[[type], type[ServiceBase]]:
     """
 
     def decorator(cls: type) -> type[ServiceBase]:
+        if not issubclass(cls, ServiceBase):
+            raise TypeError(
+                f"@service '{cls.__name__}': must inherit from ServiceBase. "
+                f"Did you forget 'class {cls.__name__}(ServiceBase):'?"
+            )
         name = cls.__name__ + "Service"
         meta = ServiceMeta(name=name)
-        return cast("type[ServiceBase]", make_subclass(cls, ServiceBase, meta, name))
+        setattr(cls, CF_SERVICE_MARKER, True)
+        setattr(cls, CF_SERVICE_META, meta)
+        setattr(cls, CF_NAME_ATTR, name)
+        return cls
 
     return decorator
 

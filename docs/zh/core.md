@@ -9,8 +9,11 @@
 框架使用装饰器保持代码简洁和声明式：
 
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class MyService:
+class MyService(ServiceBase):
     pass
 ```
 
@@ -21,8 +24,11 @@ class MyService:
 一切都围绕 async/await 构建以实现高性能：
 
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class MyService:
+class MyService(ServiceBase):
     async def do_something(self):
         await some_async_operation()
 ```
@@ -32,8 +38,11 @@ class MyService:
 依赖通过 Python 类型注解声明，取代旧的 `deps` 参数。这使得依赖关系更直观，IDE 也能提供更好的支持：
 
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class MyService:
+class MyService(ServiceBase):
     db: DatabaseService
     cache: CacheService
 ```
@@ -52,8 +61,11 @@ class MyService:
 通过组合简单模块构建复杂系统：
 
 ```python
+from canary_framework import module
+from canary_framework.core import ModuleBase
+
 @module(services=[AuthModule, PostsModule, CommentsModule])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -96,7 +108,7 @@ class App:
 
 ### 2. 基类
 
-装饰类自动继承自基类：
+装饰类必须显式继承自基类：
 
 - `ServiceBase`：带有生命周期方法的服务基类
 - `ModuleBase`：协调服务的模块基类（继承 `ServiceBase`）
@@ -109,7 +121,6 @@ class App:
 - **Registry**：服务注册和查找（支持父子继承）
 - **injector**：`topological_sort(registry)` — 使用 `resolve_deps()` 的依赖拓扑排序
 - **hooks**：生命周期钩子发现（`find_hooks`）和执行
-- **utils**：`make_subclass` — 创建带有框架元数据的子类
 
 ## 工作原理：模块启动
 
@@ -122,12 +133,12 @@ app = App()
 ```
 
 - 创建模块类的实例
-- 类通过装饰器继承自 `ModuleBase`
+- 类通过装饰器要求并验证为 `ModuleBase` 的子类
 
 ### 步骤 2：配置（核心 DI 阶段）
 
 ```python
-await app.configure(config_instance)
+await app.configure(config_instance)  # config 必须是 CanaryConfig 实例或 None
 ```
 
 1. 设置 `config` 属性，初始化日志
@@ -183,8 +194,11 @@ await app.shutdown()
 框架将元数据存储在装饰类上：
 
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class MyService:
+class MyService(ServiceBase):
     pass
 
 # 元数据存储为属性
@@ -199,11 +213,9 @@ hasattr(MyService, "__cf_service_meta__")  # True
 
 ## 标记系统
 
-标记标识类的类型：
+标记标识类的类型。框架使用单一的 `CF_SERVICE_MARKER` 标记：
 
-- `CF_SERVICE_MARKER = "__cf_service__"`：标识服务类
-- `CF_MODULE_MARKER = "__cf_module__"`：标识模块类
-- `CF_ROUTER_MARKER = "__cf_router__"`：标识路由类
+- `CF_SERVICE_MARKER = "__cf_service__"`：标识所有框架装饰类（服务、模块和路由共享此标记）
 
 辅助函数：
 - `is_cf_service(cls)`：检查类是否为服务

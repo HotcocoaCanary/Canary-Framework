@@ -7,9 +7,12 @@ Canary 框架的完整 API 文档。
 ```python
 from canary_framework import (
     # 装饰器
-    service, module, router,
+    config, service, module, router,
     get, post, put, delete, patch,
     after_config, after_init, before_startup, before_shutdown,
+
+    # 配置
+    CanaryConfig,
 
     # 基类
     RouterBase,
@@ -36,7 +39,7 @@ from canary_framework import (
 
 ### @service
 
-将类标记为服务。**无参数调用**，服务名称自动生成为 `类名 + "Service"`。
+将类标记为服务。**无参数调用**，服务名称自动生成为 `类名 + "Service"`。类必须显式继承 `ServiceBase`。
 
 **签名：**
 ```python
@@ -47,14 +50,17 @@ def service() -> Callable[[type], type[ServiceBase]]
 
 **示例：**
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 # 服务名称自动为 "DatabaseService"
 ```
 
 **行为：**
-- 将类转换为 `ServiceBase` 的子类
+- 检查类是否为 `ServiceBase` 的子类，否则抛出 `TypeError`
 - 添加元数据标记 `__cf_service__` 和 `__cf_service_meta__`
 - 依赖通过类型注解声明（如 `db: DatabaseService`），而非 `deps` 参数
 - 服务名称在模块内必须唯一
@@ -63,7 +69,7 @@ class Database:
 
 ### @module
 
-将类标记为模块。只需提供 `services` 参数，模块名称自动生成为 `类名 + "Module"`。
+将类标记为模块。只需提供 `services` 参数，模块名称自动生成为 `类名 + "Module"`。类必须显式继承 `ModuleBase`。
 
 **签名：**
 ```python
@@ -75,14 +81,17 @@ def module(*, services: list[type] | None = None) -> Callable[[type], type[Modul
 
 **示例：**
 ```python
+from canary_framework import module
+from canary_framework.core import ModuleBase
+
 @module(services=[DatabaseService, ApiRouter])
-class App:
+class App(ModuleBase):
     pass
 # 模块名称自动为 "AppModule"
 ```
 
 **行为：**
-- 将类转换为 `ModuleBase` 的子类
+- 检查类是否为 `ModuleBase` 的子类，否则抛出 `TypeError`
 - 递归注册所有子服务及其依赖（通过 `resolve_deps()` 解析）
 - 构建依赖图并进行拓扑排序
 - 在 `configure()` 阶段自动注入依赖
@@ -92,7 +101,7 @@ class App:
 
 ### @router
 
-将类标记为路由。无 `name`/`deps` 参数，路由名称自动生成为 `类名 + "Router"`。
+将类标记为路由。无 `name`/`deps` 参数，路由名称自动生成为 `类名 + "Router"`。类必须显式继承 `RouterBase`。
 
 **签名：**
 ```python
@@ -105,14 +114,17 @@ def router(prefix: str = "", *, tags: list[str] | None = None) -> Callable[[type
 
 **示例：**
 ```python
+from canary_framework import router
+from canary_framework.core import RouterBase
+
 @router(prefix="/api", tags=["API"])
-class Api:
+class Api(RouterBase):
     pass
 # 路由名称自动为 "ApiRouter"
 ```
 
 **行为：**
-- 将类转换为 `RouterBase` 的子类
+- 检查类是否为 `RouterBase` 的子类，否则抛出 `TypeError`
 - 收集所有使用 HTTP 方法装饰器标记的方法
 - 自动生成 OpenAPI 文档
 - 依赖通过类型注解声明
@@ -149,8 +161,11 @@ def patch(path: str, *, ...) -> Callable
 
 **示例：**
 ```python
+from canary_framework import router, get, post
+from canary_framework.core import RouterBase
+
 @router()
-class UsersRouter:
+class UsersRouter(RouterBase):
     @get("/{user_id}", summary="获取用户", response_model=UserResponse)
     async def get_user(self, user_id: int):
         pass
@@ -165,6 +180,31 @@ class UsersRouter:
 - `Pydantic BaseModel` → `JSONResponse`（调用 `model_dump()`）
 - `str` → `PlainTextResponse`
 - `Response` 子类 → 直接返回
+
+---
+
+### @config
+
+将类标记为配置类。类必须继承 `CanaryConfig`。
+
+**签名：**
+```python
+def config() -> Callable[[type], type[CanaryConfig]]
+```
+
+**参数：** 无
+
+**示例：**
+```python
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8080
+    log_level: str = "DEBUG"
+```
 
 ---
 
@@ -191,8 +231,11 @@ def before_shutdown(func: HookFunction) -> HookFunction
 
 **示例：**
 ```python
+from canary_framework import service, after_config, before_shutdown
+from canary_framework.core import ServiceBase
+
 @service()
-class Database:
+class Database(ServiceBase):
     @after_config
     async def connect(self):
         pass
@@ -206,6 +249,35 @@ class Database:
 
 ## 基类
 
+### CanaryConfig
+
+框架配置的基类。所有配置类必须继承 `CanaryConfig`。
+
+```python
+from canary_framework.common.config import CanaryConfig
+```
+
+**字段（均可选，含默认值）：**
+
+| 字段 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `host` | `str` | `"127.0.0.1"` | 服务器绑定地址 |
+| `port` | `int` | `8000` | 服务器端口 (1-65535) |
+| `log_level` | `Literal["DEBUG","INFO","WARNING","ERROR","CRITICAL"]` | `"INFO"` | 框架日志级别 |
+| `openapi_title` | `str` | `"Canary Framework API"` | API 标题 |
+| `openapi_version` | `str` | `"1.0.0"` | API 版本 |
+| `openapi_description` | `str` | `""` | API 描述 |
+| `openapi_servers` | `list[dict]` | `[]` | OpenAPI 服务器列表 |
+| `openapi_security_schemes` | `dict` | `{}` | 安全方案 |
+| `docs_openapi_path` | `str` | `"/openapi.json"` | OpenAPI JSON 路径 |
+| `docs_swagger_path` | `str` | `"/docs"` | Swagger UI 路径 |
+| `docs_redoc_path` | `str` | `"/redoc"` | ReDoc 路径 |
+| `docs_swagger_css_cdn` | `str` | Swagger CSS CDN | CSS CDN URL |
+| `docs_swagger_js_cdn` | `str` | Swagger JS CDN | JS CDN URL |
+| `docs_redoc_cdn` | `str` | ReDoc JS CDN | ReDoc CDN URL |
+
+允许额外字段，可以添加任意自定义配置字段。
+
 ### ServiceBase
 
 服务的基类。
@@ -213,12 +285,15 @@ class Database:
 **属性：**
 - `config`：配置对象（在配置阶段设置）
 - `_cf_hooks`：内部钩子注册表
+- `_cf_parent_registry`：父注册表引用
 
 **方法：**
-- `async configure(config_instance=None)`：配置服务，调用 `@after_config` 钩子
+- `async configure(config_instance: CanaryConfig | None = None)`：配置服务，调用 `@after_config` 钩子
 - `async init()`：初始化服务，调用 `@after_init` 钩子
 - `async startup()`：启动服务，调用 `@before_startup` 钩子
 - `async shutdown()`：关闭服务，调用 `@before_shutdown` 钩子（逆序）
+- `async __call__(scope, receive, send)`：ASGI 应用入口点，处理 lifespan 协议
+- `async _handle_lifespan(receive, send)`：处理 ASGI 生命周期事件
 - `async _invoke_hook(hook)`：调用指定的生命周期钩子
 
 ---
@@ -238,12 +313,11 @@ class Database:
 - `asgi_app`：带有挂载子服务的 Starlette 路由
 
 **方法：**
-- `async configure(config_instance=None)`：配置模块和所有服务（**核心 DI 阶段**：注册、排序、实例化、注入依赖）
+- `async configure(config_instance: CanaryConfig | None = None)`：配置模块和所有服务（**核心 DI 阶段**：注册、排序、实例化、注入依赖）
 - `async init()`：初始化模块和所有服务
 - `async startup()`：启动模块和所有服务
 - `async shutdown()`：关闭模块和所有服务（逆序）
-- `async __call__(scope, receive, send)`：ASGI 应用接口
-- `async _handle_lifespan(receive, send)`：处理 ASGI 生命周期事件
+- `async __call__(scope, receive, send)`：ASGI 应用接口（继承自 ServiceBase）
 - `_register_entry_with_deps(cls, registry)`：递归注册服务及其依赖
 
 **子服务访问：** 配置完成后，子服务通过**原始类名**可访问：
@@ -266,7 +340,10 @@ app.AuthService    # Auth 服务实例
 - `asgi_app`：带有收集路由的 Starlette 路由
 
 **方法：**
-- `async __call__(scope, receive, send)`：ASGI 应用接口
+- `async configure(config_instance: CanaryConfig | None = None)`：配置路由器，调用父类 configure 方法
+- `async startup()`：启动路由器，自动注册 OpenAPI schema 和文档端点
+- `async __call__(scope, receive, send)`：ASGI 应用接口（继承自 ServiceBase）
+- `get_mount_path()`：获取路由的挂载路径
 - `_collect_routes()`：收集所有 HTTP 路由
 
 ---
@@ -365,12 +442,10 @@ Exception
 
 ### 标记 (markers)
 
-用于标识框架类的常量和辅助函数。
+用于标识框架类的常量和辅助函数。框架使用单一的 `CF_SERVICE_MARKER` 标识所有装饰类。
 
 **常量：**
 - `CF_SERVICE_MARKER = "__cf_service__"`
-- `CF_MODULE_MARKER = "__cf_module__"`
-- `CF_ROUTER_MARKER = "__cf_router__"`
 - `CF_NAME_ATTR = "__cf_name__"`
 - `CF_SERVICE_META = "__cf_service_meta__"`
 - `ROUTE_ATTR = "__cf_route__"`
@@ -485,15 +560,6 @@ class LifecycleAware(Protocol):
 
 ---
 
-### Utils
-
-实用函数。
-
-**函数：**
-- `make_subclass(cls: type, base: type, meta: ServiceMeta, name: str, *, extra_marker=None) -> type`：创建带有框架元数据的子类
-
----
-
 ### OpenAPI
 
 OpenAPI 文档生成工具。
@@ -536,9 +602,7 @@ print(f"Canary Framework v{__version__}")
 
 装饰类设置了这些内部属性：
 
-- `__cf_service__`：如果用 `@service` 装饰则为 `True`
-- `__cf_module__`：如果用 `@module` 装饰则为 `True`
-- `__cf_router__`：如果用 `@router` 装饰则为 `True`
+- `__cf_service__`：如果用 `@service`/`@module`/`@router` 装饰则为 `True`
 - `__cf_service_meta__`：元数据对象（`ServiceMeta`/`ModuleMeta`/`RouterMeta`）
 - `__cf_name__`：服务/模块/路由名称
 
@@ -555,23 +619,27 @@ print(f"Canary Framework v{__version__}")
 
 ## 配置类约定
 
-配置类应遵循以下约定：
+配置类必须使用 `@config` 装饰器并继承 `CanaryConfig`：
 
 ```python
-class AppConfig:
-    def __init__(self):
-        self.database_url = "sqlite:///app.db"
-        self.debug = True
-        self.port = 8000
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    database_url: str = "sqlite:///app.db"
+    debug: bool = True
+    port: int = 8000
 ```
 
-配置类的属性会在 `configure` 阶段注入到所有服务的 `config` 属性中。
+配置对象在 `configure` 阶段注入到所有服务的 `config` 属性中。
 
-框架日志级别可通过 `cf_log_level` 字段配置：
+框架日志级别可通过 `log_level` 字段配置：
 
 ```python
-class AppConfig:
-    cf_log_level: str = "DEBUG"  # 默认 "INFO"
+@config
+class AppConfig(CanaryConfig):
+    log_level: str = "DEBUG"  # 默认 "INFO"
 ```
 
 ---
