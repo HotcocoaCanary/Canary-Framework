@@ -25,13 +25,14 @@ pip install canary-framework
 
 ```python
 from canary_framework import module, router, get, post, service
+from canary_framework.core import ServiceBase, ModuleBase, RouterBase
 
 @service()
-class DatabaseService:
+class DatabaseService(ServiceBase):
     pass
 
 @router(prefix="/api")
-class ApiRouter:
+class ApiRouter(RouterBase):
     db: DatabaseService
 
     @get("/hello")
@@ -43,7 +44,7 @@ class ApiRouter:
         return {"echo": data}
 
 @module(services=[DatabaseService, ApiRouter])
-class AppModule:
+class AppModule(ModuleBase):
     pass
 ```
 
@@ -65,13 +66,14 @@ uvicorn main:AppModule --reload
 
 ### 服务 (Service)
 
-服务是应用的基本构建块，封装业务逻辑。`@service()` 无参数调用，名称自动生成为 `ClassName + "Service"`：
+服务是应用的基本构建块，封装业务逻辑。`@service()` 无参数调用，类必须显式继承 `ServiceBase`。名称自动生成为 `ClassName + "Service"`：
 
 ```python
 from canary_framework import service, after_config
+from canary_framework.core import ServiceBase
 
 @service()
-class Database:
+class Database(ServiceBase):
     @after_config
     async def connect(self):
         print("Database connected")
@@ -79,25 +81,27 @@ class Database:
 
 ### 模块 (Module)
 
-模块组织和组合服务，使用 `services` 参数指定子服务。名称自动生成为 `ClassName + "Module"`：
+模块组织和组合服务，使用 `services` 参数指定子服务。类必须显式继承 `ModuleBase`。名称自动生成为 `ClassName + "Module"`：
 
 ```python
 from canary_framework import module
+from canary_framework.core import ModuleBase
 
 @module(services=[DatabaseService, ApiRouter])
-class App:
+class App(ModuleBase):
     pass
 ```
 
 ### 路由 (Router)
 
-路由处理 HTTP 请求，支持 `prefix` 和 `tags` 参数。名称自动生成为 `ClassName + "Router"`：
+路由处理 HTTP 请求，支持 `prefix` 和 `tags` 参数。类必须显式继承 `RouterBase`。名称自动生成为 `ClassName + "Router"`：
 
 ```python
 from canary_framework import router, get
+from canary_framework.core import RouterBase
 
 @router(prefix="/users")
-class UsersRouter:
+class UsersRouter(RouterBase):
     @get("/")
     async def list_users(self):
         return {"users": []}
@@ -108,8 +112,11 @@ class UsersRouter:
 依赖通过 Python 类型注解声明，框架自动注入：
 
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class UserService:
+class UserService(ServiceBase):
     db: DatabaseService
 
     async def get_user(self, user_id):

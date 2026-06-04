@@ -16,15 +16,15 @@ Use type annotations on the class body to declare dependencies:
 
 ```python
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class Cache:
+class Cache(ServiceBase):
     pass
 
 @service()
-class UserRepository:
+class UserRepository(ServiceBase):
     db: Database    # Auto-injected as self.db
     cache: Cache    # Auto-injected as self.cache
 
@@ -53,15 +53,15 @@ The framework builds a dependency graph and ensures services are initialized in 
 
 ```python
 @service()
-class A:
+class A(ServiceBase):
     pass
 
 @service()
-class B:
+class B(ServiceBase):
     a: A  # Depends on A
 
 @service()
-class C:
+class C(ServiceBase):
     b: B  # Depends on B
 
 # Topological sort determines order: A → B → C
@@ -92,11 +92,11 @@ The framework detects and reports circular dependencies:
 ```python
 # ❌ This will throw CircularDependencyError
 @service()
-class A:
+class A(ServiceBase):
     b: B
 
 @service()
-class B:
+class B(ServiceBase):
     a: A
 ```
 
@@ -106,20 +106,20 @@ Services are singletons within their module — only one instance is created and
 
 ```python
 @service()
-class Database:
+class Database(ServiceBase):
     def __init__(self):
         print("Database created")  # Only printed once
 
 @service()
-class ServiceA:
+class ServiceA(ServiceBase):
     db: Database
 
 @service()
-class ServiceB:
+class ServiceB(ServiceBase):
     db: Database
 
 @module(services=[Database, ServiceA, ServiceB])
-class App:
+class App(ModuleBase):
     pass
 
 # Both ServiceA and ServiceB receive the same Database instance
@@ -131,27 +131,27 @@ Modules can have parent registries, allowing services to be shared across module
 
 ```python
 @service()
-class SharedDatabase:
+class SharedDatabase(ServiceBase):
     pass
 
 @service()
-class AuthService:
+class AuthService(ServiceBase):
     db: SharedDatabase
 
 @service()
-class ProductService:
+class ProductService(ServiceBase):
     db: SharedDatabase
 
 @module(services=[AuthService])
-class AuthModule:
+class AuthModule(ModuleBase):
     pass
 
 @module(services=[ProductService])
-class ProductsModule:
+class ProductsModule(ModuleBase):
     pass
 
 @module(services=[SharedDatabase, AuthModule, ProductsModule])
-class App:
+class App(ModuleBase):
     pass
 
 # Both AuthService and ProductService share the same SharedDatabase instance
@@ -163,11 +163,11 @@ Module child services are accessible as attributes using the class name:
 
 ```python
 @module(services=[Database, Auth])
-class App:
+class App(ModuleBase):
     pass
 
 app = App()
-await app.configure(config)
+await app.configure(config)  # config: CanaryConfig | None
 
 # Access children directly by class name
 app.Database    # Database service instance
@@ -222,8 +222,6 @@ class ServiceEntry:
     cls: type                  # The service class
     name: str                  # Auto-generated service name
     instance: object = None    # Service instance (None until configured)
-    deps: list[type] = []      # Dependencies resolved from annotations
-    dep_names: list[str] = []  # Dependency attribute names
 ```
 
 ## Topological Sort
@@ -241,15 +239,17 @@ order = topological_sort(registry)
 
 ```python
 from canary_framework import module, service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
 
 # Layer 1: Infrastructure
 @service()
-class Database:
+class Database(ServiceBase):
     async def query(self, sql):
         return f"Query: {sql}"
 
 @service()
-class Cache:
+class Cache(ServiceBase):
     async def get(self, key):
         return None
 
@@ -258,7 +258,7 @@ class Cache:
 
 # Layer 2: Repositories
 @service()
-class UserRepo:
+class UserRepo(ServiceBase):
     db: Database
     cache: Cache
 
@@ -272,7 +272,7 @@ class UserRepo:
 
 # Layer 3: Services
 @service()
-class UserService:
+class UserService(ServiceBase):
     repo: UserRepo
 
     async def get_profile(self, user_id):
@@ -281,7 +281,7 @@ class UserService:
 
 # Layer 4: Composition
 @module(services=[Database, Cache, UserRepo, UserService])
-class App:
+class App(ModuleBase):
     pass
 ```
 

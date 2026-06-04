@@ -12,23 +12,58 @@ endpoints inside a @router class.
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Awaitable, Callable
 from types import FunctionType
-from typing import cast, get_type_hints
+from typing import cast, override
 
 from pydantic import BaseModel
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 from starlette.routing import Router as StarletteRouter
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp
 
-from canary_framework.common import ROUTE_ATTR, HookFunction
-from canary_framework.common.markers import get_router_meta
+from canary_framework.common import (
+    CF_NAME_ATTR,
+    ROUTE_ATTR,
+    HookFunction,
+    RouterMeta,
+    get_router_meta,
+)
+from canary_framework.common.config import CanaryConfig
 from canary_framework.common.routing import parse_route_path
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.logging import get_logger
+from canary_framework.engine.openapi import generate_openapi_schema
+
+_SWAGGER_UI_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Swagger UI</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+        SwaggerUIBundle({ url: "/openapi.json", dom_id: "#swagger-ui" });
+    </script>
+</body>
+</html>"""
+
+_REDOC_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>ReDoc</title>
+</head>
+<body>
+    <div id="redoc"></div>
+    <script src="https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js"></script>
+    <script>
+        Redoc.init("/openapi.json", {}, document.getElementById("redoc"));
+    </script>
+</body>
+</html>"""
 
 
 def _convert_param(value: str, param_type: type | None) -> object:
@@ -165,27 +200,10 @@ def _route_handler(instance: object, attr: HookFunction, cls: type) -> Route:
     # 解析路径，提取路径参数和查询参数
     starlette_path, path_param_names, query_param_names = parse_route_path(path)
 
-    # 应用路由器前缀
-    router_meta = get_router_meta(cls)
-    if router_meta and router_meta.prefix:
-        starlette_path = router_meta.prefix + starlette_path
+    from canary_framework.engine.params import resolve_params
 
-    sig = inspect.signature(attr)
-    try:
-        type_hints = get_type_hints(attr)
-    except Exception:
-        type_hints = {}
-
-    param_types = {}
-    for name, param in sig.parameters.items():
-        if name == "self":
-            continue
-        if name in type_hints:
-            param_types[name] = type_hints[name]
-        elif param.annotation is not inspect.Parameter.empty:
-            param_types[name] = param.annotation
-        else:
-            param_types[name] = None
+    params = resolve_params(attr)
+    param_types = {name: ann for name, (ann, has_default, field_info) in params.items()}
 
     async def endpoint(request: Request) -> Response:
         kwargs: dict[str, object] = {}
@@ -262,9 +280,121 @@ class RouterBase(ServiceBase):
         """
         super().__init__()
         self._starlette_router: StarletteRouter | None = None
+        self._cf_root_routes: list[Route] | None = None
+
+    @override
+    async def startup(self) -> None:
+        """启动路由器，自动注册 OpenAPI schema 和文档端点。
+
+        在 Module 中运行时，通过 _cf_parent_registry 遍历所有兄弟路由器
+        收集 RouterMeta 生成统一 OpenAPI schema，并注册 root 级别文档路由。
+        独立运行时，仅收集自身 meta。第一个路由器注册全局文档（first-wins）。
+
+        Start the router. Automatically registers OpenAPI schema and doc
+        endpoints. The first router in a module registers global docs (first-wins).
+        """
+        await super().startup()
+        meta = get_router_meta(type(self))
+        if meta is None:
+            return
+
+        parent = self._cf_parent_registry
+        if (
+            parent is not None
+            and hasattr(parent, "_cf_docs_registered")
+            and parent._cf_docs_registered
+        ):
+            return
+
+        router_metas: list[RouterMeta] = [meta]
+        if parent is not None and hasattr(parent, "all_entries"):
+            for entry in parent.all_entries():
+                other_meta = get_router_meta(entry.cls)
+                if other_meta is not None and other_meta is not meta:
+                    router_metas.append(other_meta)
+
+        config = self.config
+        cfg: CanaryConfig = config if isinstance(config, CanaryConfig) else CanaryConfig()
+        schema = generate_openapi_schema(
+            router_metas,
+            title=cfg.openapi_title,
+            version=cfg.openapi_version,
+            description=cfg.openapi_description,
+            servers=cfg.openapi_servers or None,
+            security_schemes=cfg.openapi_security_schemes or None,
+        )
+
+        openapi_path = cfg.docs_openapi_path
+        docs_path = cfg.docs_swagger_path
+        redoc_path = cfg.docs_redoc_path
+
+        swagger_css = cfg.docs_swagger_css_cdn
+        swagger_js = cfg.docs_swagger_js_cdn
+        redoc_js = cfg.docs_redoc_cdn
+
+        swagger_html = (
+            _SWAGGER_UI_HTML.replace(
+                "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+                swagger_css,
+            )
+            .replace(
+                "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+                swagger_js,
+            )
+            .replace(
+                '"/openapi.json"',
+                f'"{openapi_path}"',
+            )
+        )
+        redoc_html = _REDOC_HTML.replace(
+            "https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
+            redoc_js,
+        ).replace(
+            '"/openapi.json"',
+            f'"{openapi_path}"',
+        )
+
+        async def openapi_endpoint(_request: object) -> JSONResponse:
+            return JSONResponse(schema)
+
+        async def swagger_endpoint(_request: object) -> HTMLResponse:
+            return HTMLResponse(swagger_html)
+
+        async def redoc_endpoint(_request: object) -> HTMLResponse:
+            return HTMLResponse(redoc_html)
+
+        self._cf_root_routes = [
+            Route(openapi_path, endpoint=openapi_endpoint, methods=["GET"]),
+            Route(docs_path, endpoint=swagger_endpoint, methods=["GET"]),
+            Route(redoc_path, endpoint=redoc_endpoint, methods=["GET"]),
+        ]
+
+        if parent is not None and hasattr(parent, "_cf_docs_registered"):
+            parent._cf_docs_registered = True
+
+    def get_mount_path(self) -> str:
+        """返回路由器在模块 ASGI 应用中的挂载路径。
+
+        Returns the mount path for this router in the module's ASGI app.
+        """
+        meta = get_router_meta(type(self))
+        if meta and meta.prefix:
+            return meta.prefix
+        return f"/{getattr(type(self), CF_NAME_ATTR, type(self).__name__)}"
+
+    def _cf_get_root_routes(self) -> list[Route]:
+        """返回需要在模块根路径注册的路由（如文档端点）。
+
+        仅在 Module 中运行时有效，独立运行时返回空列表。
+
+        Return root-level routes (e.g., doc endpoints) for the parent module.
+        """
+        if self._cf_parent_registry is not None and self._cf_root_routes:
+            return self._cf_root_routes
+        return []
 
     @property
-    def asgi_app(self) -> ASGIApp:
+    def asgi_app(self) -> ASGIApp | None:
         """获取ASGI应用。
 
         懒加载创建Starlette路由器，收集所有路由。
@@ -281,32 +411,13 @@ class RouterBase(ServiceBase):
         """
         if self._starlette_router is None:
             routes = _collect_routes(self)
+            if self._cf_root_routes and self._cf_parent_registry is None:
+                routes.extend(self._cf_root_routes)
             _log.debug("Collected %d route(s) for router: %s", len(routes), type(self).__name__)
             for route in routes:
                 _log.debug("  Route: %s %s", route.methods, route.path)
             self._starlette_router = StarletteRouter(routes)
         return self._starlette_router
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """ASGI应用入口点。
-
-        将请求委托给asgi_app处理。
-
-        Args:
-            scope: ASGI scope字典。
-            receive: 接收消息的异步函数。
-            send: 发送消息的异步函数。
-
-        ASGI application entry point.
-
-        Delegates requests to the asgi_app.
-
-        Args:
-            scope: ASGI scope dictionary.
-            receive: Async function to receive messages.
-            send: Async function to send messages.
-        """
-        await self.asgi_app(scope, receive, send)
 
 
 __all__ = ["RouterBase"]

@@ -36,12 +36,14 @@ class TestParseRoutePath:
         assert path_params == []
         assert query_params == ["page", "limit"]
 
-    def test_path_with_hash_params(self) -> None:
-        """Test path with hash params."""
-        path, path_params, query_params = parse_route_path("/items#section={section}")
-        assert path == "/items"
-        assert path_params == []
-        assert query_params == ["section"]
+    def test_path_with_path_and_query_params(self) -> None:
+        """Test path with both path and query params."""
+        path, path_params, query_params = parse_route_path(
+            "/items/{item_id}?page={page}&limit={limit}"
+        )
+        assert path == "/items/{item_id}"
+        assert path_params == ["item_id"]
+        assert query_params == ["page", "limit"]
 
 
 @pytest.mark.unit

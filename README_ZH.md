@@ -16,7 +16,7 @@ Canary Framework 是一个**装饰器驱动**的 Python 异步服务框架。核
 
 ## 核心特性
 
-- **装饰器驱动** — 使用 `@service`、`@module`、`@router` 等装饰器，零继承
+- **装饰器驱动** — 使用 `@service`、`@module`、`@router` 等装饰器，需显式基类继承
 - **注解式依赖注入** — 用类型注解声明依赖：`db: DatabaseService`，无样板代码
 - **拓扑启动** — Kahn 算法确保依赖优先启动
 - **生命周期管理** — `@after_config`/`@after_init`/`@before_startup`/`@before_shutdown` 钩子
@@ -34,22 +34,25 @@ pip install canary-framework
 
 ```python
 from canary_framework import module, service, router, get, post, after_config
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
 
 @service()
-class DatabaseService:
+class DatabaseService(ServiceBase):
     @after_config
     async def connect(self):
         self.conn = "connected"
 
 @service()
-class UserService:
+class UserService(ServiceBase):
     db: DatabaseService
 
     async def get_user(self, user_id: int):
         return {"id": user_id, "name": "Alice"}
 
 @router(prefix="/api", tags=["users"])
-class ApiRouter:
+class ApiRouter(RouterBase):
     user_service: UserService
 
     @get("/users/{user_id}")
@@ -61,17 +64,54 @@ class ApiRouter:
         return {"id": 1, **body}
 
 @module(services=[DatabaseService, UserService, ApiRouter])
-class App:
+class App(ModuleBase):
     pass
 
-# 使用 uvicorn 运行
-# uvicorn main:App --host 0.0.0.0 --port 8000 --reload
+# ---- 入口 ----
+
+async def setup():
+    app = App()
+    await app.configure()
+    await app.init()
+    return app
+
+if __name__ == "__main__":
+    import asyncio
+    import uvicorn
+
+    app = asyncio.run(setup())
+    uvicorn.run(app, lifespan="on")
+```
+
+## 配置
+
+使用 `@config` 装饰器和 `CanaryConfig` 自定义框架行为：
+
+```python
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8080
+    openapi_title: str = "My API"
+    log_level: str = "DEBUG"
+
+async def setup():
+    cfg = AppConfig()
+    app = App()
+    await app.configure(cfg)
+    await app.init()
+    return app, cfg
 ```
 
 ## Web 示例（带 OpenAPI）
 
 ```python
 from canary_framework import module, router, get, post
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
 from pydantic import BaseModel, Field
 
 class UserRequest(BaseModel):
@@ -84,7 +124,7 @@ class UserResponse(BaseModel):
     email: str
 
 @router(prefix="/users", tags=["Users"])
-class UsersRouter:
+class UsersRouter(RouterBase):
     @get("/", summary="获取用户列表", description="获取所有用户")
     async def list_users(self) -> list[UserResponse]:
         return []
@@ -98,7 +138,7 @@ class UsersRouter:
         return UserResponse(id=1, name=user.name, email=user.email)
 
 @module(services=[UsersRouter])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -115,13 +155,12 @@ class App:
 src/canary_framework/
 ├── common/              # 共享基础设施
 │   ├── errors.py        # 框架异常
-│   ├── markers.py       # 元数据标记，resolve_deps()
 │   ├── routing.py       # 路由路径解析
-│   └── types.py         # 数据类和类型别名
+│   └── types.py         # 数据类、标记和类型别名
 ├── core/                # 基类
 │   ├── module.py        # ModuleBase — 编排和依赖注入
-│   ├── service.py       # ServiceBase — 生命周期管理
-│   └── router.py        # RouterBase — ASGI 路由
+│   ├── service.py       # ServiceBase — 生命周期和 ASGI
+│   └── router.py        # RouterBase — ASGI 路由 + OpenAPI 文档
 ├── decorators/          # 装饰器实现
 │   ├── module.py        # @module
 │   ├── service.py       # @service
@@ -132,7 +171,7 @@ src/canary_framework/
     ├── injector.py      # 拓扑排序
     ├── hooks.py         # 生命周期钩子发现
     ├── openapi.py       # OpenAPI schema 生成
-    ├── utils.py         # make_subclass()
+    ├── params.py        # 路由参数解析
     └── logging.py       # 框架日志
 ```
 

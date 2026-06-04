@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 
-from canary_framework.common import CircularDependencyError
-from canary_framework.common.markers import resolve_deps
+from canary_framework.common import CircularDependencyError, resolve_deps
 from canary_framework.engine.logging import get_logger
 from canary_framework.engine.registry import Registry
 

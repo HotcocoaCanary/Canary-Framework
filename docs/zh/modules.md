@@ -4,13 +4,14 @@
 
 ## 定义模块
 
-使用 `@module` 装饰器定义模块。只需提供 `services` 参数，模块名称自动生成为 `类名 + "Module"`：
+使用 `@module` 装饰器定义模块。类必须显式继承 `ModuleBase`。只需提供 `services` 参数，模块名称自动生成为 `类名 + "Module"`：
 
 ```python
 from canary_framework import module
+from canary_framework.core import ModuleBase
 
 @module(services=[...])
-class Auth:
+class Auth(ModuleBase):
     pass
 ```
 
@@ -36,46 +37,47 @@ class Auth:
 
 ```python
 from canary_framework import module, service, router
+from canary_framework.core import ServiceBase, ModuleBase, RouterBase
 
 # 核心服务
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class Cache:
+class Cache(ServiceBase):
     pass
 
 # 认证模块
 @service()
-class AuthService:
+class AuthService(ServiceBase):
     db: DatabaseService
 
 @router(prefix="/auth")
-class AuthRouter:
+class AuthRouter(RouterBase):
     auth_svc: AuthService
 
 @module(services=[AuthService, AuthRouter])
-class Auth:
+class Auth(ModuleBase):
     pass
 
 # 文章模块
 @service()
-class PostsService:
+class PostsService(ServiceBase):
     db: DatabaseService
     cache: CacheService
 
 @router(prefix="/posts")
-class PostsRouter:
+class PostsRouter(RouterBase):
     svc: PostsService
 
 @module(services=[PostsService, PostsRouter])
-class Posts:
+class Posts(ModuleBase):
     pass
 
 # 主应用模块
 @module(services=[DatabaseService, CacheService, AuthModule, PostsModule])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -119,10 +121,26 @@ await app.shutdown()
 模块可以直接用作 ASGI 应用。它自动挂载所有子路由：
 
 ```python
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+async def setup():
+    cfg = AppConfig()
+    app = App()
+    await app.configure(cfg)
+    await app.init()
+    return app, cfg
+
+import asyncio
 import uvicorn
 
-# 将模块作为 ASGI 应用运行
-uvicorn.run("main:AppModule", host="0.0.0.0", port=8000)
+app, cfg = asyncio.run(setup())
+uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
 ```
 
 模块将：
@@ -132,7 +150,7 @@ uvicorn.run("main:AppModule", host="0.0.0.0", port=8000)
 
 ## 模块基类
 
-当您用 `@module` 装饰一个类时，它会自动继承自 `ModuleBase`，该类提供：
+使用 `@module` 装饰的类必须显式继承自 `ModuleBase`，该类提供：
 
 - `config` 属性：访问配置
 - `configure(config_instance=None)` 方法：配置模块和所有服务
@@ -140,26 +158,30 @@ uvicorn.run("main:AppModule", host="0.0.0.0", port=8000)
 - `startup()` 方法：启动模块和所有服务
 - `shutdown()` 方法：关闭模块和所有服务
 - `asgi_app` 属性：访问 ASGI 应用
+- `__call__(scope, receive, send)`：ASGI 应用入口点（继承自 ServiceBase）
 
 ## 依赖共享
 
 模块中的服务共享依赖项。如果多个服务依赖于同一个服务，则只创建并共享一个实例：
 
 ```python
+from canary_framework import service, module
+from canary_framework.core import ServiceBase, ModuleBase
+
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class ServiceA:
+class ServiceA(ServiceBase):
     db: DatabaseService
 
 @service()
-class ServiceB:
+class ServiceB(ServiceBase):
     db: DatabaseService
 
 @module(services=[DatabaseService, ServiceA, ServiceB])
-class App:
+class App(ModuleBase):
     pass
 
 # ServiceA 和 ServiceB 都将接收同一个 Database 实例
@@ -171,7 +193,7 @@ class App:
 
 ```python
 @module(services=[DatabaseService, AuthService, PostsRouter])
-class App:
+class App(ModuleBase):
     pass
 
 app = App()
@@ -189,23 +211,24 @@ app.AuthService.db    # Auth 的 Database 依赖
 
 ```python
 from canary_framework import module, service, router, get
+from canary_framework.core import ServiceBase, ModuleBase, RouterBase
 
 # 服务
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class UserRepository:
+class UserRepository(ServiceBase):
     db: DatabaseService
 
 @service()
-class UserService:
+class UserService(ServiceBase):
     repo: UserRepositoryService
 
 # 路由
 @router(prefix="/api/users")
-class UsersRouter:
+class UsersRouter(RouterBase):
     svc: UserService
 
     @get("/")
@@ -214,11 +237,11 @@ class UsersRouter:
 
 # 模块
 @module(services=[UserRepositoryService, UserService, UsersRouter])
-class Users:
+class Users(ModuleBase):
     pass
 
 @module(services=[DatabaseService, UsersModule])
-class App:
+class App(ModuleBase):
     pass
 ```
 

@@ -2,6 +2,7 @@
 
 import pytest
 
+from canary_framework.common.config import CanaryConfig
 from canary_framework.core.module import ModuleBase
 
 
@@ -22,7 +23,7 @@ class TestModuleBase:
     async def test_configure_empty_module(self) -> None:
         """Test configure on empty module."""
         module = ModuleBase()
-        config = {"key": "value"}
+        config = CanaryConfig(host="0.0.0.0")
         await module.configure(config)
         assert module.config == config
 
@@ -34,15 +35,12 @@ class TestModuleBase:
         assert module._cf_asgi_app is not None
         assert app is module._cf_asgi_app
 
-    def test_asgi_app_includes_openapi(self) -> None:
-        """Test asgi_app includes OpenAPI endpoints."""
+    def test_asgi_app_empty_module_has_no_docs(self) -> None:
+        """Test asgi_app on empty module has no docs (docs come from routers)."""
         module = ModuleBase()
         app = module.asgi_app
-
-        # Check that the routes include OpenAPI endpoints
-        # We can check the routes by looking at the Starlette router
         routes = app.routes
         paths = [route.path for route in routes]  # type: ignore[attr-defined]
-        assert "/openapi.json" in paths
-        assert "/docs" in paths
-        assert "/redoc" in paths
+        assert "/openapi.json" not in paths
+        assert "/docs" not in paths
+        assert "/redoc" not in paths

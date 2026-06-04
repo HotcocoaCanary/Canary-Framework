@@ -2,8 +2,9 @@
 
 import pytest
 
-from canary_framework.common.markers import get_module_meta, is_cf_module, is_cf_service
+from canary_framework.common import get_module_meta, is_cf_module, is_cf_service
 from canary_framework.core.module import ModuleBase
+from canary_framework.core.service import ServiceBase
 from canary_framework.decorators.module import module
 from canary_framework.decorators.service import service
 
@@ -16,7 +17,7 @@ class TestModuleDecorator:
         """Test @module marks class as module."""
 
         @module()
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         assert is_cf_module(MyModule)
@@ -26,7 +27,7 @@ class TestModuleDecorator:
         """Test @module makes class inherit from ModuleBase."""
 
         @module()
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         assert issubclass(MyModule, ModuleBase)
@@ -35,7 +36,7 @@ class TestModuleDecorator:
         """Test @module sets metadata."""
 
         @module()
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         meta = get_module_meta(MyModule)
@@ -46,11 +47,11 @@ class TestModuleDecorator:
         """Test @module with services."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             pass
 
         @module(services=[MyService])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         meta = get_module_meta(MyModule)
@@ -65,5 +66,5 @@ class TestModuleDecorator:
         with pytest.raises(TypeError):
 
             @module(services=[UndecoratedService])
-            class MyModule:
+            class MyModule(ModuleBase):
                 pass

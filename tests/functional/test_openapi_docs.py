@@ -6,7 +6,8 @@ import pytest
 from pydantic import BaseModel
 
 from canary_framework import get, post, router
-from canary_framework.common.markers import get_router_meta
+from canary_framework.common import get_router_meta
+from canary_framework.core.router import RouterBase
 from canary_framework.engine.openapi import generate_openapi_schema
 
 
@@ -27,7 +28,7 @@ class TestOpenAPIDocs:
             value: int
 
         @router()
-        class MyRouter:
+        class MyRouter(RouterBase):
             @get("/items", summary="Get all items", tags=["items"])
             async def get_items(self) -> None:
                 pass
@@ -56,13 +57,13 @@ class TestOpenAPIDocs:
         """Test OpenAPI with multiple routers."""
 
         @router(tags=["users"])
-        class UserRouter:
+        class UserRouter(RouterBase):
             @get("/users")
             async def get_users(self) -> None:
                 pass
 
         @router(tags=["products"])
-        class ProductRouter:
+        class ProductRouter(RouterBase):
             @get("/products")
             async def get_products(self) -> None:
                 pass
@@ -90,7 +91,7 @@ class TestOpenAPIDocs:
         """Test OpenAPI with descriptions."""
 
         @router()
-        class MyRouter:
+        class MyRouter(RouterBase):
             @get(
                 "/test",
                 summary="Test endpoint",

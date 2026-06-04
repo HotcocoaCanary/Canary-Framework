@@ -13,6 +13,9 @@ from canary_framework import (
     router,
     service,
 )
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.functional
@@ -31,8 +34,9 @@ class TestSimpleApp:
 
         # Define a service to manage todos
         @service()
-        class TodoService:
+        class TodoService(ServiceBase):
             def __init__(self) -> None:
+                super().__init__()
                 self.todos: list[TodoItem] = []
                 self.next_id = 1
 
@@ -53,7 +57,7 @@ class TestSimpleApp:
 
         # Define a router with API endpoints
         @router()
-        class TodoRouter:
+        class TodoRouter(RouterBase):
             todo_service: TodoService
 
             @get("/todos")
@@ -67,7 +71,7 @@ class TestSimpleApp:
 
         # Define the main module
         @module(services=[TodoRouter])
-        class TodoApp:
+        class TodoApp(ModuleBase):
             @after_config
             async def setup_test_data(self) -> None:
                 # Add some test data
@@ -84,11 +88,11 @@ class TestSimpleApp:
 
         # Create and configure the app
         app = TodoApp()
-        await app.configure()  # type: ignore[attr-defined]
+        await app.configure()
 
         # Test the API endpoints
         async with AsyncClient(
-            transport=ASGITransport(app=app),  # type: ignore[arg-type]
+            transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
             # Test list todos
@@ -116,20 +120,21 @@ class TestSimpleApp:
         """Test OpenAPI docs."""
 
         @router()
-        class MyRouter:
+        class MyRouter(RouterBase):
             @get("/test")
             async def test(self) -> dict[str, str]:
                 return {"status": "ok"}
 
         @module(services=[MyRouter])
-        class MyApp:
+        class MyApp(ModuleBase):
             pass
 
         app = MyApp()
-        await app.configure()  # type: ignore[attr-defined]
+        await app.configure()
+        await app.startup()
 
         async with AsyncClient(
-            transport=ASGITransport(app=app),  # type: ignore[arg-type]
+            transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
             # Test OpenAPI JSON

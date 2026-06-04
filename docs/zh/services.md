@@ -4,13 +4,14 @@
 
 ## 定义服务
 
-使用 `@service()` 装饰器定义服务（无参数调用）：
+使用 `@service()` 装饰器定义服务（无参数调用）。类必须显式继承 `ServiceBase`：
 
 ```python
 from canary_framework import service
+from canary_framework.core import ServiceBase
 
 @service()
-class UserRepository:
+class UserRepository(ServiceBase):
     def __init__(self):
         self.users = []
 
@@ -37,12 +38,15 @@ class UserRepository:
 依赖通过 Python 类型注解声明，取代了旧的 `deps` 参数。只需在类体中添加带类型的属性注解即可：
 
 ```python
+from canary_framework import service
+from canary_framework.core import ServiceBase
+
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class UserService:
+class UserService(ServiceBase):
     db: DatabaseService  # 依赖声明：通过类型注解
 
     async def get_user(self, user_id):
@@ -75,21 +79,23 @@ class UserService:
 
 ## 服务基类
 
-当您用 `@service()` 装饰一个类时，它会自动继承自 `ServiceBase`，该类提供：
+使用 `@service()` 装饰的类必须显式继承自 `ServiceBase`，该类提供：
 
 - `config` 属性：访问配置阶段传递的配置
 - `configure(config_instance=None)` 方法：配置服务
 - `init()` 方法：初始化服务
 - `startup()` 方法：启动服务
 - `shutdown()` 方法：关闭服务
+- `__call__(scope, receive, send)`：ASGI 应用入口点
 
 ## 完整示例
 
 ```python
 from canary_framework import service, after_config, after_init, before_startup, before_shutdown
+from canary_framework.core import ServiceBase
 
 @service()
-class Cache:
+class Cache(ServiceBase):
     def __init__(self):
         self.cache = {}
         self.connection = None

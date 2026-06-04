@@ -3,6 +3,8 @@
 import pytest
 
 from canary_framework import module, service
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.integration
@@ -14,20 +16,20 @@ class TestDependencyInjection:
         """Test simple dependency injection."""
 
         @service()
-        class Dependency:
+        class Dependency(ServiceBase):
             def get_value(self) -> str:
                 return "dependency value"
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             dependency: Dependency
 
         @module(services=[MyService])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         app = MyModule()
-        await app.configure()  # type: ignore[attr-defined]
+        await app.configure()
 
         # Check that dependency is injected
         assert hasattr(app.MyService, "dependency")  # type: ignore[attr-defined]
@@ -38,26 +40,26 @@ class TestDependencyInjection:
         """Test multiple dependencies."""
 
         @service()
-        class Dep1:
+        class Dep1(ServiceBase):
             def get_value(self) -> str:
                 return "dep1"
 
         @service()
-        class Dep2:
+        class Dep2(ServiceBase):
             def get_value(self) -> str:
                 return "dep2"
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             dep1: Dep1
             dep2: Dep2
 
         @module(services=[MyService])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         app = MyModule()
-        await app.configure()  # type: ignore[attr-defined]
+        await app.configure()
 
         assert hasattr(app.MyService, "dep1")  # type: ignore[attr-defined]
         assert hasattr(app.MyService, "dep2")  # type: ignore[attr-defined]
@@ -69,24 +71,24 @@ class TestDependencyInjection:
         """Test nested dependencies."""
 
         @service()
-        class DeepDep:
+        class DeepDep(ServiceBase):
             def get_value(self) -> str:
                 return "deep"
 
         @service()
-        class MiddleDep:
+        class MiddleDep(ServiceBase):
             deep_dep: DeepDep
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             middle_dep: MiddleDep
 
         @module(services=[MyService])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         app = MyModule()
-        await app.configure()  # type: ignore[attr-defined]
+        await app.configure()
 
         assert hasattr(app.MyService, "middle_dep")  # type: ignore[attr-defined]
         assert hasattr(app.MyService.middle_dep, "deep_dep")  # type: ignore[attr-defined]

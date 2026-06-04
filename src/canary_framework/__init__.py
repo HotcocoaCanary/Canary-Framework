@@ -13,6 +13,7 @@ from __future__ import annotations
 __version__ = "0.4.10"
 
 from canary_framework.common import (
+    CanaryConfig,
     CanaryFrameworkError,
     CircularDependencyError,
     ConfigurationError,
@@ -27,6 +28,7 @@ from canary_framework.decorators import (
     after_init,
     before_shutdown,
     before_startup,
+    config,
     delete,
     get,
     module,
@@ -38,6 +40,7 @@ from canary_framework.decorators import (
 )
 
 __all__ = [
+    "CanaryConfig",
     "CanaryFrameworkError",
     "CircularDependencyError",
     "ConfigurationError",
@@ -51,6 +54,7 @@ __all__ = [
     "after_init",
     "before_shutdown",
     "before_startup",
+    "config",
     "delete",
     "get",
     "module",

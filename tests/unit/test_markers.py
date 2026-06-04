@@ -2,11 +2,12 @@
 
 import pytest
 
-from canary_framework.common.markers import (
-    CF_MODULE_MARKER,
-    CF_ROUTER_MARKER,
+from canary_framework.common import (
     CF_SERVICE_MARKER,
     CF_SERVICE_META,
+    ModuleMeta,
+    RouterMeta,
+    ServiceMeta,
     get_module_meta,
     get_router_meta,
     get_service_meta,
@@ -14,7 +15,6 @@ from canary_framework.common.markers import (
     is_cf_router,
     is_cf_service,
 )
-from canary_framework.common.types import ModuleMeta, RouterMeta, ServiceMeta
 
 
 @pytest.mark.unit
@@ -44,7 +44,7 @@ class TestMarkerChecks:
         class TestClass:
             pass
 
-        setattr(TestClass, CF_MODULE_MARKER, True)
+        setattr(TestClass, CF_SERVICE_META, ModuleMeta(name="test"))
         assert is_cf_module(TestClass) is True
 
     def test_is_cf_module_negative(self) -> None:
@@ -61,7 +61,7 @@ class TestMarkerChecks:
         class TestClass:
             pass
 
-        setattr(TestClass, CF_ROUTER_MARKER, True)
+        setattr(TestClass, CF_SERVICE_META, RouterMeta(name="test"))
         assert is_cf_router(TestClass) is True
 
     def test_is_cf_router_negative(self) -> None:

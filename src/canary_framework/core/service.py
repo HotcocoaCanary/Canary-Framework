@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import inspect
 
+from starlette.types import Receive, Scope, Send
+
 from canary_framework.common import LifecycleHook, LifecycleHookError
+from canary_framework.common.config import CanaryConfig
 from canary_framework.engine.hooks import HookDict, find_hooks
 from canary_framework.engine.logging import get_logger
 
@@ -37,24 +40,38 @@ class ServiceBase:
         Initializes the ServiceBase instance.
         """
         self._cf_hooks: HookDict | None = None
-        self.config: object = None
+        self.config: CanaryConfig | None = None
+        self._cf_parent_registry: object | None = None
         super().__init__()
 
-    async def configure(self, config_instance: object = None) -> None:
+    async def configure(self, config_instance: CanaryConfig | None = None) -> None:
         """配置服务。
 
         设置配置实例并调用AFTER_CONFIG钩子。
+        只接受 CanaryConfig 子类实例或 None。
 
         Args:
-            config_instance: 配置对象实例。
+            config_instance: CanaryConfig 实例或 None。
+
+        Raises:
+            TypeError: 如果 config_instance 不是 CanaryConfig 子类。
 
         Configure the service.
 
         Sets the config instance and invokes the AFTER_CONFIG hook.
+        Only accepts CanaryConfig subclass instances or None.
 
         Args:
-            config_instance: The configuration object instance.
+            config_instance: CanaryConfig instance or None.
+
+        Raises:
+            TypeError: If config_instance is not a CanaryConfig subclass.
         """
+        if config_instance is not None and not isinstance(config_instance, CanaryConfig):
+            raise TypeError(
+                f"config_instance must be a CanaryConfig subclass or None, "
+                f"got {type(config_instance).__name__}"
+            )
         _log.debug("Configuring service: %s", type(self).__name__)
         self.config = config_instance
         await self._invoke_hook(LifecycleHook.AFTER_CONFIG)
@@ -94,6 +111,42 @@ class ServiceBase:
         """
         _log.debug("Shutting down service: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.BEFORE_SHUTDOWN)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """ASGI 应用入口点。
+
+        处理 lifespan 协议映射到 startup/shutdown，
+        其他请求委托给 asgi_app（如果存在）。
+
+        ASGI application entry point.
+
+        Handles lifespan protocol mapped to startup/shutdown,
+        delegates other requests to asgi_app if available.
+        """
+        if scope["type"] == "lifespan":
+            await self._handle_lifespan(receive, send)
+        else:
+            asgi = getattr(self, "asgi_app", None)
+            if asgi is not None:
+                await asgi(scope, receive, send)
+
+    async def _handle_lifespan(self, receive: Receive, send: Send) -> None:
+        """处理 ASGI lifespan 协议。
+
+        startup → self.startup()
+        shutdown → self.shutdown()
+
+        Handle ASGI lifespan protocol.
+        """
+        while True:
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                await self.startup()
+                await send({"type": "lifespan.startup.complete"})
+            elif message["type"] == "lifespan.shutdown":
+                await self.shutdown()
+                await send({"type": "lifespan.shutdown.complete"})
+                return
 
     async def _invoke_hook(self, hook: LifecycleHook) -> None:
         """调用指定的生命周期钩子。

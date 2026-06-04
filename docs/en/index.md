@@ -24,9 +24,12 @@ Here's a minimal example to get you started:
 
 ```python
 from canary_framework import module, router, get, post
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import RouterBase
 
 @router(prefix="")
-class Api:
+class Api(RouterBase):
     @get("/hello")
     async def hello(self):
         return {"message": "Hello, Canary!"}
@@ -36,7 +39,7 @@ class Api:
         return {"echo": body}
 
 @module(services=[Api])
-class App:
+class App(ModuleBase):
     pass
 
 # Run with uvicorn
@@ -59,9 +62,10 @@ Services are the building blocks of your application, encapsulating business log
 
 ```python
 from canary_framework import service, after_config
+from canary_framework.core.service import ServiceBase
 
 @service()
-class Database:
+class Database(ServiceBase):
     @after_config
     async def connect(self):
         print("Database connected")
@@ -75,7 +79,7 @@ Modules are containers that organize and compose services:
 from canary_framework import module
 
 @module(services=[Database, Api])
-class App:
+class App(ModuleBase):
     pass
 ```
 
@@ -85,9 +89,10 @@ Routers handle HTTP requests with auto-bound parameters:
 
 ```python
 from canary_framework import router, get
+from canary_framework.core.router import RouterBase
 
 @router(prefix="/users")
-class Users:
+class Users(RouterBase):
     @get("/")
     async def list_users(self):
         return {"users": []}
@@ -98,8 +103,11 @@ class Users:
 Declare dependencies with type annotations — the framework automatically resolves and injects them:
 
 ```python
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+
 @service()
-class UserRepo:
+class UserRepo(ServiceBase):
     db: Database  # Auto-injected by the framework
 
     async def get_user(self, user_id):

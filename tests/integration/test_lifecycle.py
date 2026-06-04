@@ -10,6 +10,8 @@ from canary_framework import (
     module,
     service,
 )
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.integration
@@ -23,7 +25,7 @@ class TestLifecycle:
         events: list[str] = []
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             @after_config
             def on_config(self) -> None:
                 events.append("service-config")
@@ -41,7 +43,7 @@ class TestLifecycle:
                 events.append("service-shutdown")
 
         @module(services=[MyService])
-        class MyModule:
+        class MyModule(ModuleBase):
             @after_config
             def on_config(self) -> None:
                 events.append("module-config")
@@ -59,10 +61,10 @@ class TestLifecycle:
                 events.append("module-shutdown")
 
         app = MyModule()
-        await app.configure()  # type: ignore[attr-defined]
-        await app.init()  # type: ignore[attr-defined]
-        await app.startup()  # type: ignore[attr-defined]
-        await app.shutdown()  # type: ignore[attr-defined]
+        await app.configure()
+        await app.init()
+        await app.startup()
+        await app.shutdown()
 
         # Check that all hooks were called
         assert len(events) == 8
@@ -83,7 +85,7 @@ class TestLifecycle:
         shutdown_order: list[str] = []
 
         @service()
-        class Service1:
+        class Service1(ServiceBase):
             @before_startup
             def on_startup(self) -> None:
                 startup_order.append("Service1")
@@ -93,7 +95,7 @@ class TestLifecycle:
                 shutdown_order.append("Service1")
 
         @service()
-        class Service2:
+        class Service2(ServiceBase):
             @before_startup
             def on_startup(self) -> None:
                 startup_order.append("Service2")
@@ -103,13 +105,13 @@ class TestLifecycle:
                 shutdown_order.append("Service2")
 
         @module(services=[Service1, Service2])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
         app = MyModule()
-        await app.configure()  # type: ignore[attr-defined]
-        await app.startup()  # type: ignore[attr-defined]
-        await app.shutdown()  # type: ignore[attr-defined]
+        await app.configure()
+        await app.startup()
+        await app.shutdown()
 
         assert len(startup_order) == 2
         assert len(shutdown_order) == 2

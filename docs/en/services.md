@@ -8,9 +8,10 @@ Use the `@service()` decorator to define a service:
 
 ```python
 from canary_framework import service
+from canary_framework.core.service import ServiceBase
 
 @service()
-class UserRepository:
+class UserRepository(ServiceBase):
     def __init__(self):
         self.users = []
 
@@ -23,7 +24,7 @@ class UserRepository:
 ```
 
 - Services are automatically named `ClassName` + `"Service"` — e.g., `UserRepository` → `UserRepositoryService`
-- No `name` or `deps` parameters are needed
+- Name is auto-generated from the class name
 
 ## Declaring Dependencies
 
@@ -31,11 +32,11 @@ Dependencies are declared via Python type annotations, not a `deps` list:
 
 ```python
 @service()
-class Database:
+class Database(ServiceBase):
     pass
 
 @service()
-class UserRepo:
+class UserRepo(ServiceBase):
     db: Database  # Declared via annotation — auto-injected
 
     async def get_user(self, user_id):
@@ -60,7 +61,7 @@ You can hook into these phases using lifecycle decorators. See the [Lifecycle](.
 
 ## Service Base Class
 
-When you decorate a class with `@service()`, it automatically inherits from `ServiceBase`, which provides:
+Classes decorated with `@service()` must explicitly inherit from `ServiceBase`, which provides:
 
 - `config` attribute: Access to configuration passed during configure phase
 - `configure(config_instance=None)` method: Configures the service
@@ -72,9 +73,10 @@ When you decorate a class with `@service()`, it automatically inherits from `Ser
 
 ```python
 from canary_framework import service, after_config, after_init, before_startup, before_shutdown
+from canary_framework.core.service import ServiceBase
 
 @service()
-class Cache:
+class Cache(ServiceBase):
     def __init__(self):
         self.store = {}
         self.connection = None

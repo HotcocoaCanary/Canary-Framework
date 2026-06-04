@@ -2,7 +2,7 @@
 
 import pytest
 
-from canary_framework.common.markers import ROUTE_ATTR, get_router_meta, is_cf_router
+from canary_framework.common import ROUTE_ATTR, get_router_meta, is_cf_router
 from canary_framework.core.router import RouterBase
 from canary_framework.decorators.router import (
     delete,
@@ -22,7 +22,7 @@ class TestRouterDecorator:
         """Test @router marks class as router."""
 
         @router()
-        class MyRouter:
+        class MyRouter(RouterBase):
             pass
 
         assert is_cf_router(MyRouter)
@@ -31,7 +31,7 @@ class TestRouterDecorator:
         """Test @router makes class inherit from RouterBase."""
 
         @router()
-        class MyRouter:
+        class MyRouter(RouterBase):
             pass
 
         assert issubclass(MyRouter, RouterBase)
@@ -40,7 +40,7 @@ class TestRouterDecorator:
         """Test @router sets metadata."""
 
         @router()
-        class MyRouter:
+        class MyRouter(RouterBase):
             pass
 
         meta = get_router_meta(MyRouter)
@@ -54,7 +54,7 @@ class TestRouterDecorator:
         """Test @router with prefix."""
 
         @router(prefix="/api")
-        class MyRouter:
+        class MyRouter(RouterBase):
             pass
 
         meta = get_router_meta(MyRouter)
@@ -65,7 +65,7 @@ class TestRouterDecorator:
         """Test @router with tags."""
 
         @router(tags=["api", "v1"])
-        class MyRouter:
+        class MyRouter(RouterBase):
             pass
 
         meta = get_router_meta(MyRouter)
@@ -76,7 +76,7 @@ class TestRouterDecorator:
         """Test @router collects routes."""
 
         @router()
-        class MyRouter:
+        class MyRouter(RouterBase):
             @get("/test")
             async def test_route(self) -> None:
                 pass

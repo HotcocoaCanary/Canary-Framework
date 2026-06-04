@@ -1,5 +1,6 @@
-"""Decorator API — ``@service``, ``@module``, ``@router``, HTTP methods, and lifecycle hooks."""
+"""Decorator API — ``@service``, ``@module``, ``@router``, HTTP methods, lifecycle hooks, and ``@config``."""
 
+from canary_framework.decorators.config import config
 from canary_framework.decorators.lifecycle import (
     after_config,
     after_init,
@@ -22,6 +23,7 @@ __all__ = [
     "after_init",
     "before_shutdown",
     "before_startup",
+    "config",
     "delete",
     "get",
     "module",
