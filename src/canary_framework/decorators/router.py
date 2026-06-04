@@ -272,17 +272,16 @@ def patch(
 def router(
     prefix: str = "",
     *,
-    deps: list[type] | None = None,
     tags: list[str] | None = None,
 ) -> Callable[[type], type[RouterBase]]:
     """声明一个类为路由服务。
 
     将@service语义与HTTP路由分组相结合。
     路由名称自动生成为``类名 + Router``。
+    依赖通过类的类型注解自动检测。
 
     Args:
         prefix: 应用于此组中所有路由的URL前缀。
-        deps: 依赖类列表。
         tags: 此路由组的OpenAPI标签。
 
     Returns:
@@ -292,16 +291,15 @@ def router(
 
     Combines ``@service`` semantics with HTTP route grouping.
     The router name is auto-generated as ``ClassName + Router``.
+    Dependencies are auto-detected from class type annotations.
 
     Args:
         prefix: URL prefix applied to all routes in this group.
-        deps: Dependency classes.
         tags: OpenAPI tags for this route group.
 
     Returns:
         The decorated class.
     """
-    _deps = list(deps or ())
     _tags = list(tags or [])
 
     def decorator(cls: type) -> type[RouterBase]:
@@ -314,7 +312,6 @@ def router(
 
         meta = RouterMeta(
             name=name,
-            deps=_deps,
             prefix=prefix,
             tags=_tags,
             routes=routes,

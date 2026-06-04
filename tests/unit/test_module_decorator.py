@@ -40,21 +40,7 @@ class TestModuleDecorator:
 
         meta = get_module_meta(MyModule)
         assert meta.name == "MyModuleModule"
-        assert meta.deps == []
         assert meta.services == []
-
-    def test_module_decorator_with_deps(self) -> None:
-        """Test @module with dependencies."""
-
-        class Dep:
-            pass
-
-        @module(deps=[Dep])
-        class MyModule:
-            pass
-
-        meta = get_module_meta(MyModule)
-        assert meta.deps == [Dep]
 
     def test_module_decorator_with_services(self) -> None:
         """Test @module with services."""

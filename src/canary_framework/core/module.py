@@ -30,8 +30,9 @@ from canary_framework.common import (
     is_cf_router,
     is_cf_service,
 )
+from canary_framework.common.markers import resolve_deps
 from canary_framework.core.service import ServiceBase
-from canary_framework.engine.injector import inject_deps, to_snake, topological_sort
+from canary_framework.engine.injector import topological_sort
 from canary_framework.engine.logging import ensure_logging, get_logger
 from canary_framework.engine.openapi import generate_openapi_schema
 from canary_framework.engine.registry import Registry
@@ -146,10 +147,11 @@ class ModuleBase(ServiceBase):
             inst = entry.instance
             if inst is None:
                 raise DependencyInjectionError(f"Service '{name}' instance is None during wiring.")
-            inject_deps(inst, entry, registry)
+            for attr_name, dep_cls in resolve_deps(type(inst)).items():
+                setattr(inst, attr_name, registry.get_by_class(dep_cls).instance)
             if isinstance(inst, ModuleBase):
                 inst._cf_parent_registry = registry
-            setattr(self, to_snake(entry.cls.__name__), inst)
+            setattr(self, entry.cls.__name__, inst)
 
         for name in self._cf_startup_order:
             entry = registry.get_by_name(name)
@@ -394,15 +396,15 @@ class ModuleBase(ServiceBase):
         if is_cf_module(cls):
             mod_meta = get_module_meta(cls)
             registry.register(cls, meta=mod_meta)
-            for dep in mod_meta.deps:
-                self._register_entry_with_deps(dep, registry)
+            for dep_cls in resolve_deps(cls).values():
+                self._register_entry_with_deps(dep_cls, registry)
             return
 
         if is_cf_service(cls):
             svc_meta = get_service_meta(cls)
             registry.register(cls, meta=svc_meta)
-            for dep in svc_meta.deps:
-                self._register_entry_with_deps(dep, registry)
+            for dep_cls in resolve_deps(cls).values():
+                self._register_entry_with_deps(dep_cls, registry)
             return
 
         raise TypeError(f"'{cls.__name__}' is not decorated with @service or @module.")

@@ -34,15 +34,17 @@ class TestComplexApp:
             def get_all(self) -> list[User]:
                 return self.users
 
-        @router(deps=[UserService])
+        @router()
         class UserRouter:
+            user_service: UserService
+
             @get("/users")
             async def list_users(self) -> list[User]:
-                return self.user_service.get_all()  # type: ignore[attr-defined, no-any-return]
+                return self.user_service.get_all()  # type: ignore[attr-defined, no-any-return]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
 
             @post("/users", request_model=User)
             async def create_user(self, user: User) -> User:
-                return self.user_service.create(user)  # type: ignore[attr-defined, no-any-return]
+                return self.user_service.create(user)  # type: ignore[attr-defined, no-any-return]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
 
         @module(services=[UserService, UserRouter])
         class UserModule:
@@ -67,8 +69,10 @@ class TestComplexApp:
             def get_all(self) -> list[Product]:
                 return self.products
 
-        @router(deps=[ProductService])
+        @router()
         class ProductRouter:
+            product_service: ProductService
+
             @get("/products")
             async def list_products(self) -> list[Product]:
                 return self.product_service.get_all()  # type: ignore[attr-defined, no-any-return]

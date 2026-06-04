@@ -14,7 +14,6 @@ Provides service registration, lookup, and iteration with parent-child inheritan
 from __future__ import annotations
 
 from canary_framework.common import (
-    CF_NAME_ATTR,
     ServiceEntry,
     ServiceMeta,
     ServiceNotFoundError,
@@ -76,12 +75,7 @@ class Registry:
         if name in self._by_name:
             raise ValueError(f"Service/Module '{name}' is already registered.")
 
-        entry = ServiceEntry(
-            cls=cls,
-            name=name,
-            deps=list(meta.deps),
-            dep_names=[getattr(d, CF_NAME_ATTR, d.__name__) for d in meta.deps],
-        )
+        entry = ServiceEntry(cls=cls, name=name)
         self._by_name[name] = entry
         self._by_class[cls] = entry
         _log.debug("Registered service/module: %s -> %s", cls.__name__, name)

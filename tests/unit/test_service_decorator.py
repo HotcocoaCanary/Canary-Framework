@@ -38,17 +38,3 @@ class TestServiceDecorator:
 
         meta = get_service_meta(MyService)
         assert meta.name == "MyServiceService"
-        assert meta.deps == []
-
-    def test_service_decorator_with_deps(self) -> None:
-        """Test @service with dependencies."""
-
-        class Dep:
-            pass
-
-        @service(deps=[Dep])
-        class MyService:
-            pass
-
-        meta = get_service_meta(MyService)
-        assert meta.deps == [Dep]

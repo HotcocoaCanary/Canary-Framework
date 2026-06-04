@@ -62,9 +62,9 @@ class TestModuleRegistry:
             def get_value(self) -> str:
                 return "shared"
 
-        @service(deps=[SharedService])
+        @service()
         class ChildService:
-            pass
+            shared_service: SharedService
 
         @module(services=[SharedService, ChildService])
         class ChildModule:
@@ -78,6 +78,6 @@ class TestModuleRegistry:
         await app.configure()  # type: ignore[attr-defined]
 
         # Check that shared service is available
-        assert app.child_module is not None  # type: ignore[attr-defined]
-        assert hasattr(app.child_module.child_service, "shared_service")  # type: ignore[attr-defined]
-        assert app.child_module.child_service.shared_service.get_value() == "shared"  # type: ignore[attr-defined]
+        assert app.ChildModule is not None  # type: ignore[attr-defined]
+        assert hasattr(app.ChildModule.ChildService, "shared_service")  # type: ignore[attr-defined]
+        assert app.ChildModule.ChildService.shared_service.get_value() == "shared"  # type: ignore[attr-defined]

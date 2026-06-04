@@ -56,8 +56,10 @@ class TestAsyncOperations:
                 self.count += 1
                 return self.count
 
-        @router(deps=[CounterService])
+        @router()
         class CounterRouter:
+            counter_service: CounterService
+
             @get("/increment")
             async def increment(self) -> dict[str, int]:
                 result = await self.counter_service.increment()  # type: ignore[attr-defined]
@@ -83,7 +85,7 @@ class TestAsyncOperations:
                 assert response.status_code == 200
 
             # Count should be 5
-            assert app.counter_router.counter_service.count == 5  # type: ignore[attr-defined]
+            assert app.CounterRouter.counter_service.count == 5  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_long_running_operations(self) -> None:
@@ -95,8 +97,10 @@ class TestAsyncOperations:
                 await asyncio.sleep(seconds)
                 return {"status": "done", "duration": seconds}
 
-        @router(deps=[LongTaskService])
+        @router()
         class TaskRouter:
+            long_task_service: LongTaskService
+
             @get("/task?seconds={seconds}")
             async def run_task(self, seconds: float) -> dict[str, str | float]:
                 return await self.long_task_service.do_work(seconds)  # type: ignore[attr-defined, no-any-return]

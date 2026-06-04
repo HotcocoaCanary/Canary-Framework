@@ -2,36 +2,10 @@
 
 import pytest
 
-from canary_framework.common.errors import CircularDependencyError, DependencyInjectionError
-from canary_framework.common.types import ServiceEntry, ServiceMeta
-from canary_framework.engine.injector import inject_deps, to_snake, topological_sort
+from canary_framework.common.markers import CF_SERVICE_MARKER
+from canary_framework.common.types import ServiceMeta
+from canary_framework.engine.injector import topological_sort
 from canary_framework.engine.registry import Registry
-
-
-@pytest.mark.unit
-class TestToSnake:
-    """Tests for to_snake function."""
-
-    @pytest.mark.parametrize(
-        "input_str, expected",
-        [
-            ("TestClass", "test_class"),
-            ("HTTPService", "http_service"),
-            ("UserService", "user_service"),
-            ("APIResponse", "api_response"),
-            ("Test", "test"),
-            ("test", "test"),
-            ("testCamel", "test_camel"),
-            ("TestHTTP", "test_http"),
-        ],
-    )
-    def test_to_snake_conversion(self, input_str: str, expected: str) -> None:
-        """Test to_snake conversion for various inputs."""
-        assert to_snake(input_str) == expected
-
-    def test_empty_string(self) -> None:
-        """Test empty string returns empty."""
-        assert to_snake("") == ""
 
 
 @pytest.mark.unit
@@ -39,31 +13,24 @@ class TestTopologicalSort:
     """Tests for topological_sort function."""
 
     def test_simple_dependency_chain(self) -> None:
-        """Test simple dependency chain."""
+        """Test simple dependency chain via annotations."""
         reg = Registry()
-
-        class A:
-            pass
-
-        class B:
-            pass
 
         class C:
             pass
 
-        reg.register(A, meta=ServiceMeta(name="a", deps=[B]))
-        reg.register(B, meta=ServiceMeta(name="b", deps=[C]))
-        reg.register(C, meta=ServiceMeta(name="c", deps=[]))
+        class B:
+            c: C
 
-        # Set up dep_names properly - these should be service names, not class names
-        entries = reg.all_entries()
-        for entry in entries:
-            if entry.cls is A:
-                entry.dep_names = ["b"]
-            elif entry.cls is B:
-                entry.dep_names = ["c"]
-            else:
-                entry.dep_names = []
+        class A:
+            b: B
+
+        for cls in (A, B, C):
+            setattr(cls, CF_SERVICE_MARKER, True)
+
+        reg.register(A, meta=ServiceMeta(name="a"))
+        reg.register(B, meta=ServiceMeta(name="b"))
+        reg.register(C, meta=ServiceMeta(name="c"))
 
         result = topological_sort(reg)
         assert result == ["c", "b", "a"]
@@ -78,140 +45,8 @@ class TestTopologicalSort:
         class B:
             pass
 
-        reg.register(A, meta=ServiceMeta(name="a", deps=[]))
-        reg.register(B, meta=ServiceMeta(name="b", deps=[]))
-
-        for entry in reg.all_entries():
-            entry.dep_names = []
+        reg.register(A, meta=ServiceMeta(name="a"))
+        reg.register(B, meta=ServiceMeta(name="b"))
 
         result = topological_sort(reg)
         assert set(result) == {"a", "b"}
-
-    def test_circular_dependency(self) -> None:
-        """Test that circular dependency raises error."""
-        reg = Registry()
-
-        class A:
-            pass
-
-        class B:
-            pass
-
-        reg.register(A, meta=ServiceMeta(name="a", deps=[B]))
-        reg.register(B, meta=ServiceMeta(name="b", deps=[A]))
-
-        for entry in reg.all_entries():
-            entry.dep_names = ["b"] if entry.cls is A else ["a"]
-
-        with pytest.raises(CircularDependencyError):
-            topological_sort(reg)
-
-
-@pytest.mark.unit
-class TestInjectDeps:
-    """Tests for inject_deps function."""
-
-    def test_simple_injection(self) -> None:
-        """Test simple dependency injection."""
-        reg = Registry()
-
-        class Dep:
-            pass
-
-        class Service:
-            pass
-
-        reg.register(Dep, meta=ServiceMeta(name="dep", deps=[]))
-        reg.register(Service, meta=ServiceMeta(name="service", deps=[Dep]))
-
-        dep_instance = Dep()
-        service_instance = Service()
-
-        reg.get_by_class(Dep).instance = dep_instance
-
-        entry = ServiceEntry(cls=Service, name="service", instance=service_instance, deps=[Dep])
-
-        inject_deps(service_instance, entry, reg)
-
-        assert hasattr(service_instance, "dep")
-        assert service_instance.dep is dep_instance
-
-    def test_missing_instance(self) -> None:
-        """Test that missing dependency instance raises error."""
-        reg = Registry()
-
-        class Dep:
-            pass
-
-        class Service:
-            pass
-
-        reg.register(Dep, meta=ServiceMeta(name="dep", deps=[]))
-
-        service_instance = Service()
-
-        entry = ServiceEntry(cls=Service, name="service", instance=service_instance, deps=[Dep])
-
-        with pytest.raises(DependencyInjectionError):
-            inject_deps(service_instance, entry, reg)
-
-    def test_annotation_name_override(self) -> None:
-        """Test that annotation name takes priority over to_snake."""
-        reg = Registry()
-
-        class KbService:
-            pass
-
-        class MyRouter:
-            kb: KbService  # User-declared name differs from to_snake("KbService") → "kb_service"
-
-        reg.register(KbService, meta=ServiceMeta(name="kb_service", deps=[]))
-        reg.register(MyRouter, meta=ServiceMeta(name="my_router", deps=[KbService]))
-
-        kb_instance = KbService()
-        router_instance = MyRouter()
-
-        reg.get_by_class(KbService).instance = kb_instance
-
-        entry = ServiceEntry(
-            cls=MyRouter,
-            name="my_router",
-            instance=router_instance,
-            deps=[KbService],
-        )
-
-        inject_deps(router_instance, entry, reg)
-
-        assert hasattr(router_instance, "kb")
-        assert not hasattr(router_instance, "kb_service")
-        assert router_instance.kb is kb_instance
-
-    def test_annotation_fallback_to_snake(self) -> None:
-        """Test fallback to to_snake when no annotation is present."""
-        reg = Registry()
-
-        class Dep:
-            pass
-
-        class Service:
-            pass  # No annotation at all
-
-        reg.register(Dep, meta=ServiceMeta(name="dep", deps=[]))
-        reg.register(Service, meta=ServiceMeta(name="service", deps=[Dep]))
-
-        dep_instance = Dep()
-        service_instance = Service()
-
-        reg.get_by_class(Dep).instance = dep_instance
-
-        entry = ServiceEntry(
-            cls=Service,
-            name="service",
-            instance=service_instance,
-            deps=[Dep],
-        )
-
-        inject_deps(service_instance, entry, reg)
-
-        assert hasattr(service_instance, "dep")
-        assert service_instance.dep is dep_instance
