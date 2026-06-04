@@ -58,11 +58,11 @@ class TestSimpleApp:
 
             @get("/todos")
             async def list_todos(self) -> list[dict[str, int | str | bool]]:
-                return [todo.model_dump() for todo in self.todo_service.get_all()]  # type: ignore[attr-defined]  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
+                return [todo.model_dump() for todo in self.todo_service.get_all()]  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
 
             @post("/todos", request_model=TodoItem)
             async def create_todo(self, todo: TodoItem) -> dict[str, int | str | bool]:
-                created = self.todo_service.create(todo)  # type: ignore[attr-defined]  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
+                created = self.todo_service.create(todo)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
                 return dict(created.model_dump())
 
         # Define the main module

@@ -15,23 +15,21 @@ Instantiation → Configuration → Initialization → Startup → Shutdown
 The service instance is created with `__init__()`:
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     def __init__(self):
-        # Initialize basic attributes
         self.connected = False
         self.data = []
 ```
 
 ### 2. Configuration
 
-The `configure(config)` method is called, where you can set up connections and access configuration:
+The `configure(config_instance)` method is called, where you can set up connections and access configuration:
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def configure(self, config_instance=None):
-        # Access configuration
         if config_instance:
             self.config = config_instance
 ```
@@ -41,11 +39,10 @@ Use `@after_config` hook to run code after configuration:
 ```python
 from canary_framework import after_config
 
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     @after_config
     async def connect(self):
-        # Connect to database
         self.connection = await connect_to_db(self.config.db_url)
 ```
 
@@ -54,10 +51,9 @@ class DatabaseService:
 The `init()` method is called after all services are configured:
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def init(self):
-        # Initialize service after all dependencies are ready
         pass
 ```
 
@@ -66,11 +62,10 @@ Use `@after_init` hook to run code after initialization:
 ```python
 from canary_framework import after_init
 
-@service(name="user_service")
+@service()
 class UserService:
     @after_init
     async def seed_default_users(self):
-        # Create default users if needed
         if not await self.db.has_users():
             await self.db.create_default_users()
 ```
@@ -80,10 +75,9 @@ class UserService:
 The `startup()` method is called when the application is ready to start:
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def startup(self):
-        # Start background tasks, begin processing, etc.
         pass
 ```
 
@@ -92,11 +86,10 @@ Use `@before_startup` hook to run code before startup:
 ```python
 from canary_framework import before_startup
 
-@service(name="server")
-class ServerService:
+@service()
+class Server:
     @before_startup
     async def verify_connections(self):
-        # Verify all connections are healthy before serving
         assert self.db.connection is not None
         assert self.cache.connection is not None
 ```
@@ -106,10 +99,9 @@ class ServerService:
 The `shutdown()` method is called when the application is stopping:
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def shutdown(self):
-        # Cleanup resources
         pass
 ```
 
@@ -118,11 +110,10 @@ Use `@before_shutdown` hook to run code before shutdown:
 ```python
 from canary_framework import before_shutdown
 
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     @before_shutdown
     async def disconnect(self):
-        # Disconnect gracefully
         await self.connection.close()
 ```
 
@@ -142,16 +133,14 @@ Four decorators are available for hooking into the lifecycle:
 Hooks can be either synchronous or asynchronous:
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     @after_config
     def sync_hook(self):
-        # Synchronous hook
         print("Configured")
-    
+
     @after_init
     async def async_hook(self):
-        # Asynchronous hook
         await some_async_operation()
 ```
 
@@ -160,11 +149,11 @@ class MyService:
 Modules coordinate the lifecycle of their child services:
 
 ```python
-@module(name="app", services=[ServiceA, ServiceB])
-class AppModule:
+@module(services=[ServiceA, ServiceB])
+class App:
     pass
 
-app = AppModule()
+app = App()
 
 # Configure all services in dependency order
 await app.configure(config)
@@ -182,10 +171,10 @@ await app.shutdown()
 ```
 
 The execution order follows topological sort:
-- **Configure**: A → B
-- **Init**: A → B
-- **Startup**: A → B
-- **Shutdown**: B → A
+- **Configure**: dependencies first (A → B)
+- **Init**: dependencies first (A → B)
+- **Startup**: dependencies first (A → B)
+- **Shutdown**: reverse order (B → A)
 
 ## Complete Lifecycle Example
 
@@ -197,49 +186,51 @@ from canary_framework import (
 
 calls = []
 
-@service(name="a")
-class ServiceA:
+@service()
+class A:
     @after_config
     def config_a(self):
         calls.append("A: after_config")
-    
+
     @after_init
     def init_a(self):
         calls.append("A: after_init")
-    
+
     @before_startup
     def startup_a(self):
         calls.append("A: before_startup")
-    
+
     @before_shutdown
     def shutdown_a(self):
         calls.append("A: before_shutdown")
 
-@service(name="b", deps=[ServiceA])
-class ServiceB:
+@service()
+class B:
+    a: A  # B depends on A
+
     @after_config
     def config_b(self):
         calls.append("B: after_config")
-    
+
     @after_init
     def init_b(self):
         calls.append("B: after_init")
-    
+
     @before_startup
     def startup_b(self):
         calls.append("B: before_startup")
-    
+
     @before_shutdown
     def shutdown_b(self):
         calls.append("B: before_shutdown")
 
-@module(name="app", services=[ServiceA, ServiceB])
-class AppModule:
+@module(services=[A, B])
+class App:
     pass
 
 # Run lifecycle
-app = AppModule()
-await app.configure()
+app = App()
+await app.configure(config)
 await app.init()
 await app.startup()
 await app.shutdown()
@@ -262,12 +253,11 @@ When running as an ASGI application, the framework automatically handles the lif
 ```python
 import uvicorn
 
-@module(name="app", services=[...])
-class AppModule:
+@module(services=[...])
+class App:
     pass
 
-# uvicorn handles the lifecycle events
-uvicorn.run("main:AppModule", lifespan="on")
+uvicorn.run("main:App", lifespan="on")
 ```
 
 The ASGI lifespan protocol will:
@@ -284,15 +274,14 @@ class AppConfig:
         self.database_url = "sqlite:///mydb.db"
         self.debug = True
 
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     @after_config
     async def connect(self):
-        # Access config via self.config
         url = self.config.database_url
         self.connection = await connect(url)
 
-app = AppModule()
+app = App()
 await app.configure(AppConfig())
 ```
 
@@ -307,15 +296,15 @@ The framework automatically configures logging during `configure()`. No manual
 ```python
 from canary_framework import module
 
-@module(name="app", services=[...])
-class AppModule:
+@module(services=[...])
+class App:
     pass
 
 class AppConfig:
     def __init__(self):
         self.database_url = "sqlite:///mydb.db"
 
-app = AppModule()
+app = App()
 await app.configure(AppConfig())
 # Framework logs now visible on stdout:
 # [2026-06-02 13:00:00] cf.module             INFO     Configuring module: AppModule
@@ -333,8 +322,7 @@ class AppConfig:
 Valid levels: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, `"CRITICAL"`.
 
 **Manual handler**: If you have already configured a handler on the root logger
-or the `cf` logger, the framework skips its own setup. This allows you to use
-your own logging configuration freely.
+or the `cf` logger, the framework skips its own setup.
 
 ## Error Handling
 
@@ -344,7 +332,7 @@ If a hook raises an exception, it's wrapped in `LifecycleHookError`:
 from canary_framework.common import LifecycleHookError
 
 try:
-    await app.configure()
+    await app.configure(config)
 except LifecycleHookError as e:
     print(f"Lifecycle error: {e}")
 ```

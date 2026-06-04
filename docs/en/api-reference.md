@@ -10,20 +10,20 @@ from canary_framework import (
     service, module, router,
     get, post, put, delete, patch,
     after_config, after_init, before_startup, before_shutdown,
-    
+
     # Base Classes
     ServiceBase, ModuleBase, RouterBase,
-    
+
     # Exceptions
     CanaryFrameworkError,
     DependencyInjectionError,
     CircularDependencyError,
     LifecycleHookError,
     ServiceNotFoundError,
-    
+
     # Enums
     LifecycleHook,
-    
+
     # Version
     __version__
 )
@@ -39,17 +39,18 @@ Marks a class as a service.
 
 **Signature:**
 ```python
-def service(name: str, *, deps: List[type] = None) -> Callable[[type], type[ServiceBase]]
+def service() -> Callable[[type], type[ServiceBase]]
 ```
 
 **Parameters:**
-- `name` (str, required): Unique identifier for the service
-- `deps` (List[type], optional): List of service classes this service depends on
+- None. The `name` and `deps` parameters have been removed.
+
+The service name is auto-generated as `ClassName` + `"Service"`. Dependencies are declared via type annotations on the class body.
 
 **Example:**
 ```python
-@service(name="database", deps=[ConfigService])
-class DatabaseService:
+@service()
+class Database:
     pass
 ```
 
@@ -57,28 +58,25 @@ class DatabaseService:
 
 ### @module
 
-Marks a class as a module.
+Marks a class as a module container.
 
 **Signature:**
 ```python
 def module(
-    name: str,
     *,
-    deps: List[type] = None,
     services: List[type] = None
 ) -> Callable[[type], type[ModuleBase]]
 ```
 
 **Parameters:**
-- `name` (str, required): Unique identifier for the module
-- `deps` (List[type], optional): Dependencies for the module
-- `services` (List[type], optional): Services/modules this module contains
-- `config` (type, optional): Configuration class for the module
+- `services` (List[type], keyword-only): Services, routers, and sub-modules this module contains
+
+The `name` and `deps` parameters have been removed. The module name is auto-generated as `ClassName` + `"Module"`.
 
 **Example:**
 ```python
-@module(name="app", services=[DatabaseService, ApiRouter])
-class AppModule:
+@module(services=[Database, Auth, Api])
+class App:
     pass
 ```
 
@@ -91,24 +89,22 @@ Marks a class as a router.
 **Signature:**
 ```python
 def router(
-    name: str = "",
     prefix: str = "",
     *,
-    deps: List[type] = None,
     tags: List[str] = None
 ) -> Callable[[type], type[RouterBase]]
 ```
 
 **Parameters:**
-- `prefix` (str, optional): URL prefix for all routes
-- `name` (str, optional): Unique identifier for the router
-- `deps` (List[type], optional): Dependencies for the router
-- `tags` (List[str], optional): OpenAPI tags for documentation
+- `prefix` (str, positional, default `""`): URL prefix for all routes
+- `tags` (List[str], keyword-only): OpenAPI tags for documentation
+
+The `name` and `deps` parameters have been removed. The router name is auto-generated as `ClassName` + `"Router"`. Dependencies are declared via type annotations.
 
 **Example:**
 ```python
-@router(name="api", prefix="/api", deps=[UserService])
-class ApiRouter:
+@router(prefix="/api", tags=["API"])
+class Api:
     pass
 ```
 
@@ -120,26 +116,40 @@ Mark methods as route handlers.
 
 **Signatures:**
 ```python
-def get(path: str) -> Callable[[HookFunction], HookFunction]
-def post(path: str) -> Callable[[HookFunction], HookFunction]
-def put(path: str) -> Callable[[HookFunction], HookFunction]
-def delete(path: str) -> Callable[[HookFunction], HookFunction]
-def patch(path: str) -> Callable[[HookFunction], HookFunction]
+def get(path: str, **kwargs) -> Callable
+def post(path: str, **kwargs) -> Callable
+def put(path: str, **kwargs) -> Callable
+def delete(path: str, **kwargs) -> Callable
+def patch(path: str, **kwargs) -> Callable
 ```
 
 **Parameters:**
 - `path` (str, required): URL path for the route
+- `summary` (str): Short summary for OpenAPI
+- `description` (str): Detailed description for OpenAPI
+- `request_model` (Pydantic BaseModel): Auto-parse request body into this model. Passed as `body` parameter.
+- `response_model` (Pydantic BaseModel): Response data model for OpenAPI
+- `responses` (dict): Custom response definitions
+- `tags` (list[str]): OpenAPI tags
+- `deprecated` (bool): Mark as deprecated
+- `operation_id` (str): Unique operation identifier
+- `path_params` (dict): Path parameter definitions for schema enrichment
+- `query_params` (dict): Query parameter definitions for schema enrichment
+
+Route handlers do **not** receive a `request` parameter. Path parameters, query parameters, and request body are auto-bound.
 
 **Example:**
 ```python
-@router(name="users")
-class UsersRouter:
+@router(prefix="/users")
+class Users:
     @get("/{user_id}")
-    async def get_user(self, request):
+    async def get_user(self, user_id: int):
+        # user_id auto-bound from URL path
         pass
-    
-    @post("/")
-    async def create_user(self, request):
+
+    @post("/", request_model=UserCreate)
+    async def create_user(self, body: UserCreate):
+        # body auto-parsed from request
         pass
 ```
 
@@ -151,20 +161,20 @@ Mark methods as lifecycle hooks.
 
 **Signatures:**
 ```python
-def after_config(func: HookFunction) -> HookFunction
-def after_init(func: HookFunction) -> HookFunction
-def before_startup(func: HookFunction) -> HookFunction
-def before_shutdown(func: HookFunction) -> HookFunction
+def after_config(func) -> HookFunction
+def after_init(func) -> HookFunction
+def before_startup(func) -> HookFunction
+def before_shutdown(func) -> HookFunction
 ```
 
 **Example:**
 ```python
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     @after_config
     async def connect(self):
         pass
-    
+
     @before_shutdown
     async def disconnect(self):
         pass
@@ -212,7 +222,7 @@ Base class for modules, extends ServiceBase.
 - `async shutdown()`: Shutdown module and all services
 - `async __call__(scope, receive, send)`: ASGI app interface
 - `async _handle_lifespan(receive, send)`: Handle ASGI lifespan events
-- `_register_entry_with_deps(cls, registry)`: Recursively register services
+- `_register_entry_with_deps(cls, registry)`: Recursively register services with annotation-resolved deps
 
 ---
 
@@ -298,11 +308,11 @@ Configuration error.
 Constants and helpers for identifying framework classes.
 
 **Constants:**
-- `CF_SERVICE_MARKER`: "__cf_service__"
-- `CF_MODULE_MARKER`: "__cf_module__"
-- `CF_ROUTER_MARKER`: "__cf_router__"
-- `CF_NAME_ATTR`: "__cf_name__"
-- `ROUTE_ATTR`: "__cf_route__"
+- `CF_SERVICE_MARKER`: `"__cf_service__"`
+- `CF_MODULE_MARKER`: `"__cf_module__"`
+- `CF_ROUTER_MARKER`: `"__cf_router__"`
+- `CF_NAME_ATTR`: `"__cf_name__"`
+- `ROUTE_ATTR`: `"__cf_route__"`
 - `CF_HOOK_MARKER_MAP`: Mapping of LifecycleHook to marker strings
 
 **Functions:**
@@ -322,40 +332,40 @@ Data classes and type aliases.
 ```python
 @dataclass
 class ServiceMeta:
-    name: str
-    deps: List[type] = field(default_factory=list)
+    name: str                       # Auto-generated service name (e.g., "DatabaseService")
+    deps: Dict[str, type] = {}      # Dependencies resolved from annotations
 ```
 
 **ModuleMeta:**
 ```python
 @dataclass
 class ModuleMeta(ServiceMeta):
-    services: List[type] = field(default_factory=list)
-    config_cls: type = None
+    services: List[type] = []       # Child services/modules
+    config_cls: type = None         # Configuration class
 ```
 
 **RouterMeta:**
 ```python
 @dataclass
 class RouterMeta(ServiceMeta):
-    prefix: str = ""
-    tags: List[str] = field(default_factory=list)
-    routes: List[HookFunction] = field(default_factory=list)
+    prefix: str = ""                # URL prefix
+    tags: List[str] = []            # OpenAPI tags
+    routes: List[Callable] = []     # Route handler methods
 ```
 
 **ServiceEntry:**
 ```python
 @dataclass
 class ServiceEntry:
-    cls: type
-    name: str
-    instance: object = None
-    deps: List[type] = field(default_factory=list)
-    dep_names: List[str] = field(default_factory=list)
+    cls: type                       # The service class
+    name: str                       # Auto-generated name
+    instance: object = None         # Service instance (None until configured)
+    deps: List[type] = []           # Dependency types resolved from annotations
+    dep_names: List[str] = []       # Annotation key names for dependency injection
 ```
 
 **Type Aliases:**
-- `HookFunction`: Callable[..., object]
+- `HookFunction`: `Callable[..., object]`
 
 ---
 
@@ -382,14 +392,13 @@ Service registry class.
 
 ---
 
-### Injector
+### Resolver
 
-Dependency injection utilities.
+Dependency resolution utilities.
 
 **Functions:**
-- `to_snake(name)`: Convert camelCase to snake_case
-- `topological_sort(registry)`: Sort services in dependency order
-- `inject_deps(instance, entry, registry)`: Inject dependencies into instance
+- `resolve_deps(cls) -> Dict[str, type]`: Read a class's `__annotations__` and return entries whose types are marked with `CF_SERVICE_MARKER`. This replaces the old `deps` list. Each returned key is the annotation attribute name that will be used for `setattr` injection.
+- `topological_sort(registry) -> List[ServiceEntry]`: Sort services in dependency order using Kahn's algorithm. Uses `resolve_deps()` internally to build the dependency graph.
 
 ---
 
@@ -439,11 +448,11 @@ Current version of Canary Framework.
 
 Decorated classes have these internal attributes set:
 
-- `__cf_service__`: `True` if decorated with @service
-- `__cf_module__`: `True` if decorated with @module
-- `__cf_router__`: `True` if decorated with @router
+- `__cf_service__`: `True` if decorated with `@service()`
+- `__cf_module__`: `True` if decorated with `@module()`
+- `__cf_router__`: `True` if decorated with `@router()`
 - `__cf_service_meta__`: Metadata object (ServiceMeta/ModuleMeta/RouterMeta)
-- `__cf_name__`: Service/module name
+- `__cf_name__`: Auto-generated service/module/router name
 
 Hook methods have:
 - `__cf_after_config__`: `True`
@@ -452,4 +461,25 @@ Hook methods have:
 - `__cf_before_shutdown__`: `True`
 
 Route methods have:
-- `__cf_route__`: `{"method": "GET", "path": "/path"}`
+- `__cf_route__`: `{"method": "GET", "path": "/path", ...}`
+
+---
+
+## Migration Notes (from v1 to v2)
+
+Key changes from the old API:
+
+| Old API (v1) | New API (v2) |
+|---|---|
+| `@service(name="foo")` | `@service()` — auto-named |
+| `@service(name="foo", deps=[Bar])` | `@service()` with `bar: Bar` annotation |
+| `@module(name="app", services=[...])` | `@module(services=[...])` — auto-named |
+| `@module(name="app", deps=[...])` | Dependencies declared via annotations |
+| `@router(name="api", prefix="/api", deps=[Svc])` | `@router(prefix="/api")` with `svc: Svc` annotation |
+| `self.database_service` (snake_case injection) | `self.db`, `self.cache` (annotation key name) |
+| `async def handler(self, request)` | `async def handler(self, ...)` — params auto-bound |
+| `request.path_params["user_id"]` | `def handler(self, user_id: int)` |
+| `request.query_params.get("page")` | `def handler(self, page: int = 1)` |
+| `data = await request.json()` | `def handler(self, body: MyModel)` with `request_model` |
+| `app.auth_module` / `app.auth_service` | `app.AuthModule` / `app.AuthService` (class name access) |
+| `inject_deps(instance, entry, registry)` | `setattr(instance, key, resolved)` via annotation keys |

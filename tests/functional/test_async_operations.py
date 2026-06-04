@@ -62,7 +62,7 @@ class TestAsyncOperations:
 
             @get("/increment")
             async def increment(self) -> dict[str, int]:
-                result = await self.counter_service.increment()  # type: ignore[attr-defined]
+                result = await self.counter_service.increment()
                 return {"count": result}
 
         @module(services=[CounterRouter])
@@ -103,7 +103,7 @@ class TestAsyncOperations:
 
             @get("/task?seconds={seconds}")
             async def run_task(self, seconds: float) -> dict[str, str | float]:
-                return await self.long_task_service.do_work(seconds)  # type: ignore[attr-defined, no-any-return]
+                return await self.long_task_service.do_work(seconds)
 
         @module(services=[TaskRouter])
         class TaskApp:
