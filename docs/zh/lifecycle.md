@@ -7,7 +7,7 @@ Canary 框架为服务和模块提供全面的生命周期管理系统。
 每个服务和模块都经过这些阶段：
 
 ```
-实例化 → 配置 → 初始化 → 启动 → 关闭
+实例化 → configure(config_instance) → init() → startup() → shutdown()
 ```
 
 ### 1. 实例化
@@ -15,23 +15,26 @@ Canary 框架为服务和模块提供全面的生命周期管理系统。
 使用 `__init__()` 创建服务实例：
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     def __init__(self):
-        # 初始化基本属性
         self.connected = False
         self.data = []
 ```
 
 ### 2. 配置
 
-调用 `configure(config)` 方法，您可以在其中设置连接和访问配置：
+调用 `configure(config_instance)` 方法。对于模块，此阶段会：
+- 创建注册表并递归注册所有子服务及其依赖
+- 执行拓扑排序
+- 实例化所有服务
+- 解析并注入依赖
+- 按顺序调用每个服务的 `configure()`
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def configure(self, config_instance=None):
-        # 访问配置
         if config_instance:
             self.config = config_instance
 ```
@@ -41,23 +44,21 @@ class MyService:
 ```python
 from canary_framework import after_config
 
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     @after_config
     async def connect(self):
-        # 连接到数据库
         self.connection = await connect_to_db(self.config.db_url)
 ```
 
 ### 3. 初始化
 
-在所有服务配置后调用 `init()` 方法：
+在所有服务配置后调用 `init()` 方法。对于模块，按拓扑顺序传播到所有子服务：
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def init(self):
-        # 在所有依赖项准备好后初始化服务
         pass
 ```
 
@@ -66,24 +67,22 @@ class MyService:
 ```python
 from canary_framework import after_init
 
-@service(name="user_service")
+@service()
 class UserService:
     @after_init
     async def seed_default_users(self):
-        # 如果需要，创建默认用户
         if not await self.db.has_users():
             await self.db.create_default_users()
 ```
 
 ### 4. 启动
 
-当应用准备好启动时调用 `startup()` 方法：
+当应用准备好启动时调用 `startup()` 方法。对于模块，按拓扑顺序传播：
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def startup(self):
-        # 启动后台任务，开始处理等
         pass
 ```
 
@@ -92,24 +91,22 @@ class MyService:
 ```python
 from canary_framework import before_startup
 
-@service(name="server")
-class ServerService:
+@service()
+class Server:
     @before_startup
     async def verify_connections(self):
-        # 在提供服务前验证所有连接正常
         assert self.db.connection is not None
         assert self.cache.connection is not None
 ```
 
 ### 5. 关闭
 
-当应用停止时调用 `shutdown()` 方法：
+当应用停止时调用 `shutdown()` 方法。对于模块，按**逆拓扑顺序**传播：
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def shutdown(self):
-        # 清理资源
         pass
 ```
 
@@ -118,11 +115,10 @@ class MyService:
 ```python
 from canary_framework import before_shutdown
 
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     @before_shutdown
     async def disconnect(self):
-        # 优雅断开连接
         await self.connection.close()
 ```
 
@@ -142,31 +138,29 @@ class DatabaseService:
 钩子可以是同步的或异步的：
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     @after_config
     def sync_hook(self):
-        # 同步钩子
         print("Configured")
-    
+
     @after_init
     async def async_hook(self):
-        # 异步钩子
         await some_async_operation()
 ```
 
 ## 模块生命周期
 
-模块协调其子服务的生命周期：
+模块协调其子服务的生命周期。`configure()` 阶段是 DI 的核心：
 
 ```python
-@module(name="app", services=[ServiceA, ServiceB])
-class AppModule:
+@module(services=[ServiceA, ServiceB])
+class App:
     pass
 
-app = AppModule()
+app = App()
 
-# 按依赖顺序配置所有服务
+# 按依赖顺序配置所有服务（包含 DI 注入）
 await app.configure(config)
 
 # 初始化所有服务
@@ -182,10 +176,31 @@ await app.shutdown()
 ```
 
 执行顺序遵循拓扑排序：
-- **配置**：A → B
-- **初始化**：A → B
-- **启动**：A → B
-- **关闭**：B → A
+- **configure**: A → B（包含 DI 注入：解析注解 → setattr 注入）
+- **init**: A → B
+- **startup**: A → B
+- **shutdown**: B → A（逆序）
+
+### 配置阶段详细步骤
+
+```
+module.configure(config_instance)
+├─ 1. 设置 config 属性
+├─ 2. 初始化日志（从 config_instance.cf_log_level 读取级别）
+├─ 3. 创建 Registry（可继承父注册表）
+├─ 4. 递归注册服务（_register_entry_with_deps）
+│   ├─ 检查幂等性（已在注册表则跳过）
+│   ├─ 注册到 Registry
+│   └─ 通过 resolve_deps(cls) 读取类型注解，递归注册依赖
+├─ 5. topological_sort(registry) — 构建依赖图并排序
+├─ 6. 按拓扑顺序实例化所有服务
+├─ 7. 按拓扑顺序注入依赖
+│   └─ for attr_name, dep_cls in resolve_deps(type(inst)).items():
+│       setattr(inst, attr_name, registry.get_by_class(dep_cls).instance)
+├─ 8. 通过 setattr(self, entry.cls.__name__, inst) 挂载子服务
+├─ 9. 按拓扑顺序调用每个子服务的 configure(config_instance)
+└─ 10. 调用模块自身的 @after_config 钩子
+```
 
 ## 完整生命周期示例
 
@@ -197,48 +212,49 @@ from canary_framework import (
 
 calls = []
 
-@service(name="a")
-class ServiceA:
+@service()
+class A:
     @after_config
     def config_a(self):
         calls.append("A: after_config")
-    
+
     @after_init
     def init_a(self):
         calls.append("A: after_init")
-    
+
     @before_startup
     def startup_a(self):
         calls.append("A: before_startup")
-    
+
     @before_shutdown
     def shutdown_a(self):
         calls.append("A: before_shutdown")
 
-@service(name="b", deps=[ServiceA])
-class ServiceB:
+@service()
+class B:
+    a: AService  # B 依赖 A
+
     @after_config
     def config_b(self):
         calls.append("B: after_config")
-    
+
     @after_init
     def init_b(self):
         calls.append("B: after_init")
-    
+
     @before_startup
     def startup_b(self):
         calls.append("B: before_startup")
-    
+
     @before_shutdown
     def shutdown_b(self):
         calls.append("B: before_shutdown")
 
-@module(name="app", services=[ServiceA, ServiceB])
-class AppModule:
+@module(services=[AService, BService])
+class App:
     pass
 
-# 运行生命周期
-app = AppModule()
+app = App()
 await app.configure()
 await app.init()
 await app.startup()
@@ -262,21 +278,23 @@ await app.shutdown()
 ```python
 import uvicorn
 
-@module(name="app", services=[...])
-class AppModule:
+@module(services=[...])
+class App:
     pass
 
-# uvicorn 处理生命周期事件
-uvicorn.run("main:AppModule", lifespan="on")
+# uvicorn 自动处理生命周期事件
+uvicorn.run("main:AppModule", host="0.0.0.0", port=8000)
 ```
 
 ASGI 生命周期协议将：
 1. 服务器启动时调用 `startup()`
 2. 服务器停止时调用 `shutdown()`
 
+注意：`configure()` 和 `init()` 需要在 uvicorn 启动前手动调用，或者通过自定义启动脚本管理。
+
 ## 配置
 
-在配置阶段传递配置：
+在配置阶段传递配置对象：
 
 ```python
 class AppConfig:
@@ -284,15 +302,14 @@ class AppConfig:
         self.database_url = "sqlite:///mydb.db"
         self.debug = True
 
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     @after_config
     async def connect(self):
-        # 通过 self.config 访问配置
         url = self.config.database_url
         self.connection = await connect(url)
 
-app = AppModule()
+app = App()
 await app.configure(AppConfig())
 ```
 
@@ -306,25 +323,25 @@ await app.configure(AppConfig())
 ```python
 from canary_framework import module
 
-@module(name="app", services=[...])
-class AppModule:
+@module(services=[...])
+class App:
     pass
 
 class AppConfig:
     def __init__(self):
         self.database_url = "sqlite:///mydb.db"
 
-app = AppModule()
+app = App()
 await app.configure(AppConfig())
 # 框架日志现在会输出到 stdout：
-# [2026-06-02 13:00:00] cf.module             INFO     Configuring module: AppModule
+# [2026-06-02 13:00:00] cf.module             INFO     Configuring module: App
 ```
 
 **自定义日志级别**：在配置对象上设置 `cf_log_level` 字段来控制框架日志级别：
 
 ```python
 class AppConfig:
-    cf_log_level: str = "DEBUG"  # 显示 DEBUG 级别的框架日志
+    cf_log_level: str = "DEBUG"
     # ... 其他配置字段 ...
 ```
 

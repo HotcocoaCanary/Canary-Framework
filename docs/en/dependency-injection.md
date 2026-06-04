@@ -1,62 +1,88 @@
 # Dependency Injection
 
-Canary Framework has a built-in dependency injection (DI) system that manages service dependencies automatically.
+Canary Framework has a built-in, annotation-driven dependency injection (DI) system that manages service dependencies automatically.
 
 ## How It Works
 
-1. **Declare dependencies**: Specify which services a service depends on
-2. **Register services**: Services are registered in a registry
-3. **Topological sort**: Services are sorted in dependency order
-4. **Instantiate and inject**: Services are instantiated and dependencies are injected
+1. **Declare dependencies**: Use Python type annotations on your service class
+2. **Resolve**: `resolve_deps(cls)` reads annotations and filters by `CF_SERVICE_MARKER`
+3. **Register**: Services and their dependencies are registered recursively
+4. **Topological sort**: `topological_sort(registry)` builds the dependency graph and determines instantiation order
+5. **Instantiate and inject**: Services are instantiated in order; dependencies set via `setattr` using the annotation key name
 
 ## Declaring Dependencies
 
-Use the `deps` parameter to declare dependencies:
+Use type annotations on the class body to declare dependencies:
 
 ```python
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     pass
 
-@service(name="cache")
-class CacheService:
+@service()
+class Cache:
     pass
 
-@service(name="user_repository", deps=[DatabaseService, CacheService])
+@service()
 class UserRepository:
-    # DatabaseService is available as self.database_service
-    # CacheService is available as self.cache_service
-    pass
+    db: Database    # Auto-injected as self.db
+    cache: Cache    # Auto-injected as self.cache
+
+    async def get_user(self, user_id):
+        cached = await self.cache.get(f"user:{user_id}")
+        if cached:
+            return cached
+        user = await self.db.query(f"SELECT * FROM users WHERE id={user_id}")
+        await self.cache.set(f"user:{user_id}", user)
+        return user
 ```
 
-## Injection Naming
+The annotation key name becomes the attribute name on the instance:
 
-Dependencies are injected as attributes using snake_case naming:
+| Annotation | Injected As |
+|------------|-------------|
+| `db: Database` | `self.db` |
+| `cache: Cache` | `self.cache` |
+| `auth: AuthService` | `self.auth` |
 
-| Class Name | Attribute Name |
-|------------|----------------|
-| `DatabaseService` | `self.database_service` |
-| `UserRepository` | `self.user_repository` |
-| `APIRouter` | `self.api_router` |
+**You choose the attribute name** — simply name the annotation field however you want.
 
 ## Dependency Graph
 
 The framework builds a dependency graph and ensures services are initialized in the correct order:
 
 ```python
-@service(name="a")
+@service()
 class A:
     pass
 
-@service(name="b", deps=[A])
+@service()
 class B:
-    pass
+    a: A  # Depends on A
 
-@service(name="c", deps=[B])
+@service()
 class C:
-    pass
+    b: B  # Depends on B
 
-# Startup order: A → B → C
+# Topological sort determines order: A → B → C
+```
+
+## DI Execution Flow
+
+```
+1. resolve_deps(cls) reads annotations on the class
+   ↓
+2. Filter annotations: keep only types with CF_SERVICE_MARKER
+   ↓
+3. Register each dependency recursively in the registry
+   ↓
+4. topological_sort(registry) builds dependency graph
+   ↓
+5. Instantiate services in topological order
+   ↓
+6. For each service: setattr(instance, attr_name, resolved_dep_instance)
+   ↓
+7. Run lifecycle hooks
 ```
 
 ## Circular Dependencies
@@ -65,38 +91,38 @@ The framework detects and reports circular dependencies:
 
 ```python
 # ❌ This will throw CircularDependencyError
-@service(name="a", deps=["b"])
+@service()
 class A:
-    pass
+    b: B
 
-@service(name="b", deps=["a"])
+@service()
 class B:
-    pass
+    a: A
 ```
 
 ## Shared Instances
 
-Services are singletons within their module - only one instance is created and shared:
+Services are singletons within their module — only one instance is created and shared:
 
 ```python
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     def __init__(self):
-        print("DatabaseService created")  # Only printed once
+        print("Database created")  # Only printed once
 
-@service(name="service1", deps=[DatabaseService])
-class Service1:
+@service()
+class ServiceA:
+    db: Database
+
+@service()
+class ServiceB:
+    db: Database
+
+@module(services=[Database, ServiceA, ServiceB])
+class App:
     pass
 
-@service(name="service2", deps=[DatabaseService])
-class Service2:
-    pass
-
-@module(name="app", services=[DatabaseService, Service1, Service2])
-class AppModule:
-    pass
-
-# Both Service1 and Service2 get the same DatabaseService instance
+# Both ServiceA and ServiceB receive the same Database instance
 ```
 
 ## Parent Registry
@@ -104,53 +130,66 @@ class AppModule:
 Modules can have parent registries, allowing services to be shared across modules:
 
 ```python
-@service(name="shared_db")
+@service()
 class SharedDatabase:
     pass
 
-@service(name="auth_service", deps=[SharedDatabase])
+@service()
 class AuthService:
-    pass
+    db: SharedDatabase
 
-@service(name="product_service", deps=[SharedDatabase])
+@service()
 class ProductService:
-    pass
+    db: SharedDatabase
 
-@module(name="auth", services=[AuthService])
+@module(services=[AuthService])
 class AuthModule:
     pass
 
-@module(name="products", services=[ProductService])
+@module(services=[ProductService])
 class ProductsModule:
     pass
 
-@module(name="app", services=[SharedDatabase, AuthModule, ProductsModule])
-class AppModule:
+@module(services=[SharedDatabase, AuthModule, ProductsModule])
+class App:
     pass
 
 # Both AuthService and ProductService share the same SharedDatabase instance
 ```
 
+## Module Children Access
+
+Module child services are accessible as attributes using the class name:
+
+```python
+@module(services=[Database, Auth])
+class App:
+    pass
+
+app = App()
+await app.configure(config)
+
+# Access children directly by class name
+app.Database    # Database service instance
+app.Auth        # Auth service instance
+```
+
 ## Manual Injection
 
-You can manually inject dependencies if needed:
+You can manually resolve dependencies if needed:
 
 ```python
 from canary_framework.engine.registry import Registry
-from canary_framework.engine.injector import inject_deps
+from canary_framework.engine.injector import topological_sort, resolve_deps
 
-# Create registry
 registry = Registry()
 registry.register(MyService)
-registry.register(MyDependency)
 
-# Create instances
-for entry in registry:
+# resolve_deps reads annotations on MyService to find deps
+# topological_sort uses resolve_deps() to build the full graph
+for entry in topological_sort(registry):
     entry.instance = entry.cls()
-
-# Inject dependencies
-for entry in registry:
-    inject_deps(entry.instance, entry, registry)
+    # Set dependencies via setattr using annotation key names
 ```
 
 ## Service Registry
@@ -162,22 +201,15 @@ from canary_framework.engine.registry import Registry
 
 registry = Registry()
 
-# Register a service
 registry.register(MyService)
 
-# Lookup by name
-entry = registry.get_by_name("my_service")
-
-# Lookup by class
 entry = registry.get_by_class(MyService)
 
-# Check if registered
 if MyService in registry:
     pass
 
-# Get all services
 for entry in registry:
-    print(entry.name)
+    print(entry.cls)
 ```
 
 ## ServiceEntry
@@ -187,23 +219,22 @@ Each service in the registry is represented by a `ServiceEntry`:
 ```python
 @dataclass
 class ServiceEntry:
-    cls: type              # The service class
-    name: str              # Service name
-    instance: object       # Service instance (None until configured)
-    deps: list[type]       # Dependencies
-    dep_names: list[str]   # Dependency names
+    cls: type                  # The service class
+    name: str                  # Auto-generated service name
+    instance: object = None    # Service instance (None until configured)
+    deps: list[type] = []      # Dependencies resolved from annotations
+    dep_names: list[str] = []  # Dependency attribute names
 ```
 
 ## Topological Sort
 
-The framework uses Kahn's algorithm for topological sorting:
+The framework uses Kahn's algorithm for topological sorting, driven by `resolve_deps()`:
 
 ```python
 from canary_framework.engine.injector import topological_sort
 
-# Get the startup order
 order = topological_sort(registry)
-# Returns: ["a", "b", "c"]
+# Returns entries in dependency order
 ```
 
 ## Complete DI Example
@@ -212,48 +243,53 @@ order = topological_sort(registry)
 from canary_framework import module, service
 
 # Layer 1: Infrastructure
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     async def query(self, sql):
         return f"Query: {sql}"
 
-@service(name="cache")
-class CacheService:
+@service()
+class Cache:
     async def get(self, key):
         return None
-    
+
     async def set(self, key, value):
         pass
 
 # Layer 2: Repositories
-@service(name="user_repo", deps=[DatabaseService, CacheService])
-class UserRepository:
+@service()
+class UserRepo:
+    db: Database
+    cache: Cache
+
     async def get_user(self, user_id):
-        cached = await self.cache_service.get(f"user:{user_id}")
+        cached = await self.cache.get(f"user:{user_id}")
         if cached:
             return cached
-        
-        user = await self.database_service.query(f"SELECT * FROM users WHERE id={user_id}")
-        await self.cache_service.set(f"user:{user_id}", user)
+        user = await self.db.query(f"SELECT * FROM users WHERE id={user_id}")
+        await self.cache.set(f"user:{user_id}", user)
         return user
 
 # Layer 3: Services
-@service(name="user_service", deps=[UserRepository])
+@service()
 class UserService:
+    repo: UserRepo
+
     async def get_profile(self, user_id):
-        user = await self.user_repo.get_user(user_id)
+        user = await self.repo.get_user(user_id)
         return {"profile": user}
 
 # Layer 4: Composition
-@module(name="app", services=[DatabaseService, CacheService, UserRepository, UserService])
-class AppModule:
+@module(services=[Database, Cache, UserRepo, UserService])
+class App:
     pass
 ```
 
 ## Design Principles
 
-1. **Explicit dependencies**: Dependencies are declared clearly
-2. **Constructor injection**: No magic, dependencies are set as attributes
-3. **Topological order**: Services start in the right order
-4. **Single instances**: Services are singletons within their scope
-5. **Error detection**: Circular dependencies are caught early
+1. **Annotation-driven**: Dependencies declared with Python type hints — no separate `deps` lists
+2. **Flexible naming**: You control the attribute name via the annotation key
+3. **Automatic resolution**: `resolve_deps()` discovers dependencies by reading annotations
+4. **Topological order**: Services start in the right dependency order
+5. **Single instances**: Services are singletons within their scope
+6. **Error detection**: Circular dependencies are caught early

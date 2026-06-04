@@ -4,68 +4,66 @@ Services are the building blocks of your Canary Framework application. They enca
 
 ## Defining a Service
 
-Use the `@service` decorator to define a service:
+Use the `@service()` decorator to define a service:
 
 ```python
 from canary_framework import service
 
-@service(name="user_repository")
+@service()
 class UserRepository:
     def __init__(self):
         self.users = []
-    
+
     async def get_all(self):
         return self.users
-    
+
     async def add(self, user):
         self.users.append(user)
         return user
 ```
 
-### Service Parameters
+- Services are automatically named `ClassName` + `"Service"` — e.g., `UserRepository` → `UserRepositoryService`
+- No `name` or `deps` parameters are needed
 
-- `name`: (required) A unique identifier for the service
-- `deps`: (optional) A list of service classes this service depends on
+## Declaring Dependencies
 
-## Service Dependencies
-
-Services can depend on other services. Declare dependencies using the `deps` parameter:
+Dependencies are declared via Python type annotations, not a `deps` list:
 
 ```python
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     pass
 
-@service(name="user_service", deps=[DatabaseService])
-class UserService:
+@service()
+class UserRepo:
+    db: Database  # Declared via annotation — auto-injected
+
     async def get_user(self, user_id):
-        # The database service is automatically injected
-        # as self.database_service
-        return await self.database_service.query(...)
+        return await self.db.query(...)
 ```
 
-Dependencies are automatically injected as attributes in snake_case format:
-- `DatabaseService` → `self.database_service`
-- `UserRepository` → `self.user_repository`
+- Annotations are resolved by `resolve_deps()` — only types marked with `CF_SERVICE_MARKER` are treated as dependencies
+- The injected instance is set on the annotation key name (e.g., `self.db` for `db: Database`)
+- **You control the attribute name** — use any valid Python identifier: `db`, `cache`, `repo`, etc.
 
 ## Service Lifecycle
 
 Services go through a well-defined lifecycle:
 
 1. **Instantiation**: Service instance is created
-2. **Configuration**: `configure()` method is called
-3. **Initialization**: `init()` method is called
-4. **Startup**: `startup()` method is called
-5. **Shutdown**: `shutdown()` method is called (when the application stops)
+2. **Configuration**: `configure(config_instance)` is called; `@after_config` hooks run
+3. **Initialization**: `init()` is called; `@after_init` hooks run
+4. **Startup**: `startup()` is called; `@before_startup` hooks run before
+5. **Shutdown**: `@before_shutdown` hooks run, then `shutdown()` is called
 
 You can hook into these phases using lifecycle decorators. See the [Lifecycle](./lifecycle.md) documentation for details.
 
 ## Service Base Class
 
-When you decorate a class with `@service`, it automatically inherits from `ServiceBase`, which provides:
+When you decorate a class with `@service()`, it automatically inherits from `ServiceBase`, which provides:
 
 - `config` attribute: Access to configuration passed during configure phase
-- `configure(config)` method: Configures the service
+- `configure(config_instance=None)` method: Configures the service
 - `init()` method: Initializes the service
 - `startup()` method: Starts the service
 - `shutdown()` method: Shuts down the service
@@ -75,42 +73,50 @@ When you decorate a class with `@service`, it automatically inherits from `Servi
 ```python
 from canary_framework import service, after_config, after_init, before_startup, before_shutdown
 
-@service(name="cache")
-class CacheService:
+@service()
+class Cache:
     def __init__(self):
-        self.cache = {}
+        self.store = {}
         self.connection = None
-    
+
     @after_config
     async def connect(self):
-        # Connect to cache server
         self.connection = "connected"
         print("Cache connected")
-    
+
     @after_init
     async def warmup(self):
-        # Pre-populate cache with common data
-        self.cache["default"] = {"value": "default"}
+        self.store["default"] = {"value": "default"}
         print("Cache warmed up")
-    
+
     @before_startup
     async def verify(self):
-        # Verify cache is ready
         assert self.connection is not None
         print("Cache verified")
-    
+
     @before_shutdown
     async def cleanup(self):
-        # Cleanup resources
         self.connection = None
         print("Cache disconnected")
-    
+
     async def get(self, key):
-        return self.cache.get(key)
-    
+        return self.store.get(key)
+
     async def set(self, key, value):
-        self.cache[key] = value
+        self.store[key] = value
 ```
+
+## Service Naming
+
+Service names are derived automatically from the class name:
+
+| Class Name | Service Name (auto) |
+|------------|---------------------|
+| `Database` | `DatabaseService` |
+| `UserRepository` | `UserRepositoryService` |
+| `Cache` | `CacheService` |
+
+This name is used internally for registry lookups. In most code, you reference services by their class.
 
 ## Testing Services
 
@@ -120,32 +126,23 @@ Services are easy to test because they're plain Python classes:
 import pytest
 
 @pytest.mark.asyncio
-async def test_cache_service():
-    service = CacheService()
-    await service.configure()
-    await service.init()
-    await service.startup()
-    
-    await service.set("key", "value")
-    assert await service.get("key") == "value"
-    
-    await service.shutdown()
+async def test_cache():
+    svc = Cache()
+    await svc.configure()
+    await svc.init()
+    await svc.startup()
+
+    await svc.set("key", "value")
+    assert await svc.get("key") == "value"
+
+    await svc.shutdown()
 ```
-
-## Service Naming
-
-Service names must be unique within a module. The framework automatically converts class names to snake_case for injection:
-
-| Class Name | Injected Attribute |
-|------------|-------------------|
-| `DatabaseService` | `self.database_service` |
-| `UserRepository` | `self.user_repository` |
-| `APIRouter` | `self.api_router` |
 
 ## Best Practices
 
 1. **Single Responsibility**: Each service should do one thing well
 2. **Stateless Design**: Prefer stateless services or manage state explicitly
 3. **Minimal Dependencies**: Only declare dependencies you actually need
-4. **Type Hints**: Use type hints for better readability and IDE support
+4. **Type Annotations**: Use type hints for clear dependency declarations
 5. **Test Coverage**: Write unit tests for each service
+6. **Meaningful Annotation Names**: Choose descriptive names for dependency attributes (e.g., `db` not `d`)

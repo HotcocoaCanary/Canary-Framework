@@ -4,8 +4,9 @@ Canary Framework is a lightweight, decorator-driven Python async service framewo
 
 ## Key Features
 
-- **Decorator-driven**: Use simple decorators to define services, modules, and routes
-- **Dependency injection**: Built-in DI container with automatic dependency resolution
+- **Decorator-driven**: Simple decorators define services, modules, and routes — no boilerplate
+- **Annotation-based DI**: Declare dependencies with Python type annotations — no `deps` lists
+- **Automatic naming**: Service, module, and router names are derived from class names
 - **Lifecycle management**: Complete lifecycle hooks for services and modules
 - **ASGI compatible**: Built on Starlette for high-performance async web applications
 - **Modular architecture**: Compose your application from reusable modules
@@ -24,23 +25,22 @@ Here's a minimal example to get you started:
 ```python
 from canary_framework import module, router, get, post
 
-@router(name="api")
-class ApiRouter:
+@router(prefix="")
+class Api:
     @get("/hello")
-    async def hello(self, request):
+    async def hello(self):
         return {"message": "Hello, Canary!"}
-    
-    @post("/echo")
-    async def echo(self, request):
-        data = await request.json()
-        return {"echo": data}
 
-@module(name="app", services=[ApiRouter])
-class AppModule:
+    @post("/echo")
+    async def echo(self, body: dict):
+        return {"echo": body}
+
+@module(services=[Api])
+class App:
     pass
 
 # Run with uvicorn
-# uvicorn main:AppModule --reload
+# uvicorn main:App --reload
 ```
 
 ## OpenAPI Documentation
@@ -60,8 +60,8 @@ Services are the building blocks of your application, encapsulating business log
 ```python
 from canary_framework import service, after_config
 
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     @after_config
     async def connect(self):
         print("Database connected")
@@ -74,34 +74,36 @@ Modules are containers that organize and compose services:
 ```python
 from canary_framework import module
 
-@module(name="app", services=[DatabaseService, ApiRouter])
-class AppModule:
+@module(services=[Database, Api])
+class App:
     pass
 ```
 
 ### Router
 
-Routers handle HTTP requests:
+Routers handle HTTP requests with auto-bound parameters:
 
 ```python
 from canary_framework import router, get
 
-@router(name="users", prefix="/users")
-class UsersRouter:
+@router(prefix="/users")
+class Users:
     @get("/")
-    async def list_users(self, request):
+    async def list_users(self):
         return {"users": []}
 ```
 
 ### Dependency Injection
 
-Services can declare dependencies, which the framework automatically injects:
+Declare dependencies with type annotations — the framework automatically resolves and injects them:
 
 ```python
-@service(name="user_service", deps=[DatabaseService])
-class UserService:
+@service()
+class UserRepo:
+    db: Database  # Auto-injected by the framework
+
     async def get_user(self, user_id):
-        return await self.database_service.query(...)
+        return await self.db.query(...)
 ```
 
 ## Next Steps
@@ -110,15 +112,15 @@ class UserService:
 - [Services](./services.md) - Learn about service definition and lifecycle
 - [Modules](./modules.md) - Understand module composition
 - [Web Routing](./web.md) - Build web APIs with routing
-- [Dependency Injection](./dependency-injection.md) - Master the DI system
+- [Dependency Injection](./dependency-injection.md) - Master the annotation-based DI system
 - [Lifecycle](./lifecycle.md) - Control service initialization and cleanup
 - [Core Concepts](./core.md) - Dive into the framework internals
 - [API Reference](./api-reference.md) - Complete API documentation
 
 ## Design Principles
 
-1. **Decorator-driven** - Code is configuration
-2. **Async-first** - Built on async/await
-3. **Explicit dependencies** - Clear dependency declarations
-4. **Convention over configuration** - Sensible defaults
-5. **Composability** - Build complex systems through modules
+1. **Decorator-driven** — Code is configuration
+2. **Async-first** — Built on async/await
+3. **Annotation-based DI** — Dependencies declared with type hints
+4. **Automatic naming** — Names derived from class names, no manual strings
+5. **Composability** — Build complex systems through modules

@@ -9,48 +9,50 @@ This document explains the core design principles and internal architecture of C
 The framework uses decorators to keep your code clean and declarative:
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     pass
 ```
 
-Instead of complex configuration files, your code itself is the configuration.
+Your code itself is the configuration — no XML, JSON, or YAML needed.
 
 ### 2. Async-First
 
 Everything is built around async/await for high performance:
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def do_something(self):
         await some_async_operation()
 ```
 
-### 3. Explicit Dependencies
+### 3. Annotation-Based DI
 
-Dependencies are declared explicitly, making your code easier to understand and test:
+Dependencies are declared with Python type annotations, not separate lists:
 
 ```python
-@service(name="my_service", deps=[DatabaseService, CacheService])
-class MyService:
-    pass
+@service()
+class UserService:
+    db: Database      # Auto-resolved and injected
+    cache: Cache      # Auto-resolved and injected
 ```
 
-### 4. Convention Over Configuration
+### 4. Automatic Naming
 
-Sensible defaults reduce boilerplate:
-- Dependencies are auto-injected with snake_case names
-- Lifecycle methods follow a standard pattern
-- Routers are auto-mounted at predictable paths
+Names are derived from class names — no manual strings:
+
+- `@service()` + class `Database` → name `DatabaseService`
+- `@module(services=[...])` + class `App` → name `AppModule`
+- `@router(prefix="/api")` + class `Api` → name `ApiRouter`
 
 ### 5. Composability
 
 Build complex systems by composing simple modules:
 
 ```python
-@module(name="app", services=[AuthModule, PostsModule, CommentsModule])
-class AppModule:
+@module(services=[AuthModule, PostsModule, CommentsModule])
+class App:
     pass
 ```
 
@@ -72,7 +74,7 @@ class AppModule:
 ├─────────────────────────────────────────────────────────┤
 │                      Engine                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐  │
-│  │ Registry │  │ Injector │  │ Lifecycle│  │ Hooks  │  │
+│  │ Registry │  │ Resolver │  │ Lifecycle│  │ Hooks  │  │
 │  └──────────┘  └──────────┘  └──────────┘  └────────┘  │
 ├─────────────────────────────────────────────────────────┤
 │                      Starlette/ASGI                      │
@@ -85,11 +87,11 @@ class AppModule:
 
 Decorators transform plain classes into framework-aware components:
 
-- `@service`: Marks a class as a service
-- `@module`: Marks a class as a module
-- `@router`: Marks a class as a router
+- `@service()`: Marks a class as a service
+- `@module(services=[...])`: Marks a class as a module container
+- `@router(prefix="", *, tags=None)`: Marks a class as a router
 - `@get/@post/etc`: Marks methods as route handlers
-- `@after_config/etc`: Marks methods as lifecycle hooks
+- `@after_config/@after_init/@before_startup/@before_shutdown`: Marks methods as lifecycle hooks
 
 ### 2. Base Classes
 
@@ -104,9 +106,63 @@ Decorated classes automatically inherit from base classes:
 The engine manages the framework's core operations:
 
 - **Registry**: Service registration and lookup
-- **Injector**: Dependency injection and topological sorting
+- **Resolver**: `resolve_deps()` reads annotations to discover dependencies
+- **Injector**: `topological_sort()` builds dependency graph and orders instantiation
 - **Hooks**: Lifecycle hook discovery and execution
-- **Utils**: Helper functions (name conversion, etc.)
+
+## Dependency Injection Flow
+
+The new DI system is annotation-driven:
+
+```
+1. Iterate over declared services
+   ↓
+2. For each service, resolve_deps(cls) reads type annotations
+   ↓
+3. Filter: keep only types marked with CF_SERVICE_MARKER
+   ↓
+4. Register each discovered dependency recursively
+   ↓
+5. topological_sort(registry) builds a dependency graph
+   ↓
+6. Instantiate services in topological order
+   ↓
+7. For each dependency: setattr(instance, annotation_key, dependency_instance)
+   ↓
+8. Run lifecycle phases
+```
+
+### resolve_deps(cls)
+
+This function reads a class's `__annotations__` dict and returns only those entries
+whose type is decorated with `CF_SERVICE_MARKER`. For example:
+
+```python
+@service()
+class Auth:
+    db: Database   # ✓ CF_SERVICE_MARKER — included
+    x: int         # ✗ Not a service — excluded
+
+# resolve_deps(Auth) returns: {"db": Database}
+```
+
+### topological_sort(registry)
+
+Uses Kahn's algorithm with `resolve_deps()` to:
+1. Build the full dependency graph from all registered services
+2. Determine instantiation order
+3. Detect circular dependencies
+
+### setattr Injection
+
+Dependencies are injected using the annotation key name — no snake_case conversion:
+
+```python
+@service()
+class UserService:
+    db: Database   # Injected as self.db
+    repo: UserRepo # Injected as self.repo
+```
 
 ## How It Works: Module Startup
 
@@ -115,11 +171,8 @@ Let's trace through what happens when you start a module:
 ### Step 1: Module Instantiation
 
 ```python
-app = AppModule()
+app = App()
 ```
-
-- Creates an instance of your module class
-- The class inherits from `ModuleBase` via the decorator
 
 ### Step 2: Configuration
 
@@ -128,12 +181,13 @@ await app.configure(config)
 ```
 
 1. Collects all services from the module's `services` list
-2. Builds a dependency graph by traversing service dependencies
-3. Performs a topological sort to determine startup order
-4. Creates instances of all services
-5. Injects dependencies into each service
-6. Calls `configure()` on each service in order
-7. Runs `@after_config` hooks
+2. For each service, calls `resolve_deps(cls)` to discover annotations
+3. Recursively registers all discovered dependency types
+4. Calls `topological_sort(registry)` to determine startup order
+5. Creates instances of all services in order
+6. Calls `setattr` to inject each dependency with its annotation key name
+7. Calls `configure()` on each service in order
+8. Runs `@after_config` hooks
 
 ### Step 3: Initialization
 
@@ -158,8 +212,8 @@ await app.startup()
 The module acts as an ASGI app:
 - Collects all routers from services
 - Creates a Starlette router
-- Mounts child routers at their service names
-- Routes requests to handlers
+- Mounts child routers at their prefix paths
+- Routes requests to handlers with auto-bound parameters
 
 ### Step 6: Shutdown
 
@@ -175,56 +229,37 @@ await app.shutdown()
 The framework stores metadata on decorated classes:
 
 ```python
-@service(name="my_service", deps=[DatabaseService])
+@service()
 class MyService:
     pass
 
-# Metadata is stored as attributes
-hasattr(MyService, "__cf_service__")  # True
+hasattr(MyService, "__cf_service__")     # True
 hasattr(MyService, "__cf_service_meta__")  # True
 ```
 
 Metadata classes:
-- `ServiceMeta`: Metadata for services
-- `ModuleMeta`: Metadata for modules (extends ServiceMeta)
-- `RouterMeta`: Metadata for routers (extends ServiceMeta)
+- `ServiceMeta`: Metadata for services (auto-generated name, dependencies from annotations)
+- `ModuleMeta`: Metadata for modules (extends ServiceMeta, adds services list)
+- `RouterMeta`: Metadata for routers (extends ServiceMeta, adds prefix, tags, routes)
 
 ## Marker System
 
 Markers identify what type a class is:
 
-- `__cf_service__`: Identifies a service class
-- `__cf_module__`: Identifies a module class
-- `__cf_router__`: Identifies a router class
+- `CF_SERVICE_MARKER` (`__cf_service__`): Identifies a service class
+- `CF_MODULE_MARKER` (`__cf_module__`): Identifies a module class
+- `CF_ROUTER_MARKER` (`__cf_router__`): Identifies a router class
 
 Helper functions:
-- `is_cf_service()`: Check if a class is a service
-- `is_cf_module()`: Check if a class is a module
-- `is_cf_router()`: Check if a class is a router
-
-## Dependency Injection Flow
-
-```
-1. Collect all services
-   ↓
-2. Register in registry
-   ↓
-3. Build dependency graph
-   ↓
-4. Topological sort
-   ↓
-5. Create instances
-   ↓
-6. Inject dependencies
-   ↓
-7. Run lifecycle
-```
+- `is_cf_service(cls)`: Check if a class is a framework service
+- `is_cf_module(cls)`: Check if a class is a framework module
+- `is_cf_router(cls)`: Check if a class is a framework router
 
 ## ASGI Integration
 
 The framework integrates with Starlette for ASGI support:
 
-1. `RouterBase` collects route handlers
+1. `RouterBase` collects route handlers with auto-bound parameter info
 2. Converts them to Starlette `Route` objects
 3. Creates a Starlette `Router`
 4. `ModuleBase` mounts child routers
@@ -261,6 +296,6 @@ The framework is designed to be extensible:
 The framework is designed for testability:
 
 - Services are plain classes, easy to instantiate
-- Dependencies are explicit, easy to mock
+- Dependencies are explicit via annotations, easy to mock
 - Lifecycle methods can be called individually
 - No global state, tests are isolated

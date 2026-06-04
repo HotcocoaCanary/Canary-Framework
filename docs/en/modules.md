@@ -4,21 +4,19 @@ Modules are containers that organize and compose services together. They manage 
 
 ## Defining a Module
 
-Use the `@module` decorator to define a module:
+Use the `@module()` decorator to define a module:
 
 ```python
 from canary_framework import module
 
-@module(name="auth_module", services=[...])
-class AuthModule:
+@module(services=[Database, UserRepo, AuthApi])
+class Auth:
     pass
 ```
 
-### Module Parameters
-
-- `name`: (required) A unique identifier for the module
-- `services`: (optional) A list of service or module classes this module contains
-- `deps`: (optional) A list of services or modules this module depends on
+- `@module(services=[...])` — only `services` parameter needed
+- No `name` or `deps` parameters — name is auto-derived (`ClassName` + `"Module"`)
+- Module is automatically named `AuthModule`
 
 ## Module Composition
 
@@ -28,52 +26,60 @@ Modules can contain services and other modules, creating a hierarchical structur
 from canary_framework import module, service, router
 
 # Core services
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     pass
 
-@service(name="cache")
-class CacheService:
+@service()
+class Cache:
     pass
 
 # Auth module
-@service(name="auth_service", deps=[DatabaseService])
+@service()
 class AuthService:
-    pass
+    db: Database
 
-@router(name="auth_api", prefix="/auth", deps=[AuthService])
-class AuthRouter:
-    pass
+@router(prefix="/auth")
+class AuthApi:
+    auth: AuthService
 
-@module(name="auth", services=[AuthService, AuthRouter])
-class AuthModule:
+@module(services=[AuthService, AuthApi])
+class Auth:
     pass
 
 # Posts module
-@service(name="posts_service", deps=[DatabaseService, CacheService])
+@service()
 class PostsService:
-    pass
+    db: Database
+    cache: Cache
 
-@router(name="posts_api", prefix="/posts", deps=[PostsService])
-class PostsRouter:
-    pass
+@router(prefix="/posts")
+class PostsApi:
+    posts: PostsService
 
-@module(name="posts", services=[PostsService, PostsRouter])
-class PostsModule:
+@module(services=[PostsService, PostsApi])
+class Posts:
     pass
 
 # Main application module
-@module(
-    name="app",
-    services=[
-        DatabaseService,
-        CacheService,
-        AuthModule,
-        PostsModule
-    ]
-)
-class AppModule:
+@module(services=[Database, Cache, Auth, Posts])
+class App:
     pass
+```
+
+## Module Children Access
+
+Child services and sub-modules are accessible directly by their class name on the module instance:
+
+```python
+app = App()
+await app.configure(config)
+
+# Access child services by class name (not snake_case)
+app.Database    # Database service instance
+app.Cache       # Cache service instance
+app.Auth        # Auth sub-module instance
+app.Posts       # Posts sub-module instance
 ```
 
 ## Module Lifecycle
@@ -81,7 +87,7 @@ class AppModule:
 Modules coordinate the lifecycle of their child services. When a module's lifecycle methods are called, they propagate to all child services in topological order.
 
 ```python
-app = AppModule()
+app = App()
 
 # 1. Configure phase: configures all services in dependency order
 await app.configure(config)
@@ -105,21 +111,20 @@ A module can be used directly as an ASGI application. It automatically mounts al
 ```python
 import uvicorn
 
-# Run the module as an ASGI app
-uvicorn.run("main:AppModule", host="0.0.0.0", port=8000)
+uvicorn.run("main:App", host="0.0.0.0", port=8000)
 ```
 
 The module will:
 1. Collect all routers from its services
-2. Mount them at paths based on their service names
+2. Mount them at paths based on their prefix
 3. Handle ASGI requests
 
 ## Module Base Class
 
-When you decorate a class with `@module`, it automatically inherits from `ModuleBase`, which provides:
+When you decorate a class with `@module()`, it automatically inherits from `ModuleBase`, which provides:
 
 - `config` attribute: Access to configuration
-- `configure(config)` method: Configures the module and all services
+- `configure(config_instance=None)` method: Configures the module and all services
 - `init()` method: Initializes the module and all services
 - `startup()` method: Starts the module and all services
 - `shutdown()` method: Shuts down the module and all services
@@ -130,23 +135,23 @@ When you decorate a class with `@module`, it automatically inherits from `Module
 Services in a module share dependencies. If multiple services depend on the same service, only one instance is created and shared:
 
 ```python
-@service(name="database")
-class DatabaseService:
+@service()
+class Database:
     pass
 
-@service(name="service_a", deps=[DatabaseService])
+@service()
 class ServiceA:
-    pass
+    db: Database
 
-@service(name="service_b", deps=[DatabaseService])
+@service()
 class ServiceB:
+    db: Database
+
+@module(services=[Database, ServiceA, ServiceB])
+class App:
     pass
 
-@module(name="app", services=[DatabaseService, ServiceA, ServiceB])
-class AppModule:
-    pass
-
-# Both ServiceA and ServiceB will receive the same DatabaseService instance
+# Both ServiceA and ServiceB receive the same Database instance
 ```
 
 ## Complete Example
@@ -155,31 +160,34 @@ class AppModule:
 from canary_framework import module, service, router, get
 
 # Services
-@service(name="db")
+@service()
 class Database:
-    pass
+    async def query(self, sql):
+        pass
 
-@service(name="user_repo", deps=[Database])
-class UserRepository:
-    pass
+@service()
+class UserRepo:
+    db: Database
 
-@service(name="user_service", deps=[UserRepository])
+@service()
 class UserService:
-    pass
+    repo: UserRepo
 
 # Router
-@router(name="users", prefix="/api/users", deps=[UserService])
-class UsersRouter:
+@router(prefix="/api/users")
+class Users:
+    user: UserService
+
     @get("/")
-    async def list_users(self, request):
+    async def list_users(self):
         return {"users": []}
 
 # Modules
-@module(name="users_module", services=[UserRepository, UserService, UsersRouter])
+@module(services=[UserRepo, UserService, Users])
 class UsersModule:
     pass
 
-@module(name="app", services=[Database, UsersModule])
+@module(services=[Database, UsersModule])
 class App:
     pass
 ```
@@ -191,3 +199,4 @@ class App:
 3. **Module Composition**: Build large applications by composing smaller modules
 4. **Config Isolation**: Provide isolated configuration space for each module
 5. **Test Isolation**: Each module can be tested independently
+6. **Use descriptive annotation names**: `db`, `repo`, `service` — not `d1`, `d2`

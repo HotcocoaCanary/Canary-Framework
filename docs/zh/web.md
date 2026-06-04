@@ -4,185 +4,198 @@ Canary 框架与 Starlette 集成，提供强大的 Web 路由功能。
 
 ## 定义路由
 
-使用 `@router` 装饰器定义路由：
+使用 `@router` 装饰器定义路由。路由名称自动生成为 `类名 + "Router"`：
 
 ```python
 from canary_framework import router
 
-@router(name="api", prefix="/api")
+@router(prefix="/api")
 class ApiRouter:
     pass
 ```
 
 ### 路由参数
 
-- `name`：（必需）路由的唯一标识符
-- `prefix`：（可选）应用于此路由中所有路由的 URL 前缀
-- `deps`：（可选）此路由依赖的服务列表
-- `tags`：（可选）用于文档的 OpenAPI 标签
+- `prefix`：URL 前缀（位置参数，默认空字符串）。应用于此路由中所有路由的 URL 前缀
+- `tags`：（可选，仅关键字参数）用于文档的 OpenAPI 标签列表
+
+> 注意：旧的 `name` 和 `deps` 参数已移除。名称自动生成，依赖通过类型注解声明。
+
+### 自动命名
+
+路由名称自动生成为 `类名 + "Router"`：
+
+| 类名 | 自动生成的路由名 |
+|------|-----------------|
+| `Api` | `ApiRouter` |
+| `Users` | `UsersRouter` |
+| `Todos` | `TodosRouter` |
 
 ## HTTP 方法装饰器
 
-使用 HTTP 方法装饰器定义路由处理程序：
+使用 HTTP 方法装饰器定义路由处理程序。**重要**：路由处理器不再需要 `request` 参数 — 路径参数、查询参数和请求体自动绑定：
 
 ```python
 from canary_framework import router, get, post, put, delete, patch
 
-@router(name="items", prefix="/items")
+@router(prefix="/items")
 class ItemsRouter:
     @get("/")
-    async def list_items(self, request):
+    async def list_items(self):
         return {"items": []}
-    
+
     @get("/{item_id}")
-    async def get_item(self, request):
-        item_id = request.path_params["item_id"]
+    async def get_item(self, item_id: int):
         return {"item_id": item_id}
-    
+
     @post("/")
-    async def create_item(self, request):
-        data = await request.json()
+    async def create_item(self, data: dict):
         return data, 201
-    
+
     @put("/{item_id}")
-    async def update_item(self, request):
-        item_id = request.path_params["item_id"]
-        data = await request.json()
+    async def update_item(self, item_id: int, data: dict):
         return {"id": item_id, **data}
-    
+
     @patch("/{item_id}")
-    async def patch_item(self, request):
-        item_id = request.path_params["item_id"]
-        data = await request.json()
+    async def patch_item(self, item_id: int, data: dict):
         return {"id": item_id, **data}
-    
+
     @delete("/{item_id}")
-    async def delete_item(self, request):
-        item_id = request.path_params["item_id"]
+    async def delete_item(self, item_id: int):
         return {"message": f"Item {item_id} deleted"}
 ```
 
 ## 请求处理
 
-路由处理程序接收一个 Starlette `Request` 对象，并可以返回各种类型：
+路由处理程序可以返回各种类型，框架会自动转换为合适的响应：
 
 ```python
-from starlette.responses import JSONResponse, PlainTextResponse, HTMLResponse
+from starlette.responses import JSONResponse, PlainTextResponse, HTMLResponse, Response
 
-@router(name="responses")
+@router()
 class ResponseExamples:
     @get("/dict")
-    async def return_dict(self, request):
+    async def return_dict(self):
         # 自动转换为 JSONResponse
         return {"message": "Hello"}
-    
+
     @get("/str")
-    async def return_str(self, request):
+    async def return_str(self):
         # 自动转换为 PlainTextResponse
         return "Hello, World!"
-    
+
     @get("/json-response")
-    async def return_json_response(self, request):
+    async def return_json_response(self):
         return JSONResponse({"message": "Hello"}, status_code=200)
-    
+
     @get("/html")
-    async def return_html(self, request):
+    async def return_html(self):
         return HTMLResponse("<h1>Hello</h1>")
-    
+
     @get("/error")
-    async def return_error(self, request):
+    async def return_error(self):
         return {"error": "Not found"}, 404
 ```
 
 ## 路径参数
 
-使用 Starlette 的路径参数语法：
+路径参数从 URL 模式自动提取并绑定到函数参数：
 
 ```python
-@router(name="users")
+@router()
 class UsersRouter:
     @get("/users/{user_id}")
-    async def get_user(self, request):
-        user_id = request.path_params["user_id"]
+    async def get_user(self, user_id: int):
         return {"user_id": user_id}
-    
+
     @get("/users/{user_id}/posts/{post_id}")
-    async def get_user_post(self, request):
-        user_id = request.path_params["user_id"]
-        post_id = request.path_params["post_id"]
+    async def get_user_post(self, user_id: int, post_id: int):
         return {"user_id": user_id, "post_id": post_id}
 ```
 
 ## 查询参数
 
-通过请求对象访问查询参数：
+查询参数从 URL 自动提取并绑定到函数参数：
 
 ```python
-@router(name="search")
+@router()
 class SearchRouter:
     @get("/search")
-    async def search(self, request):
-        query = request.query_params.get("q", "")
-        page = int(request.query_params.get("page", 1))
-        limit = int(request.query_params.get("limit", 10))
+    async def search(self, q: str = "", page: int = 1, limit: int = 10):
         return {
-            "query": query,
+            "query": q,
             "page": page,
             "limit": limit
         }
 ```
 
-## 请求体
-
-解析 JSON 请求体：
+查询参数定义在路径后，使用 `?param={param}` 或 `#param={param}` 语法：
 
 ```python
-@router(name="data")
+@router()
+class DataRouter:
+    @get("/data?page={page}#section={section}")
+    async def get_data(self, page: int = 1, section: str = ""):
+        return {"page": page, "section": section}
+```
+
+## 请求体
+
+使用 `request_model` 参数指定 Pydantic 模型，请求体自动解析并作为函数参数传入：
+
+```python
+from pydantic import BaseModel
+
+class ItemCreate(BaseModel):
+    name: str
+    price: float
+
+@router()
 class DataRouter:
     @post("/submit")
-    async def submit(self, request):
-        data = await request.json()
+    async def submit(self, data: dict):
+        # 无 request_model 时，将从请求体自动解析为 dict
         return {"received": data}
-    
-    @post("/form")
-    async def submit_form(self, request):
-        form_data = await request.form()
-        return {"received": dict(form_data)}
+
+    @post("/items", request_model=ItemCreate)
+    async def create_item(self, item: ItemCreate):
+        # request_model 会自动解析请求体为 ItemCreate 实例
+        return {"created": item.model_dump()}
 ```
 
 ## 路由依赖
 
-路由可以依赖服务：
+路由通过类型注解声明对服务的依赖：
 
 ```python
-@service(name="user_service")
+@service()
 class UserService:
     async def get_user(self, user_id):
         return {"id": user_id, "name": "User"}
 
-@router(name="users", deps=[UserService])
+@router()
 class UsersRouter:
+    svc: UserService  # 类型注解声明依赖
+
     @get("/{user_id}")
-    async def get_user(self, request):
-        user_id = request.path_params["user_id"]
-        # UserService 注入为 self.user_service
-        user = await self.user_service.get_user(user_id)
+    async def get_user(self, user_id: int):
+        user = await self.svc.get_user(user_id)
         return user
 ```
 
 ## 挂载路由
 
-当您将路由包含在模块中时，它会自动挂载：
+当您将路由包含在模块的 `services` 列表中时，它会自动挂载。路由根据其服务名称挂载在路径上：
 
 ```python
-@module(name="app", services=[UsersRouter, ItemsRouter])
-class AppModule:
+@module(services=[UsersRouter, ItemsRouter])
+class App:
     pass
 ```
 
-路由会根据其名称挂载在路径上：
-- `UsersRouter(name="users")` → `/users`
-- `ItemsRouter(name="items")` → `/items`
+路由挂载路径对应服务名称：
+- `Users` 类 → `UsersRouter` → 挂载在 `/UsersRouter`
+- `Items` 类 → `ItemsRouter` → 挂载在 `/ItemsRouter`
 
 ## OpenAPI 文档
 
@@ -210,8 +223,8 @@ HTTP 方法装饰器支持以下 OpenAPI 文档参数：
 | `tags` | list[str] | API 分组标签 |
 | `deprecated` | bool | 是否弃用 |
 | `operation_id` | str | 操作唯一标识符 |
-| `path_params` | dict | 路径参数定义（名称 -> {"type": "str", "description": "", "required": true}） |
-| `query_params` | dict | 查询参数定义（名称 -> {"type": "str", "description": "", "required": false}） |
+
+> 注意：`path_params` 和 `query_params` 已不再需要 — 框架自动从函数签名和路径模式中提取参数信息。
 
 ### 使用示例
 
@@ -219,7 +232,6 @@ HTTP 方法装饰器支持以下 OpenAPI 文档参数：
 from pydantic import BaseModel, Field
 from canary_framework import router, get, post, put, delete
 
-# 定义请求和响应模型
 class UserRequest(BaseModel):
     name: str = Field(description="用户名")
     email: str = Field(description="用户邮箱")
@@ -229,58 +241,42 @@ class UserResponse(BaseModel):
     name: str = Field(description="用户名")
     email: str = Field(description="用户邮箱")
 
-@router(name="users", prefix="/users", tags=["Users"])
+@router(prefix="/users", tags=["Users"])
 class UsersRouter:
-    @get("/", 
-         summary="获取用户列表", 
+    @get("/",
+         summary="获取用户列表",
          description="获取系统中所有用户的列表",
-         tags=["Users", "List"],
-         query_params={
-             "page": {"type": "int", "description": "页码", "required": False},
-             "limit": {"type": "int", "description": "每页数量", "required": False}
-         })
-    async def list_users(self, request):
-        return {"users": []}
-    
-    @get("/{user_id}", 
+         tags=["Users", "List"])
+    async def list_users(self, page: int = 1, limit: int = 10):
+        return {"users": [], "page": page, "limit": limit}
+
+    @get("/{user_id}",
          summary="获取单个用户",
          description="根据用户ID获取用户详细信息",
-         response_model=UserResponse,
-         path_params={
-             "user_id": {"type": "int", "description": "用户ID"}
-         })
-    async def get_user(self, request):
-        user_id = request.path_params["user_id"]
-        return {"id": int(user_id), "name": "John", "email": "john@example.com"}
-    
-    @post("/", 
+         response_model=UserResponse)
+    async def get_user(self, user_id: int):
+        return {"id": user_id, "name": "John", "email": "john@example.com"}
+
+    @post("/",
           summary="创建用户",
           description="创建新用户",
           request_model=UserRequest,
           response_model=UserResponse)
-    async def create_user(self, request, user: UserRequest):
-        # request_model 会自动解析请求体并作为第二个参数传入
+    async def create_user(self, user: UserRequest):
         return {"id": 1, **user.model_dump()}, 201
-    
+
     @put("/{user_id}",
          summary="更新用户",
          description="更新用户信息",
          request_model=UserRequest,
-         response_model=UserResponse,
-         path_params={
-             "user_id": {"type": "int", "description": "用户ID"}
-         })
-    async def update_user(self, request, user: UserRequest):
-        user_id = int(request.path_params["user_id"])
+         response_model=UserResponse)
+    async def update_user(self, user_id: int, user: UserRequest):
         return {"id": user_id, **user.model_dump()}
-    
+
     @delete("/{user_id}",
             summary="删除用户",
-            description="删除指定用户",
-            path_params={
-                "user_id": {"type": "int", "description": "用户ID"}
-            })
-    async def delete_user(self, request):
+            description="删除指定用户")
+    async def delete_user(self, user_id: int):
         return {"message": "User deleted"}
 ```
 
@@ -288,88 +284,41 @@ class UsersRouter:
 
 当使用 `request_model` 参数时：
 1. 请求体会自动解析为该 Pydantic 模型
-2. 模型实例会作为第二个参数传递给路由处理函数
-3. 自动进行数据验证
-
-### 路径参数和查询参数
-
-- `path_params`：定义路径参数的类型、描述和是否必需
-- `query_params`：定义查询参数的类型、描述和是否必需
-- 路径参数会从路径模式（如 `{user_id}`）自动提取并添加到 OpenAPI Schema 中
-
+2. 模型实例会作为**第一个参数**传递给路由处理函数
+3. 其他参数（路径参数、查询参数）作为关键字参数传递
+4. 自动进行数据验证
 
 ### Tags 分组
 
 路由级别和方法级别的 tags 会自动合并：
 
 ```python
-@router(name="api", tags=["API"])
+@router(tags=["API"])
 class ApiRouter:
     @get("/users", tags=["Users"])
-    async def get_users(self, request):
+    async def get_users(self):
         # 合并后的 tags: ["API", "Users"]
         pass
 ```
 
 ## 中间件支持
 
-Canary 框架支持自定义中间件。您可以通过在模块中定义中间件来处理请求和响应：
+您可以通过在模块的 `__init__` 中定义中间件来处理请求和响应：
 
 ```python
 from starlette.middleware.base import BaseHTTPMiddleware
 
 class CustomMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
-        # 请求处理前
         print(f"Request: {request.method} {request.url}")
-        
-        # 调用下一个中间件/路由
         response = await call_next(request)
-        
-        # 请求处理后
         print(f"Response status: {response.status_code}")
-        
         return response
 
-@module(name="app", services=[TodosRouter])
-class AppModule:
+@module(services=[TodosRouter])
+class App:
     def __init__(self):
         self.middleware = [CustomMiddleware]
-```
-
-## 静态文件服务
-
-您可以轻松地提供静态文件：
-
-```python
-from starlette.staticfiles import StaticFiles
-
-@router(name="static")
-class StaticRouter:
-    def __init__(self):
-        # 挂载静态文件目录
-        self.asgi_app = StaticFiles(directory="static", html=True)
-
-@module(name="app", services=[StaticRouter, ApiRouter])
-class AppModule:
-    pass
-```
-
-## 错误处理
-
-您可以自定义错误处理：
-
-```python
-from starlette.exceptions import HTTPException
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-
-@router(name="api", prefix="/api")
-class ApiRouter:
-    async def handle_exception(self, request: Request, exc: Exception):
-        if isinstance(exc, HTTPException):
-            return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
-        return JSONResponse({"error": "Internal Server Error"}, status_code=500)
 ```
 
 ## CORS 支持
@@ -379,8 +328,8 @@ class ApiRouter:
 ```python
 from starlette.middleware.cors import CORSMiddleware
 
-@module(name="app", services=[ApiRouter])
-class AppModule:
+@module(services=[ApiRouter])
+class App:
     def __init__(self):
         self.middleware = [
             CORSMiddleware(
@@ -390,23 +339,6 @@ class AppModule:
                 allow_headers=["*"],
             )
         ]
-```
-
-## WebSocket 支持
-
-Canary 框架支持 WebSocket：
-
-```python
-from starlette.websockets import WebSocket
-
-@router(name="ws")
-class WebSocketRouter:
-    @get("/ws")
-    async def websocket_endpoint(self, websocket: WebSocket):
-        await websocket.accept()
-        while True:
-            data = await websocket.receive_text()
-            await websocket.send_text(f"Message received: {data}")
 ```
 
 ## 完整示例
@@ -425,80 +357,79 @@ class TodoCreate(BaseModel):
     title: str = Field(description="标题")
     completed: bool = Field(description="是否完成", default=False)
 
-@service(name="data_store")
+@service()
 class DataStore:
     def __init__(self):
         self.todos: List[Dict] = []
-    
+
     async def get_all(self):
         return self.todos
-    
+
     async def get_one(self, todo_id):
         return next((t for t in self.todos if t["id"] == todo_id), None)
-    
+
     async def create(self, todo):
         todo["id"] = len(self.todos) + 1
         self.todos.append(todo)
         return todo
-    
+
     async def update(self, todo_id, data):
         todo = await self.get_one(todo_id)
         if todo:
             todo.update(data)
         return todo
-    
+
     async def delete(self, todo_id):
         self.todos = [t for t in self.todos if t["id"] != todo_id]
 
-@router(name="todos", prefix="/todos", deps=[DataStore], tags=["Todos"])
+@router(prefix="/todos", tags=["Todos"])
 class TodosRouter:
+    store: DataStoreService
+
     @get("/", summary="获取待办列表", description="获取所有待办事项")
-    async def list_todos(self, request):
-        todos = await self.data_store.get_all()
+    async def list_todos(self):
+        todos = await self.store.get_all()
         return {"todos": todos}
-    
-    @get("/{todo_id}", 
-         summary="获取待办", 
+
+    @get("/{todo_id}",
+         summary="获取待办",
          description="根据ID获取待办事项",
          response_model=TodoResponse)
-    async def get_todo(self, request):
-        todo_id = int(request.path_params["todo_id"])
-        todo = await self.data_store.get_one(todo_id)
+    async def get_todo(self, todo_id: int):
+        todo = await self.store.get_one(todo_id)
         if todo:
             return todo
         return {"error": "Todo not found"}, 404
-    
-    @post("/", 
-          summary="创建待办", 
+
+    @post("/",
+          summary="创建待办",
           description="创建新的待办事项",
           request_model=TodoCreate,
           response_model=TodoResponse)
-    async def create_todo(self, request, todo: TodoCreate):
-        todo = await self.data_store.create(todo.model_dump())
+    async def create_todo(self, todo: TodoCreate):
+        todo = await self.store.create(todo.model_dump())
         return todo, 201
-    
+
     @put("/{todo_id}",
          summary="更新待办",
          description="更新待办事项",
          request_model=TodoCreate,
          response_model=TodoResponse)
-    async def update_todo(self, request, todo: TodoCreate):
-        todo_id = int(request.path_params["todo_id"])
-        todo = await self.data_store.update(todo_id, todo.model_dump())
+    async def update_todo(self, todo_id: int, todo: TodoCreate):
+        todo = await self.store.update(todo_id, todo.model_dump())
         if todo:
             return todo
         return {"error": "Todo not found"}, 404
-    
+
     @delete("/{todo_id}",
             summary="删除待办",
             description="删除待办事项")
-    async def delete_todo(self, request):
-        todo_id = int(request.path_params["todo_id"])
-        await self.data_store.delete(todo_id)
+    async def delete_todo(self, todo_id: int):
+        await self.store.delete(todo_id)
         return {"message": "Todo deleted"}
 
-@module(name="app", services=[DataStore, TodosRouter])
-class AppModule:
+@module(services=[DataStoreService, TodosRouter])
+class App:
     pass
 ```
 
@@ -510,3 +441,4 @@ class AppModule:
 4. **文档注释**：为每个路由添加 summary 和 description
 5. **标签分组**：使用 tags 对 API 进行分组
 6. **响应模型**：明确指定 response_model 以生成更好的 OpenAPI 文档
+7. **简洁路由处理器**：利用自动参数绑定，让处理器函数签名简洁清晰

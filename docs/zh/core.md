@@ -9,7 +9,7 @@
 框架使用装饰器保持代码简洁和声明式：
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     pass
 ```
@@ -21,36 +21,39 @@ class MyService:
 一切都围绕 async/await 构建以实现高性能：
 
 ```python
-@service(name="my_service")
+@service()
 class MyService:
     async def do_something(self):
         await some_async_operation()
 ```
 
-### 3. 显式依赖
+### 3. 注解驱动依赖
 
-依赖项显式声明，使您的代码更易于理解和测试：
+依赖通过 Python 类型注解声明，取代旧的 `deps` 参数。这使得依赖关系更直观，IDE 也能提供更好的支持：
 
 ```python
-@service(name="my_service", deps=[DatabaseService, CacheService])
+@service()
 class MyService:
-    pass
+    db: DatabaseService
+    cache: CacheService
 ```
 
 ### 4. 约定优于配置
 
 合理的默认值减少样板代码：
-- 依赖项使用 snake_case 名称自动注入
-- 生命周期方法遵循标准模式
-- 路由自动挂载在可预测的路径上
+- 服务名称自动生成为 `类名 + "Service"`
+- 模块名称自动生成为 `类名 + "Module"`
+- 路由名称自动生成为 `类名 + "Router"`
+- 依赖通过类型注解自动检测
+- 路由参数从函数签名自动绑定
 
 ### 5. 可组合性
 
 通过组合简单模块构建复杂系统：
 
 ```python
-@module(name="app", services=[AuthModule, PostsModule, CommentsModule])
-class AppModule:
+@module(services=[AuthModule, PostsModule, CommentsModule])
+class App:
     pass
 ```
 
@@ -67,12 +70,12 @@ class AppModule:
 ├─────────────────────────────────────────────────────────┤
 │                      服务                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │   服务      │  │   服务      │  │   路由      │  │
+│  │   @service   │  │   @service   │  │   @router   │  │
 │  └──────────────┘  └──────────────┘  └──────────────┘  │
 ├─────────────────────────────────────────────────────────┤
 │                      引擎                              │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐  │
-│  │ 注册表   │  │ 注入器   │  │ 生命周期   │  │ 钩子    │  │
+│  │ 注册表   │  │ 注入器   │  │ 生命周期  │  │ 钩子    │  │
 │  └──────────┘  └──────────┘  └──────────┘  └────────┘  │
 ├─────────────────────────────────────────────────────────┤
 │                  Starlette/ASGI                          │
@@ -85,9 +88,9 @@ class AppModule:
 
 装饰器将普通类转换为框架感知的组件：
 
-- `@service`：将类标记为服务
-- `@module`：将类标记为模块
-- `@router`：将类标记为路由
+- `@service()`：将类标记为服务（无参数，自动命名 `ClassName+"Service"`）
+- `@module(*, services=[...])`：将类标记为模块（仅 `services` 参数，自动命名 `ClassName+"Module"`）
+- `@router(prefix="", *, tags=None)`：将类标记为路由（无 `name`/`deps` 参数，自动命名 `ClassName+"Router"`）
 - `@get/@post 等`：将方法标记为路由处理程序
 - `@after_config 等`：将方法标记为生命周期钩子
 
@@ -96,17 +99,17 @@ class AppModule:
 装饰类自动继承自基类：
 
 - `ServiceBase`：带有生命周期方法的服务基类
-- `ModuleBase`：协调服务的模块基类
-- `RouterBase`：带有 ASGI 集成的路由基类
+- `ModuleBase`：协调服务的模块基类（继承 `ServiceBase`）
+- `RouterBase`：带有 ASGI 集成的路由基类（继承 `ServiceBase`）
 
 ### 3. 引擎
 
 引擎管理框架的核心操作：
 
-- **注册表**：服务注册和查找
-- **注入器**：依赖注入和拓扑排序
-- **钩子**：生命周期钩子发现和执行
-- **工具**：辅助函数（名称转换等）
+- **Registry**：服务注册和查找（支持父子继承）
+- **injector**：`topological_sort(registry)` — 使用 `resolve_deps()` 的依赖拓扑排序
+- **hooks**：生命周期钩子发现（`find_hooks`）和执行
+- **utils**：`make_subclass` — 创建带有框架元数据的子类
 
 ## 工作原理：模块启动
 
@@ -115,25 +118,30 @@ class AppModule:
 ### 步骤 1：模块实例化
 
 ```python
-app = AppModule()
+app = App()
 ```
 
 - 创建模块类的实例
 - 类通过装饰器继承自 `ModuleBase`
 
-### 步骤 2：配置
+### 步骤 2：配置（核心 DI 阶段）
 
 ```python
-await app.configure(config)
+await app.configure(config_instance)
 ```
 
-1. 从模块的 `services` 列表中收集所有服务
-2. 通过遍历服务依赖关系构建依赖图
-3. 执行拓扑排序以确定启动顺序
-4. 创建所有服务的实例
-5. 将依赖项注入每个服务
-6. 按顺序调用每个服务的 `configure()`
-7. 运行 `@after_config` 钩子
+1. 设置 `config` 属性，初始化日志
+2. 创建 `Registry` 实例
+3. 对 `services` 列表中的每个类调用 `_register_entry_with_deps()`：
+   - 检查幂等性（已在注册表则跳过）
+   - 注册到 Registry
+   - 通过 `resolve_deps(cls)` 读取类型注解，递归注册依赖
+4. `topological_sort(registry)`：使用 `resolve_deps()` 构建依赖图，执行 Kahn 算法排序
+5. 按拓扑顺序创建所有服务的实例
+6. 按拓扑顺序注入依赖：对每个实例调用 `resolve_deps()`，通过 `setattr(inst, attr_name, dep_instance)` 注入
+7. 通过 `setattr(self, entry.cls.__name__, inst)` 将子服务挂载到模块（用原始类名）
+8. 按拓扑顺序调用每个子服务的 `configure(config_instance)`
+9. 运行模块的 `@after_config` 钩子
 
 ### 步骤 3：初始化
 
@@ -141,8 +149,8 @@ await app.configure(config)
 await app.init()
 ```
 
-1. 按顺序调用每个服务的 `init()`
-2. 运行 `@after_init` 钩子
+1. 运行模块的 `@after_init` 钩子
+2. 按拓扑顺序调用每个子服务的 `init()`
 
 ### 步骤 4：启动
 
@@ -150,8 +158,8 @@ await app.init()
 await app.startup()
 ```
 
-1. 运行 `@before_startup` 钩子
-2. 按顺序调用每个服务的 `startup()`
+1. 运行模块的 `@before_startup` 钩子
+2. 按拓扑顺序调用每个子服务的 `startup()`
 
 ### 步骤 5：请求处理
 
@@ -167,15 +175,15 @@ await app.startup()
 await app.shutdown()
 ```
 
-1. 运行 `@before_shutdown` 钩子
-2. 按相反顺序调用每个服务的 `shutdown()`
+1. 运行模块的 `@before_shutdown` 钩子
+2. 按逆拓扑顺序调用每个子服务的 `shutdown()`
 
 ## 元数据系统
 
 框架将元数据存储在装饰类上：
 
 ```python
-@service(name="my_service", deps=[DatabaseService])
+@service()
 class MyService:
     pass
 
@@ -185,40 +193,63 @@ hasattr(MyService, "__cf_service_meta__")  # True
 ```
 
 元数据类：
-- `ServiceMeta`：服务的元数据
-- `ModuleMeta`：模块的元数据（扩展 ServiceMeta）
-- `RouterMeta`：路由的元数据（扩展 ServiceMeta）
+- `ServiceMeta(name: str)`：服务元数据（无 `deps` 字段）
+- `ModuleMeta(name: str, services: list[type])`：模块元数据（扩展 ServiceMeta）
+- `RouterMeta(name: str, prefix: str, tags: list[str], routes: list)`：路由元数据（扩展 ServiceMeta）
 
 ## 标记系统
 
 标记标识类的类型：
 
-- `__cf_service__`：标识服务类
-- `__cf_module__`：标识模块类
-- `__cf_router__`：标识路由类
+- `CF_SERVICE_MARKER = "__cf_service__"`：标识服务类
+- `CF_MODULE_MARKER = "__cf_module__"`：标识模块类
+- `CF_ROUTER_MARKER = "__cf_router__"`：标识路由类
 
 辅助函数：
-- `is_cf_service()`：检查类是否为服务
-- `is_cf_module()`：检查类是否为模块
-- `is_cf_router()`：检查类是否为路由
+- `is_cf_service(cls)`：检查类是否为服务
+- `is_cf_module(cls)`：检查类是否为模块
+- `is_cf_router(cls)`：检查类是否为路由
 
 ## 依赖注入流程
 
 ```
-1. 收集所有服务
+1. 收集模块的 services 列表中的所有服务
    ↓
-2. 在注册表中注册
+2. 递归注册（_register_entry_with_deps）
+   ├─ 注册到 Registry
+   └─ resolve_deps(cls) → 过滤 CF_SERVICE_MARKER → 递归注册依赖
    ↓
-3. 构建依赖图
+3. topological_sort(registry)
+   ├─ 遍历所有条目，通过 resolve_deps() 获取依赖
+   ├─ 构建入度表和邻接表
+   └─ Kahn 算法排序
    ↓
-4. 拓扑排序
+4. 按拓扑顺序创建实例
    ↓
-5. 创建实例
+5. 注入依赖（for attr_name, dep_cls in resolve_deps(type(inst)).items():
+   setattr(inst, attr_name, dep_instance)）
    ↓
-6. 注入依赖项
+6. 模块挂载子服务（setattr(self, entry.cls.__name__, inst)）
    ↓
 7. 运行生命周期
 ```
+
+## resolve_deps 函数
+
+`resolve_deps(cls)` 是 DI 系统的核心函数，位于 `canary_framework.common.markers`：
+
+```python
+def resolve_deps(cls: type) -> dict[str, type]:
+    """从类的类型注解中解析依赖映射。
+
+    使用 typing.get_type_hints 获取类型注解，
+    过滤出被 @service/@module/@router 装饰的类型。
+    返回 {属性名: 依赖类型}。
+    """
+```
+
+该函数被 `topological_sort()` 和 `ModuleBase._register_entry_with_deps()` 调用，
+替代了旧版中手动指定的 `deps` 参数。
 
 ## ASGI 集成
 
@@ -239,6 +270,7 @@ hasattr(MyService, "__cf_service_meta__")  # True
 - `CircularDependencyError`：检测到循环依赖
 - `LifecycleHookError`：生命周期钩子中的错误
 - `ServiceNotFoundError`：注册表中未找到服务
+- `ConfigurationError`：配置错误
 
 ## 可扩展性
 
@@ -251,7 +283,7 @@ hasattr(MyService, "__cf_service_meta__")  # True
 
 ## 性能考虑
 
-- **启动**：O(n log n) 由于拓扑排序
+- **启动**：O(n + e) 由于拓扑排序（n=服务数，e=依赖边数）
 - **运行时**：服务查找 O(1)
 - **内存**：服务是单例，内存效率高
 - **请求**：由 Starlette 处理，非常快
@@ -261,6 +293,6 @@ hasattr(MyService, "__cf_service_meta__")  # True
 框架设计为可测试的：
 
 - 服务是普通类，易于实例化
-- 依赖项显式，易于模拟
+- 依赖通过注解声明，易于模拟
 - 生命周期方法可以单独调用
 - 没有全局状态，测试隔离
