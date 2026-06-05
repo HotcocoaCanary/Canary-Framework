@@ -9,7 +9,7 @@ from canary_framework import (
     # 装饰器
     config, service, module, router,
     get, post, put, delete, patch,
-    after_config, after_init, before_startup, before_shutdown,
+    after_init, before_startup, before_shutdown,
 
     # 配置
     CanaryConfig,
@@ -191,7 +191,6 @@ class AppConfig(CanaryConfig):
 
 **签名：**
 ```python
-def after_config(func) -> HookFunction
 def after_init(func) -> HookFunction
 def before_startup(func) -> HookFunction
 def before_shutdown(func) -> HookFunction
@@ -201,7 +200,7 @@ def before_shutdown(func) -> HookFunction
 ```python
 @service()
 class Database(ServiceBase):
-    @after_config
+    @after_init
     async def connect(self):
         pass
 
@@ -248,12 +247,11 @@ from canary_framework.common.config import CanaryConfig
 服务的基类。
 
 **属性：**
-- `config`：配置对象（在配置阶段设置）
+- `config`：配置对象（通过 DI 注入）
 - `_cf_hooks`：内部钩子注册表
 - `_cf_parent_registry`：父注册表引用
 
 **方法：**
-- `async configure(config_instance: CanaryConfig | None = None)`：配置服务
 - `async init()`：初始化服务
 - `async startup()`：启动服务
 - `async shutdown()`：关闭服务
@@ -278,7 +276,6 @@ from canary_framework.common.config import CanaryConfig
 - `asgi_app`：带有挂载子服务的 Starlette 路由
 
 **方法：**
-- `async configure(config_instance: CanaryConfig | None = None)`：配置模块和所有服务
 - `async init()`：初始化模块和所有服务
 - `async startup()`：启动模块和所有服务
 - `async shutdown()`：关闭模块和所有服务
@@ -294,7 +291,6 @@ from canary_framework.common.config import CanaryConfig
 - `asgi_app`：带有收集路由的 Starlette 路由
 
 **方法：**
-- `async configure(config_instance: CanaryConfig | None = None)`：配置路由
 - `async startup()`：启动路由（自动注册 OpenAPI 文档）
 - `get_mount_path()`：获取此路由的挂载路径
 - `_cf_get_root_routes()`：获取 ASGI 应用的根路由
@@ -308,7 +304,6 @@ from canary_framework.common.config import CanaryConfig
 生命周期钩子阶段。
 
 **值：**
-- `LifecycleHook.AFTER_CONFIG`：`"after_config"`
 - `LifecycleHook.AFTER_INIT`：`"after_init"`
 - `LifecycleHook.BEFORE_STARTUP`：`"before_startup"`
 - `LifecycleHook.BEFORE_SHUTDOWN`：`"before_shutdown"`
@@ -465,7 +460,6 @@ HookDict = Dict[LifecycleHook, Optional[Callable[..., object]]]
 **LifecycleAware 协议：**
 ```python
 class LifecycleAware(Protocol):
-    async def configure(self, config_instance=None) -> None: ...
     async def init(self) -> None: ...
     async def startup(self) -> None: ...
     async def shutdown(self) -> None: ...
@@ -501,7 +495,6 @@ Canary Framework 的当前版本。
 - `__cf_name__`：自动生成的服务/模块/路由名称
 
 钩子方法具有：
-- `__cf_after_config__`：`True`
 - `__cf_after_init__`：`True`
 - `__cf_before_startup__`：`True`
 - `__cf_before_shutdown__`：`True`

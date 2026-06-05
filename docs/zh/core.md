@@ -91,7 +91,7 @@ class App(ModuleBase):
 - `@module(services=[...])`：将类标记为模块容器
 - `@router(prefix="", *, tags=None)`：将类标记为路由
 - `@get/@post 等`：将方法标记为路由处理器
-- `@after_config/@after_init/@before_startup/@before_shutdown`：将方法标记为生命周期钩子
+- `@after_init/@before_startup/@before_shutdown`：将方法标记为生命周期钩子
 
 ### 2. 基类
 
@@ -173,10 +173,10 @@ class UserService(ServiceBase):
 app = App()
 ```
 
-### 步骤 2：配置
+### 步骤 2：初始化
 
 ```python
-await app.configure(config)  # config 必须是 CanaryConfig | None
+await app.init()
 ```
 
 1. 从模块的 `services` 列表收集所有服务
@@ -185,10 +185,12 @@ await app.configure(config)  # config 必须是 CanaryConfig | None
 4. 调用 `topological_sort(registry)` 确定启动顺序
 5. 按顺序实例化所有服务
 6. 调用 `setattr` 以注解键名注入每个依赖
-7. 按顺序调用每个服务的 `configure()`
-8. 运行 `@after_config` 钩子
+7. Config 自动发现：`services` 列表中通过 `issubclass(CanaryConfig)` 检查的类被视为配置
+8. 为每个实例设置 `_cf_parent_registry`
+9. 按顺序调用每个服务的 `init()`
+10. 运行 `@after_init` 钩子
 
-### 步骤 3：初始化
+### 步骤 3：启动
 
 ```python
 await app.init()
@@ -197,7 +199,7 @@ await app.init()
 1. 按顺序调用每个服务的 `init()`
 2. 运行 `@after_init` 钩子
 
-### 步骤 4：启动
+### 步骤 3：启动
 
 ```python
 await app.startup()
@@ -206,7 +208,7 @@ await app.startup()
 1. 运行 `@before_startup` 钩子
 2. 按顺序调用每个服务的 `startup()`
 
-### 步骤 5：请求处理
+### 步骤 4：请求处理
 
 模块作为 ASGI 应用：
 - 从服务中收集所有路由
@@ -214,7 +216,7 @@ await app.startup()
 - 在其 prefix 路径上挂载子路由
 - 将请求路由到带有自动绑定参数的处理程序
 
-### 步骤 6：关闭
+### 步骤 5：关闭
 
 ```python
 await app.shutdown()

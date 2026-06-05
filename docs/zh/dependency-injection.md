@@ -167,7 +167,7 @@ class App(ModuleBase):
     pass
 
 app = App()
-await app.configure(config)  # config: CanaryConfig | None
+await app.init()
 
 # 通过类名直接访问子服务
 app.Database    # Database 服务实例

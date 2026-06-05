@@ -52,10 +52,9 @@ class UserRepo(ServiceBase):
 Services go through a well-defined lifecycle:
 
 1. **Instantiation**: Service instance is created
-2. **Configuration**: `configure(config_instance)` is called; `@after_config` hooks run
-3. **Initialization**: `init()` is called; `@after_init` hooks run
-4. **Startup**: `startup()` is called; `@before_startup` hooks run before
-5. **Shutdown**: `@before_shutdown` hooks run, then `shutdown()` is called
+2. **Initialization**: `init()` is called; `@after_init` hooks run
+3. **Startup**: `startup()` is called; `@before_startup` hooks run before
+4. **Shutdown**: `@before_shutdown` hooks run, then `shutdown()` is called
 
 You can hook into these phases using lifecycle decorators. See the [Lifecycle](./lifecycle.md) documentation for details.
 
@@ -63,8 +62,6 @@ You can hook into these phases using lifecycle decorators. See the [Lifecycle](.
 
 Classes decorated with `@service()` must explicitly inherit from `ServiceBase`, which provides:
 
-- `config` attribute: Access to configuration passed during configure phase
-- `configure(config_instance=None)` method: Configures the service
 - `init()` method: Initializes the service
 - `startup()` method: Starts the service
 - `shutdown()` method: Shuts down the service
@@ -72,7 +69,7 @@ Classes decorated with `@service()` must explicitly inherit from `ServiceBase`, 
 ## Complete Example
 
 ```python
-from canary_framework import service, after_config, after_init, before_startup, before_shutdown
+from canary_framework import service, after_init, before_startup, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
@@ -81,7 +78,7 @@ class Cache(ServiceBase):
         self.store = {}
         self.connection = None
 
-    @after_config
+    @after_init
     async def connect(self):
         self.connection = "connected"
         print("Cache connected")
@@ -130,7 +127,6 @@ import pytest
 @pytest.mark.asyncio
 async def test_cache():
     svc = Cache()
-    await svc.configure()
     await svc.init()
     await svc.startup()
 

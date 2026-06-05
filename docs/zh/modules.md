@@ -77,7 +77,7 @@ class App(ModuleBase):
 
 ```python
 app = App()
-await app.configure(config)
+await app.init()
 
 # 通过类名访问子服务（非 snake_case）
 app.Database    # Database 服务实例
@@ -93,18 +93,15 @@ app.Posts       # Posts 子模块实例
 ```python
 app = App()
 
-# 1. 配置阶段：按依赖顺序配置所有服务
-await app.configure(config)
-
-# 2. 初始化阶段：初始化所有服务
+# 1. 初始化阶段：按依赖顺序初始化所有服务
 await app.init()
 
-# 3. 启动阶段：启动所有服务
+# 2. 启动阶段：启动所有服务
 await app.startup()
 
 # ... 应用运行 ...
 
-# 4. 关闭阶段：按逆序关闭所有服务
+# 3. 关闭阶段：按逆序关闭所有服务
 await app.shutdown()
 ```
 
@@ -124,7 +121,6 @@ class AppConfig(CanaryConfig):
 async def setup():
     cfg = AppConfig()
     app = App()
-    await app.configure(cfg)
     await app.init()
     return app, cfg
 
@@ -144,8 +140,7 @@ uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
 
 使用 `@module()` 装饰的类必须显式继承 `ModuleBase`，该类提供：
 
-- `config` 属性：访问配置
-- `configure(config_instance=None)` 方法：配置模块和所有服务
+- `config` 属性：访问通过 DI 注入的配置
 - `init()` 方法：初始化模块和所有服务
 - `startup()` 方法：启动模块和所有服务
 - `shutdown()` 方法：关闭模块和所有服务

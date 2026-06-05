@@ -9,7 +9,7 @@ from canary_framework import (
     # Decorators
     config, service, module, router,
     get, post, put, delete, patch,
-    after_config, after_init, before_startup, before_shutdown,
+    after_init, before_startup, before_shutdown,
 
     # Config
     CanaryConfig,
@@ -206,7 +206,6 @@ Mark methods as lifecycle hooks.
 
 **Signatures:**
 ```python
-def after_config(func) -> HookFunction
 def after_init(func) -> HookFunction
 def before_startup(func) -> HookFunction
 def before_shutdown(func) -> HookFunction
@@ -214,12 +213,12 @@ def before_shutdown(func) -> HookFunction
 
 **Example:**
 ```python
-from canary_framework import service, after_config, before_shutdown
+from canary_framework import service, after_init, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
 class Database(ServiceBase):
-    @after_config
+    @after_init
     async def connect(self):
         pass
 
@@ -273,12 +272,10 @@ from canary_framework.core.service import ServiceBase
 ```
 
 **Attributes:**
-- `config`: Configuration object (`CanaryConfig | None`), set during configure phase
 - `_cf_hooks`: Internal hook registry (lazily populated)
 - `_cf_parent_registry`: Parent registry reference (set by parent module)
 
 **Methods:**
-- `async configure(config_instance: CanaryConfig | None = None)`: Configure the service. Sets `self.config` and invokes `AFTER_CONFIG` hook. Raises `TypeError` if `config_instance` is not `CanaryConfig` or `None`.
 - `async init()`: Initialize the service. Invokes `AFTER_INIT` hook.
 - `async startup()`: Start the service. Invokes `BEFORE_STARTUP` hook.
 - `async shutdown()`: Shutdown the service. Invokes `BEFORE_SHUTDOWN` hook.
@@ -298,7 +295,6 @@ from canary_framework.core.module import ModuleBase
 ```
 
 **Attributes:**
-- `config`: Configuration object (`CanaryConfig | None`)
 - `_cf_parent_registry`: Parent registry (if any)
 - `_cf_registry`: Service registry for this module
 - `_cf_startup_order`: List of service names in topological order
@@ -308,8 +304,7 @@ from canary_framework.core.module import ModuleBase
 - `asgi_app`: Starlette `Router` with mounted child ASGI apps and root routes
 
 **Methods:**
-- `async configure(config_instance: CanaryConfig | None = None)`: Register services recursively, topological sort, instantiate, DI wire, configure children
-- `async init()`: Initialize module and all children in topological order
+- `async init()`: Register services recursively, topological sort, instantiate, DI wire, init children. Config is auto-discovered from services list via `issubclass(CanaryConfig)`.
 - `async startup()`: Start module and all children in topological order
 - `async shutdown()`: Shutdown module and all children in reverse topological order
 - `_register_entry_with_deps(cls, registry)`: Recursively register services with annotation-resolved dependencies
@@ -329,7 +324,6 @@ from canary_framework.core.router import RouterBase
 - `asgi_app`: Starlette `Router` with collected routes (lazily built)
 
 **Methods:**
-- `async configure(config_instance: CanaryConfig | None = None)`: Configure the router (inherited from `ServiceBase`)
 - `async startup()`: Overrides `ServiceBase.startup()`. Auto-generates OpenAPI schema from sibling routers, builds documentation endpoints, registers root routes. First-wins registration for docs across sibling routers.
 - `get_mount_path()`: Returns `meta.prefix` if set, otherwise `"/{name}"`
 - `_cf_get_root_routes()`: Returns documentation root routes (`/docs`, `/redoc`, `/openapi.json`) when in a module context
@@ -343,7 +337,6 @@ from canary_framework.core.router import RouterBase
 Lifecycle hook phases.
 
 **Values:**
-- `LifecycleHook.AFTER_CONFIG`: `"after_config"`
 - `LifecycleHook.AFTER_INIT`: `"after_init"`
 - `LifecycleHook.BEFORE_STARTUP`: `"before_startup"`
 - `LifecycleHook.BEFORE_SHUTDOWN`: `"before_shutdown"`
@@ -504,7 +497,6 @@ HookDict = dict[LifecycleHook, Callable[..., object] | None]
 **LifecycleAware Protocol:**
 ```python
 class LifecycleAware(Protocol):
-    async def configure(self, config_instance=None) -> None: ...
     async def init(self) -> None: ...
     async def startup(self) -> None: ...
     async def shutdown(self) -> None: ...
@@ -545,7 +537,6 @@ Decorated classes have these internal attributes set:
 - `__cf_name__`: Auto-generated name (e.g., `"DatabaseService"`)
 
 Hook methods have:
-- `__cf_after_config__`: `True`
 - `__cf_after_init__`: `True`
 - `__cf_before_startup__`: `True`
 - `__cf_before_shutdown__`: `True`
@@ -577,5 +568,7 @@ Key changes from the old API:
 | `data = await request.json()` | `def handler(self, body: MyModel)` with `request_model` |
 | `uvicorn.run("main:App")` | `uvicorn.run(app, lifespan="on")` |
 | Plain dict passed to `configure()` | `CanaryConfig` subclass required |
+| `@after_config` | `@after_init` — configure phase removed |
+| `await app.configure(cfg)` | `await app.init()` — single init call |
 | `make_subclass()` utility | Removed — explicit inheritance |
 | `CF_MODULE_MARKER` / `CF_ROUTER_MARKER` | Removed — `isinstance` checks on meta types |

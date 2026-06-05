@@ -61,12 +61,12 @@ class App(ModuleBase):
 服务是应用的构建块，封装业务逻辑：
 
 ```python
-from canary_framework import service, after_config
+from canary_framework import service, after_init, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
 class Database(ServiceBase):
-    @after_config
+    @after_init
     async def connect(self):
         print("Database connected")
 ```

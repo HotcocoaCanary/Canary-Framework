@@ -7,7 +7,7 @@ Canary Framework provides a comprehensive lifecycle management system for servic
 Every service and module goes through these phases:
 
 ```
-Instantiation → Configuration → Initialization → Startup → Shutdown
+Instantiation → Initialization → Startup → Shutdown
 ```
 
 ### 1. Instantiation
@@ -22,33 +22,9 @@ class MyService(ServiceBase):
         self.data = []
 ```
 
-### 2. Configuration
+### 2. Initialization
 
-The `configure(config_instance)` method is called, where you can set up connections and access configuration:
-
-```python
-@service()
-class MyService(ServiceBase):
-    async def configure(self, config_instance=None):
-        if config_instance:
-            self.config = config_instance
-```
-
-Use `@after_config` hook to run code after configuration:
-
-```python
-from canary_framework import after_config
-
-@service()
-class Database(ServiceBase):
-    @after_config
-    async def connect(self):
-        self.connection = await connect_to_db(self.config.db_url)
-```
-
-### 3. Initialization
-
-The `init()` method is called after all services are configured:
+The `init()` method is called after all services are instantiated:
 
 ```python
 @service()
@@ -70,7 +46,7 @@ class UserService(ServiceBase):
             await self.db.create_default_users()
 ```
 
-### 4. Startup
+### 3. Startup
 
 The `startup()` method is called when the application is ready to start:
 
@@ -94,7 +70,7 @@ class Server(ServiceBase):
         assert self.cache.connection is not None
 ```
 
-### 5. Shutdown
+### 4. Shutdown
 
 The `shutdown()` method is called when the application is stopping:
 
@@ -119,11 +95,10 @@ class Database(ServiceBase):
 
 ## Lifecycle Hooks
 
-Four decorators are available for hooking into the lifecycle:
+Three decorators are available for hooking into the lifecycle:
 
 | Decorator | Phase | Timing |
 |-----------|-------|--------|
-| `@after_config` | Configuration | After `configure()` is called |
 | `@after_init` | Initialization | After `init()` is called |
 | `@before_startup` | Startup | Before `startup()` is called |
 | `@before_shutdown` | Shutdown | Before `shutdown()` is called |
@@ -135,10 +110,6 @@ Hooks can be either synchronous or asynchronous:
 ```python
 @service()
 class MyService(ServiceBase):
-    @after_config
-    def sync_hook(self):
-        print("Configured")
-
     @after_init
     async def async_hook(self):
         await some_async_operation()
@@ -155,9 +126,6 @@ class App(ModuleBase):
 
 app = App()
 
-# Configure all services in dependency order
-await app.configure(config)
-
 # Initialize all services
 await app.init()
 
@@ -171,7 +139,6 @@ await app.shutdown()
 ```
 
 The execution order follows topological sort:
-- **Configure**: dependencies first (A → B)
 - **Init**: dependencies first (A → B)
 - **Startup**: dependencies first (A → B)
 - **Shutdown**: reverse order (B → A)
@@ -181,7 +148,7 @@ The execution order follows topological sort:
 ```python
 from canary_framework import (
     service, module,
-    after_config, after_init, before_startup, before_shutdown
+    after_init, before_startup, before_shutdown
 )
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
@@ -190,10 +157,6 @@ calls = []
 
 @service()
 class A(ServiceBase):
-    @after_config
-    def config_a(self):
-        calls.append("A: after_config")
-
     @after_init
     def init_a(self):
         calls.append("A: after_init")
@@ -209,10 +172,6 @@ class A(ServiceBase):
 @service()
 class B(ServiceBase):
     a: A  # B depends on A
-
-    @after_config
-    def config_b(self):
-        calls.append("B: after_config")
 
     @after_init
     def init_b(self):
@@ -232,14 +191,11 @@ class App(ModuleBase):
 
 # Run lifecycle
 app = App()
-await app.configure(config)
 await app.init()
 await app.startup()
 await app.shutdown()
 
 # Resulting order:
-# A: after_config
-# B: after_config
 # A: after_init
 # B: after_init
 # A: before_startup
@@ -264,23 +220,21 @@ class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8000
 
-@module(services=[...])
+@module(services=[AppConfig, ...])
 class App(ModuleBase):
-    pass
+    config: AppConfig
 
 async def setup():
-    cfg = AppConfig()
     app = App()
-    await app.configure(cfg)
     await app.init()
-    return app, cfg
+    return app
 
 if __name__ == "__main__":
     import asyncio
     import uvicorn
 
-    app, cfg = asyncio.run(setup())
-    uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
+    app = asyncio.run(setup())
+    uvicorn.run(app, host="0.0.0.0", port=8000, lifespan="on")
 ```
 
 `ServiceBase.__call__` handles the ASGI lifespan:
@@ -289,7 +243,7 @@ if __name__ == "__main__":
 
 ## Configuration
 
-Pass configuration during the configure phase:
+Config is a regular DI service. Add it to your module and inject it:
 
 ```python
 from canary_framework import config
@@ -302,41 +256,35 @@ class AppConfig(CanaryConfig):
 
 @service()
 class Database(ServiceBase):
-    @after_config
+    config: AppConfig
+
+    @after_init
     async def connect(self):
         url = self.config.database_url
         self.connection = await connect(url)
 
 app = App()
-await app.configure(AppConfig())
-```
+await app.init()
 
 ### Logging Configuration
 
-The framework automatically configures logging during `configure()`. No manual
+The framework automatically configures logging during `init()`. No manual
 `logging.basicConfig()` is needed.
 
-**Default behavior**: When you call `app.configure(config)`, the framework adds a
+**Default behavior**: When you call `app.init()`, the framework adds a
 `StreamHandler` to the `cf` logger with `INFO` level:
 
 ```python
 from canary_framework import module
 
-@module(services=[...])
+@module(services=[AppConfig, ...])
 class App(ModuleBase):
-    pass
-
-from canary_framework import config
-from canary_framework.common.config import CanaryConfig
-
-@config
-class AppConfig(CanaryConfig):
-    database_url: str = "sqlite:///mydb.db"
+    config: AppConfig
 
 app = App()
-await app.configure(AppConfig())
+await app.init()
 # Framework logs now visible on stdout:
-# [2026-06-02 13:00:00] cf.module             INFO     Configuring module: AppModule
+# [2026-06-02 13:00:00] cf.module             INFO     Initializing module: AppModule
 ```
 
 **Custom log level**: Set `log_level` on your config object to control the
@@ -362,16 +310,15 @@ If a hook raises an exception, it's wrapped in `LifecycleHookError`:
 from canary_framework.common import LifecycleHookError
 
 try:
-    await app.configure(config)
+    await app.init()
 except LifecycleHookError as e:
     print(f"Lifecycle error: {e}")
 ```
 
 ## Best Practices
 
-1. **Use `@after_config` for connections**: Establish connections after configuration
-2. **Use `@after_init` for data setup**: Set up initial data after dependencies are ready
-3. **Use `@before_startup` for validation**: Verify everything is ready before serving
-4. **Use `@before_shutdown` for cleanup**: Gracefully close connections and save state
-5. **Keep hooks focused**: Each hook should do one thing well
-6. **Handle errors gracefully**: Catch and log exceptions in hooks
+1. **Use `@after_init` for connections and data setup**: Establish connections and set up initial data during init
+2. **Use `@before_startup` for validation**: Verify everything is ready before serving
+3. **Use `@before_shutdown` for cleanup**: Gracefully close connections and save state
+4. **Keep hooks focused**: Each hook should do one thing well
+5. **Handle errors gracefully**: Catch and log exceptions in hooks

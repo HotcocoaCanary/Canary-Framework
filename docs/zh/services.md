@@ -52,10 +52,9 @@ class UserRepo(ServiceBase):
 服务经历明确定义的生命周期：
 
 1. **实例化**：创建服务实例
-2. **配置**：调用 `configure(config_instance)`；运行 `@after_config` 钩子
-3. **初始化**：调用 `init()`；运行 `@after_init` 钩子
-4. **启动**：调用 `startup()`；之前运行 `@before_startup` 钩子
-5. **关闭**：运行 `@before_shutdown` 钩子，然后调用 `shutdown()`
+2. **初始化**：调用 `init()`；运行 `@after_init` 钩子
+3. **启动**：调用 `startup()`；之前运行 `@before_startup` 钩子
+4. **关闭**：运行 `@before_shutdown` 钩子，然后调用 `shutdown()`
 
 您可以使用生命周期装饰器介入这些阶段。有关详细信息，请参阅[生命周期](./lifecycle.md)文档。
 
@@ -63,8 +62,7 @@ class UserRepo(ServiceBase):
 
 使用 `@service()` 装饰的类必须显式继承 `ServiceBase`，该类提供：
 
-- `config` 属性：访问配置阶段传递的配置
-- `configure(config_instance=None)` 方法：配置服务
+- `config` 属性：访问通过 DI 注入的配置
 - `init()` 方法：初始化服务
 - `startup()` 方法：启动服务
 - `shutdown()` 方法：关闭服务
@@ -72,7 +70,7 @@ class UserRepo(ServiceBase):
 ## 完整示例
 
 ```python
-from canary_framework import service, after_config, after_init, before_startup, before_shutdown
+from canary_framework import service, after_init, before_startup, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
@@ -81,7 +79,7 @@ class Cache(ServiceBase):
         self.store = {}
         self.connection = None
 
-    @after_config
+    @after_init
     async def connect(self):
         self.connection = "connected"
         print("Cache connected")
@@ -130,7 +128,6 @@ import pytest
 @pytest.mark.asyncio
 async def test_cache():
     svc = Cache()
-    await svc.configure()
     await svc.init()
     await svc.startup()
 
