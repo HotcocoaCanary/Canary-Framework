@@ -1,12 +1,12 @@
 """ServiceBase — 具有钩子调用功能的生命周期感知服务基类。
 
-提供configure/init/startup/shutdown生命周期方法，
-支持通过@after_config、@after_init、@before_startup、@before_shutdown装饰器声明式地注册钩子。
+提供init/startup/shutdown生命周期方法，
+支持通过@after_init、@before_startup、@before_shutdown装饰器声明式地注册钩子。
 
 ServiceBase — lifecycle-aware service with hook invocation.
 
-Provides configure / init / startup / shutdown lifecycle with
-declarative hook support via @after_config, @after_init,
+Provides init / startup / shutdown lifecycle with
+declarative hook support via @after_init,
 @before_startup, @before_shutdown.
 """
 
@@ -17,7 +17,6 @@ import inspect
 from starlette.types import Receive, Scope, Send
 
 from canary_framework.common import LifecycleHook, LifecycleHookError
-from canary_framework.common.config import CanaryConfig
 from canary_framework.engine.hooks import HookDict, find_hooks
 from canary_framework.engine.logging import get_logger
 
@@ -27,11 +26,11 @@ _log = get_logger("service")
 class ServiceBase:
     """@service装饰类的自动注入基类。
 
-    提供configure/init/startup/shutdown生命周期方法。
+    提供init/startup/shutdown生命周期方法。
 
     Auto-injected base for @service-decorated classes.
 
-    Provides configure / init / startup / shutdown lifecycle.
+    Provides init / startup / shutdown lifecycle.
     """
 
     def __init__(self) -> None:
@@ -40,41 +39,8 @@ class ServiceBase:
         Initializes the ServiceBase instance.
         """
         self._cf_hooks: HookDict | None = None
-        self.config: CanaryConfig | None = None
         self._cf_parent_registry: object | None = None
         super().__init__()
-
-    async def configure(self, config_instance: CanaryConfig | None = None) -> None:
-        """配置服务。
-
-        设置配置实例并调用AFTER_CONFIG钩子。
-        只接受 CanaryConfig 子类实例或 None。
-
-        Args:
-            config_instance: CanaryConfig 实例或 None。
-
-        Raises:
-            TypeError: 如果 config_instance 不是 CanaryConfig 子类。
-
-        Configure the service.
-
-        Sets the config instance and invokes the AFTER_CONFIG hook.
-        Only accepts CanaryConfig subclass instances or None.
-
-        Args:
-            config_instance: CanaryConfig instance or None.
-
-        Raises:
-            TypeError: If config_instance is not a CanaryConfig subclass.
-        """
-        if config_instance is not None and not isinstance(config_instance, CanaryConfig):
-            raise TypeError(
-                f"config_instance must be a CanaryConfig subclass or None, "
-                f"got {type(config_instance).__name__}"
-            )
-        _log.debug("Configuring service: %s", type(self).__name__)
-        self.config = config_instance
-        await self._invoke_hook(LifecycleHook.AFTER_CONFIG)
 
     async def init(self) -> None:
         """初始化服务。

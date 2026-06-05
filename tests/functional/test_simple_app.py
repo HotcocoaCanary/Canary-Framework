@@ -5,7 +5,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
 from canary_framework import (
-    after_config,
+    after_init,
     before_startup,
     get,
     module,
@@ -72,7 +72,7 @@ class TestSimpleApp:
         # Define the main module
         @module(services=[TodoRouter])
         class TodoApp(ModuleBase):
-            @after_config
+            @after_init
             async def setup_test_data(self) -> None:
                 # Add some test data
                 self.TodoRouter.todo_service.create(  # type: ignore[attr-defined]
@@ -88,7 +88,7 @@ class TestSimpleApp:
 
         # Create and configure the app
         app = TodoApp()
-        await app.configure()
+        await app.init()
 
         # Test the API endpoints
         async with AsyncClient(
@@ -130,7 +130,7 @@ class TestSimpleApp:
             pass
 
         app = MyApp()
-        await app.configure()
+        await app.init()
         await app.startup()
 
         async with AsyncClient(

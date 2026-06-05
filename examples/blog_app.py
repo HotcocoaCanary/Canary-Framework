@@ -5,7 +5,7 @@ Demonstrates:
 - Pydantic-based configuration with @config + CanaryConfig
 - Explicit base class inheritance (ServiceBase, ModuleBase, RouterBase)
 - Annotation-based dependency injection
-- Lifecycle hooks (@after_config, @before_shutdown)
+- Lifecycle hooks (@after_init, @before_shutdown)
 - Full CRUD router with path/query/body parameter binding
 - Auto-generated OpenAPI docs (Swagger + ReDoc)
 - Standalone execution with uvicorn
@@ -16,7 +16,7 @@ import asyncio
 from pydantic import BaseModel, Field
 
 from canary_framework import (
-    after_config,
+    after_init,
     before_shutdown,
     config,
     delete,
@@ -58,7 +58,7 @@ class Database(ServiceBase):
         self.connected = False
         self._storage: dict[int, dict] = {}
 
-    @after_config
+    @after_init
     async def connect(self):
         self.connected = True
         print("[Database] Connected")
@@ -161,7 +161,7 @@ class AppConfig(CanaryConfig):
 
 # ---- Module (Application) ----
 
-@module(services=[Database, PostService, PostRouter])
+@module(services=[AppConfig, Database, PostService, PostRouter])
 class BlogApp(ModuleBase):
     """Main application module. Composes all services and routers."""
 
@@ -169,15 +169,16 @@ class BlogApp(ModuleBase):
 # ---- Entry Point ----
 
 async def setup():
-    cfg = AppConfig()
     app = BlogApp()
-    await app.configure(cfg)
     await app.init()
-    return app, cfg
+    return app
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    app, cfg = asyncio.run(setup())
-    uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
+    app = asyncio.run(setup())
+    config = getattr(app, "AppConfig", None)
+    host = config.host if config else "0.0.0.0"
+    port = config.port if config else 8001
+    uvicorn.run(app, host=host, port=port, lifespan="on")

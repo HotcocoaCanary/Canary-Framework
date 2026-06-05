@@ -313,7 +313,14 @@ class RouterBase(ServiceBase):
                 if other_meta is not None and other_meta is not meta:
                     router_metas.append(other_meta)
 
-        config = self.config
+        config = next(
+            (
+                getattr(self, a)
+                for a in dir(self)
+                if isinstance(getattr(self, a, None), CanaryConfig)
+            ),
+            None,
+        )
         cfg: CanaryConfig = config if isinstance(config, CanaryConfig) else CanaryConfig()
         schema = generate_openapi_schema(
             router_metas,

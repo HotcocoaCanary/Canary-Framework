@@ -4,7 +4,6 @@ import pytest
 
 from canary_framework.common import CF_HOOK_MARKER_MAP, LifecycleHook
 from canary_framework.decorators.lifecycle import (
-    after_config,
     after_init,
     before_shutdown,
     before_startup,
@@ -14,15 +13,6 @@ from canary_framework.decorators.lifecycle import (
 @pytest.mark.unit
 class TestLifecycleDecorators:
     """Tests for lifecycle decorators."""
-
-    def test_after_config_decorator(self) -> None:
-        """Test @after_config decorator."""
-
-        @after_config
-        def my_hook() -> None:
-            pass
-
-        assert getattr(my_hook, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_CONFIG], False) is True
 
     def test_after_init_decorator(self) -> None:
         """Test @after_init decorator."""
@@ -57,5 +47,5 @@ class TestLifecycleDecorators:
         def original() -> str:
             return "test"
 
-        decorated = after_config(original)
+        decorated = after_init(original)
         assert decorated() == "test"

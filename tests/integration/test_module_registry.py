@@ -28,7 +28,7 @@ class TestModuleRegistry:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         # Check that registry has both services
         assert app._cf_registry is not None
@@ -48,7 +48,7 @@ class TestModuleRegistry:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         # Check that service instance is created
         entry = app._cf_registry.get_by_class(MyService)  # type: ignore[union-attr]
@@ -77,7 +77,7 @@ class TestModuleRegistry:
             pass
 
         app = ParentModule()
-        await app.configure()
+        await app.init()
 
         # Check that shared service is available
         assert app.ChildModule is not None  # type: ignore[attr-defined]

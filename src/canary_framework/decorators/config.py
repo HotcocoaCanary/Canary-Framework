@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from canary_framework.common.config import CF_CONFIG_MARKER, CanaryConfig
+from canary_framework.common import (
+    CF_CONFIG_MARKER,
+    CF_NAME_ATTR,
+    CF_SERVICE_MARKER,
+    CF_SERVICE_META,
+    CanaryConfig,
+    ServiceMeta,
+)
 
 
 def config() -> Callable[[type], type[CanaryConfig]]:
@@ -34,6 +41,10 @@ def config() -> Callable[[type], type[CanaryConfig]]:
                 f"@config '{cls.__name__}': must inherit from CanaryConfig. "
                 f"Did you forget 'class {cls.__name__}(CanaryConfig):'?"
             )
+        name = cls.__name__
+        setattr(cls, CF_SERVICE_MARKER, True)
+        setattr(cls, CF_SERVICE_META, ServiceMeta(name=name))
+        setattr(cls, CF_NAME_ATTR, name)
         setattr(cls, CF_CONFIG_MARKER, True)
         return cls
 

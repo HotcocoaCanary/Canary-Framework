@@ -2,7 +2,6 @@
 
 import pytest
 
-from canary_framework.common.config import CanaryConfig
 from canary_framework.core.module import ModuleBase
 
 
@@ -17,15 +16,12 @@ class TestModuleBase:
         assert module._cf_registry is None
         assert module._cf_startup_order == []
         assert module._cf_asgi_app is None
-        assert module.config is None
 
     @pytest.mark.asyncio
-    async def test_configure_empty_module(self) -> None:
-        """Test configure on empty module."""
+    async def test_init_empty_module(self) -> None:
+        """Test init on empty module."""
         module = ModuleBase()
-        config = CanaryConfig(host="0.0.0.0")
-        await module.configure(config)
-        assert module.config == config
+        await module.init()
 
     def test_asgi_app_lazy_loaded(self) -> None:
         """Test asgi_app is lazily loaded."""
