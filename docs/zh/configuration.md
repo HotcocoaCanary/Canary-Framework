@@ -41,24 +41,22 @@ class AppConfig(CanaryConfig):
     log_level: str = "DEBUG"
 ```
 
-## 传递给 configure()
+## 将 Config 作为服务使用
 
-配置传递给模块的 `configure()` 方法：
+Config 是普通的 DI 服务。将其加入模块的 `services` 列表并通过注解注入：
 
 ```python
+@module(services=[AppConfig, Database, Posts])
+class BlogApp(ModuleBase):
+    config: AppConfig
+
 async def setup():
-    cfg = AppConfig()
     app = BlogApp()
-    await app.configure(cfg)   # 必须是 CanaryConfig 子类或 None
-    await app.init()
-    return app, cfg
+    await app.init()   # Config 通过 issubclass(CanaryConfig) 从 services 自动发现
+    return app
 ```
 
-`configure()` 仅接受 `CanaryConfig | None`。传递其他类型会引发 `TypeError`：
-
-```python
-await app.configure({"host": "0.0.0.0"})  # TypeError：必须是 CanaryConfig 子类
-```
+Config 通过 `@module(services=[...])` 自动发现 —— 任何通过 `issubclass(CanaryConfig)` 检查的类均被视为配置。
 
 ## 配置字段分组
 
@@ -78,10 +76,10 @@ class AppConfig(CanaryConfig):
 
 - **`log_level`** — 框架日志级别。有效值：`"DEBUG"`、`"INFO"`、`"WARNING"`、`"ERROR"`、`"CRITICAL"`。默认 `"INFO"`。
 
-如果未检测到现有处理器，`"cf"` 日志器会在 `configure()` 期间自动配置 `StreamHandler`。格式为：
+如果未检测到现有处理器，`"cf"` 日志器会在 `init()` 期间自动配置 `StreamHandler`。格式为：
 
 ```
-[YYYY-MM-DD HH:MM:SS] cf.module             INFO     Configuring module: AppModule
+[YYYY-MM-DD HH:MM:SS] cf.module             INFO     Initializing module: AppModule
 ```
 
 ### OpenAPI 信息
@@ -130,10 +128,12 @@ class AppConfig(CanaryConfig):
 
 @service()
 class Database(ServiceBase):
-    @after_config
+    config: AppConfig
+
+    @after_init
     async def connect(self):
-        url = self.config.database_url  # 访问自定义字段
+        url = self.config.database_url  # 通过注入的 config 访问自定义字段
         self.pool = await connect(url)
 ```
 
-自定义字段通过 `self.config.<field_name>` 在任何已配置的服务、路由或模块中访问。
+Config 字段通过注入的 `self.config` 属性在任何服务、路由或模块中访问。

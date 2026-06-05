@@ -37,7 +37,7 @@ my_blog/
 
 ```python
 # services/database.py
-from canary_framework import service, after_config, before_shutdown
+from canary_framework import service, after_init, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
@@ -45,7 +45,7 @@ class Database(ServiceBase):
     def __init__(self):
         self.connection = None
 
-    @after_config
+    @after_init
     async def connect(self):
         self.connection = "connected"
         print("Database connected")
@@ -60,7 +60,7 @@ class Database(ServiceBase):
 ```
 
 - `@service()` 自动将服务命名为 `DatabaseService`
-- 生命周期钩子 `@after_config` 和 `@before_shutdown` 管理连接的建立和拆除
+- 生命周期钩子 `@after_init` 和 `@before_shutdown` 管理连接的建立和拆除
 
 ## 4. 认证服务
 
@@ -187,7 +187,24 @@ class Posts(RouterBase):
 - 不再需要 `self, request` — 参数自动注入
 - 不再需要 `deps` 参数 — 依赖通过注解声明（`db: Database`, `auth: Auth`）
 
-## 6. 主应用模块
+## 6. 配置
+
+使用 `@config` 和 `CanaryConfig` 创建配置类：
+
+```python
+# config.py
+from canary_framework import config
+from canary_framework.common.config import CanaryConfig
+
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8080
+    openapi_title: str = "My Blog API"
+    log_level: str = "DEBUG"
+```
+
+## 7. 主应用模块
 
 将所有内容组合到主模块中：
 
@@ -199,13 +216,12 @@ from services.database import Database
 from services.auth import Auth
 from services.posts import Posts
 
-@module(services=[Database, Auth, Posts])
+@module(services=[AppConfig, Database, Auth, Posts])
 class BlogApp(ModuleBase):
-    pass
+    config: AppConfig
 
 async def setup():
     app = BlogApp()
-    await app.configure()
     await app.init()
     return app
 
@@ -214,13 +230,14 @@ if __name__ == "__main__":
     import uvicorn
 
     app = asyncio.run(setup())
-    uvicorn.run(app, lifespan="on")
+    uvicorn.run(app, host="0.0.0.0", port=8000, lifespan="on")
 ```
 
 - `@module(services=[...])` — 无需 `name=` 参数；自动命名为 `BlogAppModule`
+- Config 通过 `issubclass(CanaryConfig)` 从 `@module(services=[AppConfig, ...])` 自动发现
 - 子模块通过类属性名访问：`app.Database`, `app.Auth`, `app.Posts`
 
-## 7. 运行应用
+## 8. 运行应用
 
 ```bash
 python main.py
@@ -281,11 +298,9 @@ curl -X DELETE http://localhost:8000/api/posts/2
       log_level: str = "DEBUG"
 
   async def setup():
-      cfg = AppConfig()
       app = BlogApp()
-      await app.configure(cfg)
       await app.init()
-      return app, cfg
+      return app
   ```
 
 ## 下一步

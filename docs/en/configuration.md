@@ -41,24 +41,22 @@ class AppConfig(CanaryConfig):
     log_level: str = "DEBUG"
 ```
 
-## Passing to configure()
+## Using Config as a Service
 
-Configuration is passed to the module's `configure()` method:
+Config is a regular DI service. Add it to your module's `services` list and inject it via annotation:
 
 ```python
+@module(services=[AppConfig, Database, Posts])
+class BlogApp(ModuleBase):
+    config: AppConfig
+
 async def setup():
-    cfg = AppConfig()
     app = BlogApp()
-    await app.configure(cfg)   # Must be CanaryConfig subclass or None
-    await app.init()
-    return app, cfg
+    await app.init()   # Config auto-discovered from services via issubclass(CanaryConfig)
+    return app
 ```
 
-`configure()` accepts only `CanaryConfig | None`. Passing other types raises `TypeError`:
-
-```python
-await app.configure({"host": "0.0.0.0"})  # TypeError: must be CanaryConfig subclass
-```
+Config is auto-discovered from `@module(services=[...])` — any class that passes `issubclass(CanaryConfig)` check is treated as the configuration.
 
 ## Configuration Field Groups
 
@@ -78,10 +76,10 @@ class AppConfig(CanaryConfig):
 
 - **`log_level`** — Framework log level. Valid values: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`, `"CRITICAL"`. Default `"INFO"`.
 
-The `"cf"` logger is automatically configured with a `StreamHandler` during `configure()` if no existing handlers are detected. The format is:
+The `"cf"` logger is automatically configured with a `StreamHandler` during `init()` if no existing handlers are detected. The format is:
 
 ```
-[YYYY-MM-DD HH:MM:SS] cf.module             INFO     Configuring module: AppModule
+[YYYY-MM-DD HH:MM:SS] cf.module             INFO     Initializing module: AppModule
 ```
 
 ### OpenAPI Info
@@ -130,10 +128,12 @@ class AppConfig(CanaryConfig):
 
 @service()
 class Database(ServiceBase):
-    @after_config
+    config: AppConfig
+
+    @after_init
     async def connect(self):
-        url = self.config.database_url  # Access custom field
+        url = self.config.database_url  # Access custom field via injected config
         self.pool = await connect(url)
 ```
 
-Custom fields are accessed via `self.config.<field_name>` in any service, router, or module that has been configured.
+Config fields are accessed via the injected `self.config` attribute in any service, router, or module.

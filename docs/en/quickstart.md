@@ -37,7 +37,7 @@ First, let's create a database service:
 
 ```python
 # services/database.py
-from canary_framework import service, after_config, before_shutdown
+from canary_framework import service, after_init, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
@@ -45,7 +45,7 @@ class Database(ServiceBase):
     def __init__(self):
         self.connection = None
 
-    @after_config
+    @after_init
     async def connect(self):
         self.connection = "connected"
         print("Database connected")
@@ -60,7 +60,7 @@ class Database(ServiceBase):
 ```
 
 - `@service()` automatically names this service `DatabaseService`
-- Lifecycle hooks `@after_config` and `@before_shutdown` manage connection setup and teardown
+- Lifecycle hooks `@after_init` and `@before_shutdown` manage connection setup and teardown
 
 ## 4. Auth Service
 
@@ -215,29 +215,26 @@ from canary_framework.core.module import ModuleBase
 from services.database import Database
 from services.auth import Auth
 from services.posts import Posts
-from config import AppConfig
 
-@module(services=[Database, Auth, Posts])
+@module(services=[AppConfig, Database, Auth, Posts])
 class BlogApp(ModuleBase):
-    pass
+    config: AppConfig
 
 async def setup():
-    cfg = AppConfig()
     app = BlogApp()
-    await app.configure(cfg)
     await app.init()
-    return app, cfg
+    return app
 
 if __name__ == "__main__":
     import asyncio
     import uvicorn
 
-    app, cfg = asyncio.run(setup())
-    uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
+    app = asyncio.run(setup())
+    uvicorn.run(app, host="0.0.0.0", port=8000, lifespan="on")
 ```
 
 - `@module(services=[...])` — no `name=` parameter; auto-named `BlogAppModule`
-- `configure()` accepts a `CanaryConfig` subclass — plain dicts are rejected
+- Config is auto-discovered from `@module(services=[AppConfig, ...])` via `issubclass(CanaryConfig)`
 - Module children are accessible as `app.Database`, `app.Auth`, `app.Posts` (class attribute names)
 
 ## 8. Run the Application

@@ -167,7 +167,7 @@ class App(ModuleBase):
     pass
 
 app = App()
-await app.configure(config)  # config: CanaryConfig | None
+await app.init()  # Config auto-discovered from services list
 
 # Access children directly by class name
 app.Database    # Database service instance

@@ -31,7 +31,6 @@ common/  ──►  core/  ──►  decorators/  ──►  engine/
 ```python
 def __init__(self):
     self._cf_hooks: HookDict | None = None     # Lazily discovered hooks
-    self.config: CanaryConfig | None = None     # Set during configure()
     self._cf_parent_registry: object | None = None  # Injected by parent module
 ```
 
@@ -39,7 +38,6 @@ def __init__(self):
 
 | Method | Signature | What it does |
 |---|---|---|
-| `configure(config_instance)` | `CanaryConfig \| None → None` | Sets `self.config`, invokes `AFTER_CONFIG` hook. Raises `TypeError` if `config_instance` is not `CanaryConfig` (or None). |
 | `init()` | `() → None` | Invokes `AFTER_INIT` hook. |
 | `startup()` | `() → None` | Invokes `BEFORE_STARTUP` hook. |
 | `shutdown()` | `() → None` | Invokes `BEFORE_SHUTDOWN` hook. |
@@ -67,13 +65,13 @@ Implements the ASGI lifespan protocol:
 
 ### `_invoke_hook`
 
-Lazy hook discovery via `find_hooks()` (engine/hooks.py). On first invocation, `find_hooks()` traverses the class MRO looking for methods marked with hook markers (`__cf_after_config__`, `__cf_after_init__`, etc.) and binds them to the instance. Supports both sync and async hooks. Any exception raised by a hook is wrapped in `LifecycleHookError`.
+Lazy hook discovery via `find_hooks()` (engine/hooks.py). On first invocation, `find_hooks()` traverses the class MRO looking for methods marked with hook markers (`__cf_after_init__`, `__cf_before_startup__`, `__cf_before_shutdown__`) and binds them to the instance. Supports both sync and async hooks. Any exception raised by a hook is wrapped in `LifecycleHookError`.
 
 ## ModuleBase Internals
 
 `ModuleBase` (core/module.py) extends `ServiceBase` and orchestrates child services.
 
-### `configure()` Flow
+### `init()` Flow
 
 ```
 register services recursively
@@ -86,9 +84,9 @@ DI wiring: resolve_deps → setattr injection
     ↓
 set _cf_parent_registry on all ServiceBase children
     ↓
-configure each child in order
+init each child in order
     ↓
-invoke AFTER_CONFIG hook
+invoke AFTER_INIT hook
 ```
 
 **Step-by-step:**
@@ -103,7 +101,7 @@ invoke AFTER_CONFIG hook
 
 5. **Parent registry injection**: `inst._cf_parent_registry = registry` is set on every `ServiceBase` instance. This is how Routers access sibling RouterMetas and how Agents will access the registry.
 
-6. **Child configure**: Each child's `configure(config_instance)` is called in topological order, passing the same config down the tree.
+6. **Child init**: Each child's `init()` is called in topological order. Config is auto-discovered from `services` list — any class passing `issubclass(CanaryConfig)` is treated as the configuration.
 
 ### `asgi_app` Property
 
@@ -116,8 +114,8 @@ Mount path collisions are detected and raise `ValueError`.
 
 ### Lifecycle Propagation
 
-All lifecycle methods (configure, init, startup, shutdown) propagate to children:
-- **Forward order** (topological): configure, init, startup
+All lifecycle methods (init, startup, shutdown) propagate to children:
+- **Forward order** (topological): init, startup
 - **Reverse order**: shutdown
 
 ## RouterBase Internals

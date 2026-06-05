@@ -7,7 +7,7 @@ Lightweight, decorator-driven Python async service framework. Core philosophy: *
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  @config(CanaryConfig)  ——  @module(services=[...])          │
-│       configures             composes & orchestrates         │
+│      auto-discovered          composes & orchestrates         │
 ├─────────────────────────────────────────────────────────────┤
 │  @service(ServiceBase)              @router(RouterBase)      │
 │    business logic                     HTTP routing           │
@@ -26,14 +26,14 @@ Lightweight, decorator-driven Python async service framework. Core philosophy: *
 The smallest unit. Encapsulates business logic with lifecycle hooks and annotation-driven dependency injection.
 
 ```python
-from canary_framework import service, after_config, before_shutdown
+from canary_framework import service, after_init, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
 class Database(ServiceBase):
     db_url: str = "sqlite:///app.db"
 
-    @after_config
+    @after_init
     async def connect(self):
         self.connection = await create_pool(self.db_url)
 
@@ -119,7 +119,7 @@ A complete minimal working example: Database service + PostService + PostRouter 
 from pydantic import BaseModel
 from canary_framework import (
     service, module, router, config, get, post,
-    after_config, before_shutdown, after_init,
+    before_shutdown, after_init,
 )
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
@@ -137,7 +137,7 @@ class Database(ServiceBase):
     def __init__(self):
         self.connected = False
 
-    @after_config
+    @after_init
     async def connect(self):
         self.connected = True
 
@@ -190,9 +190,9 @@ class PostRouter(RouterBase):
         return await self.posts.create_post(body.model_dump()), 201
 
 # ---- Module & Config ----
-@module(services=[Database, PostService, PostRouter])
+@module(services=[AppConfig, Database, PostService, PostRouter])
 class BlogApp(ModuleBase):
-    pass
+    config: AppConfig
 
 @config
 class AppConfig(CanaryConfig):
@@ -202,17 +202,15 @@ class AppConfig(CanaryConfig):
     log_level: str = "DEBUG"
 
 async def setup():
-    cfg = AppConfig()
     app = BlogApp()
-    await app.configure(cfg)
     await app.init()
-    return app, cfg
+    return app
 
 if __name__ == "__main__":
     import asyncio
     import uvicorn
-    app, cfg = asyncio.run(setup())
-    uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
+    app = asyncio.run(setup())
+    uvicorn.run(app, host="0.0.0.0", port=8000, lifespan="on")
 ```
 
 ## Installation
@@ -239,7 +237,7 @@ src/canary_framework/
 │   ├── module.py        # @module
 │   ├── router.py        # @router, @get, @post, @put, @delete, @patch
 │   ├── config.py        # @config
-│   └── lifecycle.py     # @after_config, @after_init, @before_startup, @before_shutdown
+│       └── lifecycle.py     # @after_init, @before_startup, @before_shutdown
 └── engine/              # Runtime engine
     ├── registry.py      # Service registry (O(1) lookup, parent chaining)
     ├── injector.py      # Topological sort (Kahn's algorithm)

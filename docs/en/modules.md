@@ -77,7 +77,7 @@ Child services and sub-modules are accessible directly by their class name on th
 
 ```python
 app = App()
-await app.configure(config)
+await app.init()
 
 # Access child services by class name (not snake_case)
 app.Database    # Database service instance
@@ -93,18 +93,15 @@ Modules coordinate the lifecycle of their child services. When a module's lifecy
 ```python
 app = App()
 
-# 1. Configure phase: configures all services in dependency order
-await app.configure(config)
-
-# 2. Init phase: initializes all services
+# 1. Init phase: initializes all services in dependency order
 await app.init()
 
-# 3. Startup phase: starts all services
+# 2. Startup phase: starts all services
 await app.startup()
 
 # ... application runs ...
 
-# 4. Shutdown phase: shuts down all services in reverse order
+# 3. Shutdown phase: shuts down all services in reverse order
 await app.shutdown()
 ```
 
@@ -113,26 +110,20 @@ await app.shutdown()
 A module can be used directly as an ASGI application. It automatically mounts all child routers:
 
 ```python
-from canary_framework import config
-from canary_framework.common.config import CanaryConfig
-
-@config
-class AppConfig(CanaryConfig):
-    host: str = "0.0.0.0"
-    port: int = 8080
+@module(services=[...])
+class App(ModuleBase):
+    pass
 
 async def setup():
-    cfg = AppConfig()
     app = App()
-    await app.configure(cfg)
     await app.init()
-    return app, cfg
+    return app
 
 import asyncio
 import uvicorn
 
-app, cfg = asyncio.run(setup())
-uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
+app = asyncio.run(setup())
+uvicorn.run(app, host="0.0.0.0", port=8080, lifespan="on")
 ```
 
 The module will:
@@ -144,8 +135,6 @@ The module will:
 
 Classes decorated with `@module()` must explicitly inherit from `ModuleBase`, which provides:
 
-- `config` attribute: Access to configuration
-- `configure(config_instance=None)` method: Configures the module and all services
 - `init()` method: Initializes the module and all services
 - `startup()` method: Starts the module and all services
 - `shutdown()` method: Shuts down the module and all services
