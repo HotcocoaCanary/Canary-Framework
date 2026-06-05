@@ -17,7 +17,6 @@ class TestLifecycleHook:
 
     def test_enum_values(self) -> None:
         """Test that enum has correct values."""
-        assert LifecycleHook.AFTER_CONFIG.value == "after_config"
         assert LifecycleHook.AFTER_INIT.value == "after_init"
         assert LifecycleHook.BEFORE_STARTUP.value == "before_startup"
         assert LifecycleHook.BEFORE_SHUTDOWN.value == "before_shutdown"
@@ -25,7 +24,7 @@ class TestLifecycleHook:
     def test_enum_iteration(self) -> None:
         """Test enum iteration."""
         values = list(LifecycleHook)
-        assert len(values) == 4
+        assert len(values) == 3
 
 
 @pytest.mark.unit

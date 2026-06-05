@@ -29,7 +29,7 @@ class TestDependencyInjection:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         # Check that dependency is injected
         assert hasattr(app.MyService, "dependency")  # type: ignore[attr-defined]
@@ -59,7 +59,7 @@ class TestDependencyInjection:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         assert hasattr(app.MyService, "dep1")  # type: ignore[attr-defined]
         assert hasattr(app.MyService, "dep2")  # type: ignore[attr-defined]
@@ -88,7 +88,7 @@ class TestDependencyInjection:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         assert hasattr(app.MyService, "middle_dep")  # type: ignore[attr-defined]
         assert hasattr(app.MyService.middle_dep, "deep_dep")  # type: ignore[attr-defined]

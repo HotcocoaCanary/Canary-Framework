@@ -1,10 +1,10 @@
 """生命周期钩子装饰器实现。
 
-提供@after_config、@after_init、@before_startup、@before_shutdown装饰器。
+提供@after_init、@before_startup、@before_shutdown装饰器。
 
 Lifecycle hook decorators implementation.
 
-Provides @after_config, @after_init, @before_startup, @before_shutdown decorators.
+Provides @after_init, @before_startup, @before_shutdown decorators.
 """
 
 from __future__ import annotations
@@ -55,16 +55,6 @@ def _lifecycle_hook(phase: LifecycleHook) -> Callable[[HookFunction], HookFuncti
     return decorator
 
 
-after_config = _lifecycle_hook(LifecycleHook.AFTER_CONFIG)
-"""配置完成后执行的钩子装饰器。
-
-在模块配置完成后调用。
-
-Hook decorator executed after configuration.
-
-Called after the module is configured.
-"""
-
 after_init = _lifecycle_hook(LifecycleHook.AFTER_INIT)
 """初始化完成后执行的钩子装饰器。
 
@@ -97,7 +87,6 @@ Called before the module shuts down.
 
 
 __all__ = [
-    "after_config",
     "after_init",
     "before_shutdown",
     "before_startup",

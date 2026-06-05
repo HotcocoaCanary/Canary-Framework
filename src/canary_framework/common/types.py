@@ -16,22 +16,19 @@ from typing import Protocol
 class LifecycleHook(StrEnum):
     """生命周期钩子阶段枚举。
 
-    定义了框架支持的四个生命周期钩子阶段：
-    - AFTER_CONFIG: 配置完成后
+    定义了框架支持的三个生命周期钩子阶段：
     - AFTER_INIT: 初始化完成后
     - BEFORE_STARTUP: 启动前
     - BEFORE_SHUTDOWN: 关闭前
 
     Lifecycle phases for hook registration.
 
-    Defines four lifecycle hook phases supported by the framework:
-    - AFTER_CONFIG: After configuration is complete
+    Defines three lifecycle hook phases supported by the framework:
     - AFTER_INIT: After initialization is complete
     - BEFORE_STARTUP: Before startup
     - BEFORE_SHUTDOWN: Before shutdown
     """
 
-    AFTER_CONFIG = "after_config"
     AFTER_INIT = "after_init"
     BEFORE_STARTUP = "before_startup"
     BEFORE_SHUTDOWN = "before_shutdown"
@@ -58,7 +55,6 @@ class LifecycleAware(Protocol):
     Defines lifecycle methods that services and modules must implement.
     """
 
-    async def configure(self, config_instance: object = None) -> None: ...
     async def init(self) -> None: ...
     async def startup(self) -> None: ...
     async def shutdown(self) -> None: ...
@@ -160,7 +156,6 @@ ROUTE_ATTR = "__cf_route__"
 # 生命周期钩子标记映射
 # Lifecycle hook marker mapping
 CF_HOOK_MARKER_MAP: dict[LifecycleHook, str] = {
-    LifecycleHook.AFTER_CONFIG: "__cf_after_config__",
     LifecycleHook.AFTER_INIT: "__cf_after_init__",
     LifecycleHook.BEFORE_STARTUP: "__cf_before_startup__",
     LifecycleHook.BEFORE_SHUTDOWN: "__cf_before_shutdown__",

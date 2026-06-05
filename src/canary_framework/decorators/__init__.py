@@ -2,7 +2,6 @@
 
 from canary_framework.decorators.config import config
 from canary_framework.decorators.lifecycle import (
-    after_config,
     after_init,
     before_shutdown,
     before_startup,
@@ -19,7 +18,6 @@ from canary_framework.decorators.router import (
 from canary_framework.decorators.service import service
 
 __all__ = [
-    "after_config",
     "after_init",
     "before_shutdown",
     "before_startup",

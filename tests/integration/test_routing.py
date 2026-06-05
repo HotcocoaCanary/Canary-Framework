@@ -28,7 +28,7 @@ class TestRouting:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -53,7 +53,7 @@ class TestRouting:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -78,7 +78,7 @@ class TestRouting:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -107,7 +107,7 @@ class TestRouting:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -132,7 +132,7 @@ class TestRouting:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),

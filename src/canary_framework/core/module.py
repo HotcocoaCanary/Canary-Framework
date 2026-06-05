@@ -1,11 +1,11 @@
 """ModuleBase — 通过生命周期阶段协调子服务的模块基类。
 
-处理实例化、依赖注入、按拓扑顺序执行configure/init/startup/shutdown，
+处理实例化、依赖注入、按拓扑顺序执行init/startup/shutdown，
 并暴露Starlette Router用于ASGI挂载。
 
 ModuleBase — orchestrates child services through lifecycle phases.
 
-Handles instantiation, DI wiring, configure/init/startup/shutdown
+Handles instantiation, DI wiring, init/startup/shutdown
 in topological order, and exposes a starlette Router for ASGI mounting.
 """
 
@@ -40,7 +40,7 @@ class ModuleBase(ServiceBase):
     """@module装饰类的自动注入基类。
 
     协调子服务生命周期——实例化、依赖注入、按拓扑顺序执行
-    configure/init/startup/shutdown。
+    init/startup/shutdown。
 
     支持通过 config 对象配置文档端点：
     - cf_docs_path: OpenAPI JSON 端点路径（默认 /openapi.json）
@@ -54,7 +54,7 @@ class ModuleBase(ServiceBase):
     Auto-injected base for @module-decorated classes.
 
     Orchestrates child service lifecycle — instantiation, DI wiring,
-    configure/init/startup/shutdown in topological order.
+    init/startup/shutdown in topological order.
     """
 
     def __init__(self) -> None:
@@ -67,43 +67,39 @@ class ModuleBase(ServiceBase):
         self._cf_registry: Registry | None = None
         self._cf_startup_order: list[str] = []
         self._cf_asgi_app: StarletteRouter | None = None
-        self.config: CanaryConfig | None = None
 
     @override
-    async def configure(self, config_instance: CanaryConfig | None = None) -> None:
-        """配置模块及其所有子服务。
+    async def init(self) -> None:
+        """初始化模块及其所有子服务。
 
-        设置配置实例，创建注册表，注册所有服务及其依赖，
-        执行拓扑排序，实例化服务，注入依赖，然后调用每个服务的configure方法。
-
-        Args:
-            config_instance: 配置对象实例。
+        实例化所有服务、注入依赖、按拓扑顺序调用每个服务的init方法，
+        然后调用AFTER_INIT钩子。
 
         Raises:
             DependencyInjectionError: 如果服务实例为None。
 
-        Configure the module and all its child services.
+        Initialize the module and all its child services.
 
-        Sets the config instance, creates registry, registers all services and
-        their dependencies, performs topological sort, instantiates services,
-        injects dependencies, and calls configure on each service.
-
-        Args:
-            config_instance: The configuration object instance.
+        Instantiates all services, injects dependencies, calls init on each
+        child service in topological order, then invokes the AFTER_INIT hook.
 
         Raises:
             DependencyInjectionError: If a service instance is None.
         """
-        _log.info("Configuring module: %s", type(self).__name__)
-        self.config = config_instance
-
-        cfg = config_instance if isinstance(config_instance, CanaryConfig) else CanaryConfig()
-        ensure_logging(cfg.log_level)
+        _log.info("Initializing module: %s", type(self).__name__)
 
         meta = get_module_meta(type(self))
         if not meta.services:
-            await self._invoke_hook(LifecycleHook.AFTER_CONFIG)
+            await self._invoke_hook(LifecycleHook.AFTER_INIT)
             return
+
+        config_instance = None
+        for svc_cls in meta.services:
+            if isinstance(svc_cls, type) and issubclass(svc_cls, CanaryConfig):
+                config_instance = svc_cls()
+                break
+        if config_instance is not None:
+            ensure_logging(config_instance.log_level)
 
         parent_registry = getattr(self, "_cf_parent_registry", None)
         registry = Registry(parent=parent_registry)
@@ -133,41 +129,10 @@ class ModuleBase(ServiceBase):
             entry = registry.get_by_name(name)
             child = entry.instance
             if child is None:
-                raise DependencyInjectionError(
-                    f"Service '{name}' instance is None during configure."
-                )
-            await cast(LifecycleAware, child).configure(config_instance)
+                raise DependencyInjectionError(f"Service '{name}' instance is None during init.")
+            await cast(LifecycleAware, child).init()
 
-        await self._invoke_hook(LifecycleHook.AFTER_CONFIG)
-
-    @override
-    async def init(self) -> None:
-        """初始化模块及其所有子服务。
-
-        调用AFTER_INIT钩子，然后按拓扑顺序调用每个子服务的init方法。
-
-        Raises:
-            DependencyInjectionError: 如果服务实例为None。
-
-        Initialize the module and all its child services.
-
-        Invokes the AFTER_INIT hook, then calls init on each child service
-        in topological order.
-
-        Raises:
-            DependencyInjectionError: If a service instance is None.
-        """
-        _log.info("Initializing module: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.AFTER_INIT)
-        registry = self._cf_registry
-        if registry is not None:
-            for name in self._cf_startup_order:
-                child = registry.get_by_name(name).instance
-                if child is None:
-                    raise DependencyInjectionError(
-                        f"Service '{name}' instance is None during init."
-                    )
-                await cast(LifecycleAware, child).init()
 
     @property
     def asgi_app(self) -> StarletteRouter:

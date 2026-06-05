@@ -3,7 +3,6 @@
 import pytest
 
 from canary_framework import (
-    after_config,
     after_init,
     before_shutdown,
     before_startup,
@@ -26,10 +25,6 @@ class TestLifecycle:
 
         @service()
         class MyService(ServiceBase):
-            @after_config
-            def on_config(self) -> None:
-                events.append("service-config")
-
             @after_init
             def on_init(self) -> None:
                 events.append("service-init")
@@ -44,10 +39,6 @@ class TestLifecycle:
 
         @module(services=[MyService])
         class MyModule(ModuleBase):
-            @after_config
-            def on_config(self) -> None:
-                events.append("module-config")
-
             @after_init
             def on_init(self) -> None:
                 events.append("module-init")
@@ -61,18 +52,15 @@ class TestLifecycle:
                 events.append("module-shutdown")
 
         app = MyModule()
-        await app.configure()
         await app.init()
         await app.startup()
         await app.shutdown()
 
         # Check that all hooks were called
-        assert len(events) == 8
-        assert "service-config" in events
+        assert len(events) == 6
         assert "service-init" in events
         assert "service-startup" in events
         assert "service-shutdown" in events
-        assert "module-config" in events
         assert "module-init" in events
         assert "module-startup" in events
         assert "module-shutdown" in events
@@ -109,7 +97,7 @@ class TestLifecycle:
             pass
 
         app = MyModule()
-        await app.configure()
+        await app.init()
         await app.startup()
         await app.shutdown()
 
