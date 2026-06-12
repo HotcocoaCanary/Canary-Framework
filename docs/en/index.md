@@ -9,9 +9,9 @@ Lightweight, decorator-driven Python async service framework. Core philosophy: *
 │  @config(CanaryConfig)  ——  @module(services=[...])          │
 │      auto-discovered          composes & orchestrates         │
 ├─────────────────────────────────────────────────────────────┤
-│  @service(ServiceBase)              @router(RouterBase)      │
-│    business logic                     HTTP routing           │
-│    lifecycle hooks                    auto OpenAPI            │
+│  @service(ServiceBase)                   Router(prefix=...)  │
+│    business logic                         class attribute    │
+│    lifecycle hooks                        auto OpenAPI       │
 ├─────────────────────────────────────────────────────────────┤
 │  Engine: Registry · Injector · Hooks · OpenAPI · Params      │
 ├─────────────────────────────────────────────────────────────┤
@@ -58,27 +58,29 @@ class BlogApp(ModuleBase):
     pass
 ```
 
-### Router — `@router(prefix=...)` + `RouterBase`
+### Router — `Router(prefix=..., tags=...)` class attribute
 
-HTTP routing with auto-bound path params, query params, and request body. Auto-generates OpenAPI 3.0.3 documentation.
+HTTP routing via a `Router` class attribute on any service. Use `@router.get()` / `@router.post()` for route handlers with auto-bound path params, query params, and request body. Auto-generates OpenAPI 3.0.3 documentation.
 
 ```python
-from canary_framework import router, get, post
-from canary_framework.core.router import RouterBase
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
 
-@router(prefix="/api/posts", tags=["Posts"])
-class Posts(RouterBase):
+@service()
+class Posts(ServiceBase):
     db: Database
+    router = Router(prefix="/api/posts", tags=["Posts"])
 
-    @get("/")
+    @router.get("/")
     async def list_posts(self, page: int = 1, limit: int = 10):
         return await self.db.query(f"SELECT * FROM posts LIMIT {limit} OFFSET {(page-1)*limit}")
 
-    @get("/{post_id}")
+    @router.get("/{post_id}")
     async def get_post(self, post_id: int):
         return await self.db.query(f"SELECT * FROM posts WHERE id={post_id}")
 
-    @post("/", request_model=PostCreate)
+    @router.post("/", request_model=PostCreate)
     async def create_post(self, body: PostCreate):
         return await self.db.create_post(body), 201
 ```
@@ -112,18 +114,18 @@ class Auth(ServiceBase):
 
 ## Quick Example
 
-A complete minimal working example: Database service + PostService + PostRouter + BlogApp module + AppConfig + entry point.
+A complete minimal working example: Database service + PostService + a service with Router + BlogApp module + AppConfig + entry point.
 
 ```python
 # main.py
 from pydantic import BaseModel
 from canary_framework import (
-    service, module, router, config, get, post,
+    service, module, config,
     before_shutdown, after_init,
 )
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 from canary_framework.common.config import CanaryConfig
 
 # ---- Models ----
@@ -170,22 +172,23 @@ class PostService(ServiceBase):
         self.posts.append(data)
         return data
 
-# ---- Router ----
-@router(prefix="/api/posts", tags=["Posts"])
-class PostRouter(RouterBase):
+# ---- Service with Router ----
+@service()
+class PostRouter(ServiceBase):
     db: Database
     posts: PostService
+    router = Router(prefix="/api/posts", tags=["Posts"])
 
-    @get("/")
+    @router.get("/")
     async def list_posts(self, page: int = 1, limit: int = 10):
         return {"posts": await self.posts.list_posts()}
 
-    @get("/{post_id}")
+    @router.get("/{post_id}")
     async def get_post(self, post_id: int):
         post = await self.posts.get_post(post_id)
         return post if post else ({"error": "Not found"}, 404)
 
-    @post("/", request_model=PostCreate)
+    @router.post("/", request_model=PostCreate)
     async def create_post(self, body: PostCreate):
         return await self.posts.create_post(body.model_dump()), 201
 
@@ -223,28 +226,31 @@ pip install canary-framework
 
 ```
 src/canary_framework/
-├── common/              # Types, errors, routing, config
-│   ├── config.py        # CanaryConfig (Pydantic-based configuration)
-│   ├── types.py         # Enums, dataclasses, markers, resolve_deps()
-│   ├── routing.py       # Route path parsing
-│   └── errors.py        # Framework exceptions
-├── core/                # Base classes
-│   ├── service.py       # ServiceBase — lifecycle, ASGI __call__
-│   ├── module.py        # ModuleBase — orchestration, DI, ASGI aggregation
-│   └── router.py        # RouterBase — HTTP routing, OpenAPI docs generation
-├── decorators/          # Public decorator API
-│   ├── service.py       # @service
-│   ├── module.py        # @module
-│   ├── router.py        # @router, @get, @post, @put, @delete, @patch
-│   ├── config.py        # @config
-│       └── lifecycle.py     # @after_init, @before_startup, @before_shutdown
-└── engine/              # Runtime engine
-    ├── registry.py      # Service registry (O(1) lookup, parent chaining)
-    ├── injector.py      # Topological sort (Kahn's algorithm)
-    ├── hooks.py         # Lifecycle hook discovery
-    ├── openapi.py       # OpenAPI 3.0.3 schema generation
-    ├── params.py        # Route parameter resolution
-    └── logging.py       # Framework logging
+├── common/
+│   ├── config.py
+│   ├── types.py
+│   ├── routing.py
+│   └── errors.py
+├── core/
+│   ├── module/
+│   │   └── _base.py       # ModuleBase
+│   ├── service/
+│   │   ├── _base.py       # ServiceBase
+│   │   └── _hooks.py      # Lifecycle hook invocation
+│   └── router/
+│       ├── _base.py       # Router + RouteInfo
+│       └── _utils.py      # Route handler building
+├── decorators/
+│   ├── service.py
+│   ├── module.py
+│   ├── config.py
+│   └── lifecycle.py
+└── engine/
+    ├── registry.py
+    ├── dependencies.py
+    ├── openapi.py
+    ├── params.py
+    └── logging.py
 ```
 
 ## Design Principles
@@ -252,8 +258,8 @@ src/canary_framework/
 1. **Decorator-driven** — Code is configuration; decorators transform plain classes
 2. **Async-first** — Built on async/await, ASGI/Starlette
 3. **Annotation-based DI** — Dependencies declared with type hints, resolved automatically
-4. **Explicit inheritance** — Classes inherit from framework base classes (ServiceBase, ModuleBase, RouterBase)
-5. **Automatic naming** — `ClassName` + suffix (`Service`, `Module`, `Router`)
+4. **Explicit inheritance** — Classes inherit from framework base classes (ServiceBase, ModuleBase)
+5. **Automatic naming** — `ClassName` + suffix (`Service`, `Module`); routers are services, no separate naming convention needed
 6. **Composability** — Modules compose services; modules are themselves services
 
 ## Next Steps

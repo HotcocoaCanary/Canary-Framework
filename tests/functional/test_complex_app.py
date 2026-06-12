@@ -4,9 +4,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from canary_framework import get, module, post, router, service
+from canary_framework import module, service
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 from canary_framework.core.service import ServiceBase
 
 
@@ -38,15 +38,16 @@ class TestComplexApp:
             def get_all(self) -> list[User]:
                 return self.users
 
-        @router()
-        class UserRouter(RouterBase):
+        @service()
+        class UserRouter(ServiceBase):
+            router = Router()
             user_service: UserService
 
-            @get("/users")
+            @router.get("/users")
             async def list_users(self) -> list[User]:
                 return self.user_service.get_all()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
 
-            @post("/users", request_model=User)
+            @router.post("/users", request_model=User)
             async def create_user(self, user: User) -> User:
                 return self.user_service.create(user)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
 
@@ -74,15 +75,16 @@ class TestComplexApp:
             def get_all(self) -> list[Product]:
                 return self.products
 
-        @router()
-        class ProductRouter(RouterBase):
+        @service()
+        class ProductRouter(ServiceBase):
+            router = Router()
             product_service: ProductService
 
-            @get("/products")
+            @router.get("/products")
             async def list_products(self) -> list[Product]:
                 return self.product_service.get_all()
 
-            @post("/products", request_model=Product)
+            @router.post("/products", request_model=Product)
             async def create_product(self, product: Product) -> Product:
                 return self.product_service.create(product)
 
@@ -106,20 +108,20 @@ class TestComplexApp:
         ) as client:
             # Test user module
             response = await client.post(
-                "/UserModuleModule/UserRouterRouter/users",
+                "/UserModule/UserRouter/users",
                 json={"name": "Alice", "email": "alice@example.com"},
             )
             assert response.status_code == 200
 
-            response = await client.get("/UserModuleModule/UserRouterRouter/users")
+            response = await client.get("/UserModule/UserRouter/users")
             assert len(response.json()) == 1
 
             # Test product module
             response = await client.post(
-                "/ProductModuleModule/ProductRouterRouter/products",
+                "/ProductModule/ProductRouter/products",
                 json={"name": "Laptop", "price": 999.99},
             )
             assert response.status_code == 200
 
-            response = await client.get("/ProductModuleModule/ProductRouterRouter/products")
+            response = await client.get("/ProductModule/ProductRouter/products")
             assert len(response.json()) == 1

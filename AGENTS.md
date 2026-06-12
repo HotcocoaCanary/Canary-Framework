@@ -44,7 +44,7 @@ The publish workflow validates all three match before building.
 - **Layer order**: `common/` (zero internal deps) → `engine/` → `core/` → `decorators/`
 - **ModuleBase extends ServiceBase** — modules are composable services; the tree root is always a module
 - **DI mechanism**: type annotations on classes. `resolve_deps()` reads `get_type_hints()`, filters by `__cf_service__` marker. Kahn's algorithm produces topological start order.
-- **Registry**: write-once during `configure()`, then read-only. Parent-child chaining for nested modules.
+- **Registry**: write-once during `init()`, then read-only. Parent-child chaining for nested modules.
 - **Dependencies**: pydantic + starlette (core). uvicorn is an optional `[web]` extra, not a core dependency.
 - **`py.typed`** marker present — PEP 561 compliant package
 

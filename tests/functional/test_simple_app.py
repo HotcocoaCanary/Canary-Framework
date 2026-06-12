@@ -7,14 +7,11 @@ from pydantic import BaseModel
 from canary_framework import (
     after_init,
     before_startup,
-    get,
     module,
-    post,
-    router,
     service,
 )
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 from canary_framework.core.service import ServiceBase
 
 
@@ -56,15 +53,16 @@ class TestSimpleApp:
                 return todo
 
         # Define a router with API endpoints
-        @router()
-        class TodoRouter(RouterBase):
+        @service()
+        class TodoRouter(ServiceBase):
+            router = Router()
             todo_service: TodoService
 
-            @get("/todos")
+            @router.get("/todos")
             async def list_todos(self) -> list[dict[str, int | str | bool]]:
                 return [todo.model_dump() for todo in self.todo_service.get_all()]  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
 
-            @post("/todos", request_model=TodoItem)
+            @router.post("/todos", request_model=TodoItem)
             async def create_todo(self, todo: TodoItem) -> dict[str, int | str | bool]:
                 created = self.todo_service.create(todo)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
                 return dict(created.model_dump())
@@ -96,7 +94,7 @@ class TestSimpleApp:
             base_url="http://test",
         ) as client:
             # Test list todos
-            response = await client.get("/TodoRouterRouter/todos")
+            response = await client.get("/TodoRouter/todos")
             assert response.status_code == 200
             todos = response.json()
             assert len(todos) == 2
@@ -104,7 +102,7 @@ class TestSimpleApp:
             assert todos[0]["completed"] is True
 
             response = await client.post(
-                "/TodoRouterRouter/todos", json={"title": "New todo", "completed": False}
+                "/TodoRouter/todos", json={"title": "New todo", "completed": False}
             )
             assert response.status_code == 200
             new_todo = response.json()
@@ -112,16 +110,18 @@ class TestSimpleApp:
             assert new_todo["title"] == "New todo"
 
             # Verify list now has 3 todos
-            response = await client.get("/TodoRouterRouter/todos")
+            response = await client.get("/TodoRouter/todos")
             assert len(response.json()) == 3
 
     @pytest.mark.asyncio
     async def test_openapi_docs(self) -> None:
         """Test OpenAPI docs."""
 
-        @router()
-        class MyRouter(RouterBase):
-            @get("/test")
+        @service()
+        class MyRouter(ServiceBase):
+            router = Router()
+
+            @router.get("/test")
             async def test(self) -> dict[str, str]:
                 return {"status": "ok"}
 

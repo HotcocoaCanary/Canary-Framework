@@ -102,8 +102,9 @@ Let's build a web router for our blog posts:
 
 ```python
 # services/posts.py
-from canary_framework import router, get, post, put, delete
-from canary_framework.core.router import RouterBase
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
 from pydantic import BaseModel, Field
 from .auth import Auth
 from .database import Database
@@ -119,8 +120,10 @@ class PostResponse(BaseModel):
     content: str = Field(description="Post content")
     author: str = Field(description="Author name")
 
-@router(prefix="/api/posts", tags=["Posts"])
-class Posts(RouterBase):
+@service()
+class Posts(ServiceBase):
+    router = Router(prefix="/api/posts", tags=["Posts"])
+
     db: Database  # Auto-injected
     auth: Auth    # Auto-injected
 
@@ -129,25 +132,25 @@ class Posts(RouterBase):
             {"id": 1, "title": "First Post", "content": "Hello World!", "author": "admin"}
         ]
 
-    @get("/", summary="List posts", description="Get all blog posts")
+    @router.get("/", summary="List posts", description="Get all blog posts")
     async def list_posts(self):
         return {"posts": self.posts}
 
-    @get("/{post_id}",
-         summary="Get post",
-         description="Get post details by ID",
-         response_model=PostResponse)
+    @router.get("/{post_id}",
+                summary="Get post",
+                description="Get post details by ID",
+                response_model=PostResponse)
     async def get_post(self, post_id: int):
         post = next((p for p in self.posts if p["id"] == post_id), None)
         if post:
             return post
         return {"error": "Post not found"}, 404
 
-    @post("/",
-          summary="Create post",
-          description="Create a new blog post",
-          request_model=PostCreate,
-          response_model=PostResponse)
+    @router.post("/",
+                 summary="Create post",
+                 description="Create a new blog post",
+                 request_model=PostCreate,
+                 response_model=PostResponse)
     async def create_post(self, body: PostCreate):
         new_post = {
             "id": len(self.posts) + 1,
@@ -158,11 +161,11 @@ class Posts(RouterBase):
         self.posts.append(new_post)
         return new_post, 201
 
-    @put("/{post_id}",
-         summary="Update post",
-         description="Update post content",
-         request_model=PostCreate,
-         response_model=PostResponse)
+    @router.put("/{post_id}",
+                summary="Update post",
+                description="Update post content",
+                request_model=PostCreate,
+                response_model=PostResponse)
     async def update_post(self, post_id: int, body: PostCreate):
         post = next((p for p in self.posts if p["id"] == post_id), None)
         if post:
@@ -174,18 +177,19 @@ class Posts(RouterBase):
             return post
         return {"error": "Post not found"}, 404
 
-    @delete("/{post_id}", summary="Delete post", description="Delete a post")
+    @router.delete("/{post_id}", summary="Delete post", description="Delete a post")
     async def delete_post(self, post_id: int):
         self.posts = [p for p in self.posts if p["id"] != post_id]
         return {"message": "Post deleted"}
 ```
 
-Key changes from the old API:
-
+- `router = Router(prefix="/api/posts", tags=["Posts"])` declares a `Router` class attribute with
+  prefix and OpenAPI tags — method decorators live on this attribute
+- `@router.get`, `@router.post`, `@router.put`, `@router.delete` replace standalone
+  `@get` / `@post` / `@put` / `@delete` — the router instance carries route registrations
 - Path parameters like `{post_id}` are auto-bound — declared as function parameters (`post_id: int`)
 - `request_model` causes the body to be auto-parsed and passed as the `body` parameter
-- No more `self, request` — parameters are injected automatically
-- No `deps` parameter — dependencies declared via annotations (`db: Database`, `auth: Auth`)
+- Dependencies declared via annotations (`db: Database`, `auth: Auth`) are resolved automatically
 
 ## 6. Configuration
 
@@ -216,9 +220,9 @@ from services.database import Database
 from services.auth import Auth
 from services.posts import Posts
 
-@module(services=[AppConfig, Database, Auth, Posts])
+@module(services=[Database, Auth, Posts])
 class BlogApp(ModuleBase):
-    config: AppConfig
+    pass
 
 async def setup():
     app = BlogApp()
@@ -233,8 +237,7 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, lifespan="on")
 ```
 
-- `@module(services=[...])` — no `name=` parameter; auto-named `BlogAppModule`
-- Config is auto-discovered from `@module(services=[AppConfig, ...])` via `issubclass(CanaryConfig)`
+- `@module(services=[...])` — auto-named `BlogAppModule`
 - Module children are accessible as `app.Database`, `app.Auth`, `app.Posts` (class attribute names)
 
 ## 8. Run the Application
@@ -277,7 +280,7 @@ After starting the application, you can access these endpoints:
 ## What You've Learned
 
 - How to define services with `@service()` — no manual names needed
-- How to create routers with `@router(prefix=...)` and HTTP method decorators
+- How to create routers with `Router` class attribute and `@router.get`/`@router.post` method decorators
 - How to declare dependencies with Python type annotations (`db: Database`)
 - How route parameters are auto-bound from path, query, and body
 - How to compose everything into a module with `@module(services=[...])`

@@ -18,19 +18,19 @@ from starlette.routing import Router as StarletteRouter
 from starlette.types import ASGIApp
 
 from canary_framework.common import (
+    CanaryConfig,
     DependencyInjectionError,
     LifecycleAware,
     LifecycleHook,
+    ServiceMeta,
     get_module_meta,
     get_service_meta,
     is_cf_module,
     is_cf_service,
-    resolve_deps,
 )
-from canary_framework.common.config import CanaryConfig
+from canary_framework.common.logging import ensure_logging, get_logger
 from canary_framework.core.service import ServiceBase
-from canary_framework.engine.injector import topological_sort
-from canary_framework.engine.logging import ensure_logging, get_logger
+from canary_framework.engine.dependencies import resolve_deps, topological_sort
 from canary_framework.engine.registry import Registry
 
 _log = get_logger("module")
@@ -63,7 +63,6 @@ class ModuleBase(ServiceBase):
         Initializes the ModuleBase instance.
         """
         super().__init__()
-        self._cf_parent_registry: Registry | None = None
         self._cf_registry: Registry | None = None
         self._cf_startup_order: list[str] = []
         self._cf_asgi_app: StarletteRouter | None = None
@@ -89,17 +88,11 @@ class ModuleBase(ServiceBase):
         _log.info("Initializing module: %s", type(self).__name__)
 
         meta = get_module_meta(type(self))
-        if not meta.services:
+        if meta is None or not meta.services:
             await self._invoke_hook(LifecycleHook.AFTER_INIT)
             return
 
-        config_instance = None
-        for svc_cls in meta.services:
-            if isinstance(svc_cls, type) and issubclass(svc_cls, CanaryConfig):
-                config_instance = svc_cls()
-                break
-        if config_instance is not None:
-            ensure_logging(config_instance.log_level)
+        ensure_logging("INFO")
 
         parent_registry = getattr(self, "_cf_parent_registry", None)
         registry = Registry(parent=parent_registry)
@@ -123,16 +116,22 @@ class ModuleBase(ServiceBase):
                 setattr(inst, attr_name, registry.get_by_class(dep_cls).instance)
             if isinstance(inst, ServiceBase):
                 inst._cf_parent_registry = registry
-            setattr(self, entry.cls.__name__, inst)
+            name = entry.cls.__name__
+            if not (name.startswith("_cf_") or name in ("router", "asgi_app")):
+                setattr(self, name, inst)
+
+        for attr_name, dep_cls in resolve_deps(type(self)).items():
+            setattr(self, attr_name, registry.get_by_class(dep_cls).instance)
 
         for name in self._cf_startup_order:
             entry = registry.get_by_name(name)
             child = entry.instance
             if child is None:
                 raise DependencyInjectionError(f"Service '{name}' instance is None during init.")
-            await cast(LifecycleAware, child).init()
+            if not isinstance(child, CanaryConfig):
+                await cast(LifecycleAware, child).init()
 
-        await self._invoke_hook(LifecycleHook.AFTER_INIT)
+        await super().init()
 
     @property
     def asgi_app(self) -> StarletteRouter:
@@ -150,8 +149,17 @@ class ModuleBase(ServiceBase):
         that have an asgi_app attribute, plus root-level routes from children.
         """
         if self._cf_asgi_app is None:
+            from canary_framework.core.router._base import Router as _Router
+            from canary_framework.core.router._base import _collect_routes
+
             routes: list[Mount | Route] = []
             mount_paths: set[str] = set()
+
+            own_router = getattr(self, "router", None)
+            if isinstance(own_router, _Router):
+                for route in _collect_routes(self, include_router_prefix=False):
+                    routes.append(route)
+                    mount_paths.add(route.path)
             registry = self._cf_registry
             if registry is not None:
                 for name in self._cf_startup_order:
@@ -179,14 +187,18 @@ class ModuleBase(ServiceBase):
                                 )
                             routes.append(route)
                             mount_paths.add(route.path)
+            if self._cf_root_routes:
+                for route in self._cf_root_routes:
+                    if route.path not in mount_paths:
+                        routes.append(route)
+                        mount_paths.add(route.path)
             self._cf_asgi_app = StarletteRouter(routes)
-        assert self._cf_asgi_app is not None
         return self._cf_asgi_app
 
     def _cf_get_root_routes(self) -> list[Route]:
         """合并所有子服务（包括子模块）的根路径路由，去重后返回。
 
-        解决嵌套 Module 场景下 RouterBase 生成的文档路由
+        解决嵌套 Module 场景下，带有 Router 属性的 Service 生成的文档路由
         （如 /docs, /redoc, /openapi.json）无法传播到根 ASGI 应用的问题。
 
         Aggregate root-level routes from all child services including
@@ -234,7 +246,8 @@ class ModuleBase(ServiceBase):
                     raise DependencyInjectionError(
                         f"Service '{name}' instance is None during startup."
                     )
-                await cast(LifecycleAware, child).startup()
+                if not isinstance(child, CanaryConfig):
+                    await cast(LifecycleAware, child).startup()
 
     @override
     async def shutdown(self) -> None:
@@ -254,7 +267,7 @@ class ModuleBase(ServiceBase):
             DependencyInjectionError: 如果服务实例为None。
         """
         _log.info("Shutting down module: %s", type(self).__name__)
-        await self._invoke_hook(LifecycleHook.BEFORE_SHUTDOWN)
+        await super().shutdown()
         registry = self._cf_registry
         if registry is not None:
             for name in reversed(self._cf_startup_order):
@@ -263,7 +276,8 @@ class ModuleBase(ServiceBase):
                     raise DependencyInjectionError(
                         f"Service '{name}' instance is None during shutdown."
                     )
-                await cast(LifecycleAware, child).shutdown()
+                if not isinstance(child, CanaryConfig):
+                    await cast(LifecycleAware, child).shutdown()
 
     def _register_entry_with_deps(self, cls: type, registry: Registry) -> None:
         """递归注册服务及其依赖。
@@ -292,20 +306,21 @@ class ModuleBase(ServiceBase):
         """
         if registry.has(cls):
             return
-        parent = registry.parent
-        if parent is not None and parent.has(cls):
-            return
 
         if is_cf_module(cls):
             mod_meta = get_module_meta(cls)
-            registry.register(cls, meta=mod_meta)
+            if mod_meta is not None:
+                registry.register(cls, meta=mod_meta)
             for dep_cls in resolve_deps(cls).values():
                 self._register_entry_with_deps(dep_cls, registry)
             return
 
         if is_cf_service(cls):
             svc_meta = get_service_meta(cls)
-            registry.register(cls, meta=svc_meta)
+            if svc_meta is not None:
+                registry.register(cls, meta=svc_meta)
+            else:
+                registry.register(cls, meta=ServiceMeta(name=cls.__name__))
             for dep_cls in resolve_deps(cls).values():
                 self._register_entry_with_deps(dep_cls, registry)
             return

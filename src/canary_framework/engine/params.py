@@ -6,6 +6,7 @@ Provides shared parameter inspection used by both the router and OpenAPI generat
 from __future__ import annotations
 
 import inspect
+import warnings
 from typing import Any
 
 from pydantic.fields import FieldInfo
@@ -26,7 +27,11 @@ def resolve_params(route_fn: Any) -> dict[str, tuple[Any, bool, FieldInfo | None
     sig = inspect.signature(route_fn)
     try:
         type_hints = inspect.get_annotations(route_fn)
-    except Exception:
+    except Exception as e:
+        warnings.warn(
+            f"Failed to resolve annotations for '{getattr(route_fn, '__name__', route_fn)}': {e}",
+            stacklevel=2,
+        )
         type_hints = {}
 
     result: dict[str, tuple[Any, bool, FieldInfo | None]] = {}

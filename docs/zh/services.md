@@ -25,6 +25,7 @@ class UserRepository(ServiceBase):
 
 - 服务自动命名为 `ClassName` + `"Service"` — 例如 `UserRepository` → `UserRepositoryService`
 - 名称从类名自动生成
+- 要添加 HTTP 路由，请在类上定义 `router` 类属性并赋予一个 `Router` 实例（参见 [Web 路由](./web.md)）
 
 ## 声明依赖
 
@@ -62,7 +63,6 @@ class UserRepo(ServiceBase):
 
 使用 `@service()` 装饰的类必须显式继承 `ServiceBase`，该类提供：
 
-- `config` 属性：访问通过 DI 注入的配置
 - `init()` 方法：初始化服务
 - `startup()` 方法：启动服务
 - `shutdown()` 方法：关闭服务

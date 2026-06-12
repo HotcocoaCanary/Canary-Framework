@@ -5,10 +5,19 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel
 
-from canary_framework import get, post, router
-from canary_framework.common import get_router_meta
-from canary_framework.core.router import RouterBase
+from canary_framework import service
+from canary_framework.common import RouteInfo
+from canary_framework.core.router import Router
+from canary_framework.core.service import ServiceBase
 from canary_framework.engine.openapi import generate_openapi_schema
+
+
+def _collect_route_infos(cls: type[ServiceBase]) -> list[RouteInfo]:
+    """从服务类中收集 RouteInfo 对象。"""
+    router = getattr(cls, "router", None)
+    if isinstance(router, Router):
+        return list(router._route_infos)
+    return []
 
 
 @pytest.mark.functional
@@ -27,13 +36,15 @@ class TestOpenAPIDocs:
             name: str
             value: int
 
-        @router()
-        class MyRouter(RouterBase):
-            @get("/items", summary="Get all items", tags=["items"])
+        @service()
+        class MyRouter(ServiceBase):
+            router = Router()
+
+            @router.get("/items", summary="Get all items", tags=["items"])
             async def get_items(self) -> None:
                 pass
 
-            @post(
+            @router.post(
                 "/items",
                 summary="Create item",
                 request_model=RequestItem,
@@ -43,9 +54,9 @@ class TestOpenAPIDocs:
             async def create_item(self) -> None:
                 pass
 
-        router_meta = get_router_meta(MyRouter)
-        assert router_meta is not None
-        schema = generate_openapi_schema([router_meta])
+        route_infos = _collect_route_infos(MyRouter)
+        assert len(route_infos) == 2
+        schema = generate_openapi_schema(route_infos)
 
         assert schema["openapi"] == "3.0.3"
         assert "info" in schema
@@ -56,25 +67,25 @@ class TestOpenAPIDocs:
     def test_openapi_with_multiple_routers(self) -> None:
         """Test OpenAPI with multiple routers."""
 
-        @router(tags=["users"])
-        class UserRouter(RouterBase):
-            @get("/users")
+        @service()
+        class UserRouter(ServiceBase):
+            router = Router()
+
+            @router.get("/users")
             async def get_users(self) -> None:
                 pass
 
-        @router(tags=["products"])
-        class ProductRouter(RouterBase):
-            @get("/products")
+        @service()
+        class ProductRouter(ServiceBase):
+            router = Router()
+
+            @router.get("/products")
             async def get_products(self) -> None:
                 pass
 
-        user_meta = get_router_meta(UserRouter)
-        product_meta = get_router_meta(ProductRouter)
-        assert user_meta is not None
-        assert product_meta is not None
-
+        route_infos = _collect_route_infos(UserRouter) + _collect_route_infos(ProductRouter)
         schema = generate_openapi_schema(
-            [user_meta, product_meta],
+            route_infos,
             title="Shop API",
             version="1.0.0",
         )
@@ -90,9 +101,11 @@ class TestOpenAPIDocs:
     def test_openapi_with_descriptions(self) -> None:
         """Test OpenAPI with descriptions."""
 
-        @router()
-        class MyRouter(RouterBase):
-            @get(
+        @service()
+        class MyRouter(ServiceBase):
+            router = Router()
+
+            @router.get(
                 "/test",
                 summary="Test endpoint",
                 description="This is a test endpoint that does nothing useful",
@@ -100,9 +113,8 @@ class TestOpenAPIDocs:
             async def test(self) -> None:
                 pass
 
-        router_meta = get_router_meta(MyRouter)
-        assert router_meta is not None
-        schema = generate_openapi_schema([router_meta])
+        route_infos = _collect_route_infos(MyRouter)
+        schema = generate_openapi_schema(route_infos)
 
         paths = cast(dict[str, Any], schema["paths"])
         path_obj = cast(dict[str, Any], next(iter(paths.values())))

@@ -1,8 +1,9 @@
-"""OpenAPI 3.0.3 schema generator.
+"""OpenAPI 3.0.3 schema generator 和文档端点配置。
 
-从RouterMeta列表生成符合OpenAPI 3.0.3规范的schema。
+从RouterMeta列表生成符合OpenAPI 3.0.3规范的schema，并提供 Swagger UI / ReDoc 文档端点。
 
-Generates OpenAPI 3.0.3-compliant schemas from RouterMeta lists.
+Generates OpenAPI 3.0.3-compliant schemas from RouterMeta lists
+and configures Swagger UI / ReDoc documentation endpoints.
 """
 
 from __future__ import annotations
@@ -17,9 +18,7 @@ from uuid import UUID
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from canary_framework.common import ROUTE_ATTR, ServiceMeta
-from canary_framework.common.routing import parse_route_path
-from canary_framework.engine.params import resolve_params
+from canary_framework.common import RouteInfo
 
 _TYPE_MAP: dict[str, str] = {
     "int": "integer",
@@ -35,6 +34,9 @@ _TYPE_FORMAT_MAP: dict[type, str] = {
     UUID: "uuid",
     bytes: "byte",
 }
+
+
+_registered_schemas: dict[int, str] = {}
 
 
 def _flatten_defs(schema: dict[str, object], schemas_dict: dict[str, object]) -> None:
@@ -67,7 +69,10 @@ def _generate_schema_name(model_cls: type[BaseModel]) -> str:
         if hasattr(arg, "__name__"):
             arg_names.append(cast(str, arg.__name__))
         elif hasattr(arg, "__origin__"):
-            arg_names.append(_generate_schema_name(cast("type[BaseModel]", arg)))
+            name = _generate_schema_name(cast("type[BaseModel]", arg))
+            if name in arg_names:
+                continue
+            arg_names.append(name)
         else:
             arg_names.append(str(arg))
     return cast(str, origin.__name__) + "_" + "_".join(arg_names)
@@ -76,26 +81,25 @@ def _generate_schema_name(model_cls: type[BaseModel]) -> str:
 def _register_model_schema(
     model_cls: type[BaseModel],
     schemas_dict: dict[str, object],
-    added_model_ids: set[int],
 ) -> str:
     """注册模型 schema，展平 $defs 并返回 schema 引用名。
 
     使用 ref_template 确保 $ref 指向 #/components/schemas/{model}，
-    递归展平所有嵌套的 $defs，用 id() 去重避免泛型命名冲突。
+    递归展平所有嵌套的 $defs，按 schema name 去重。
     """
-    model_id = id(model_cls)
     model_name = _generate_schema_name(model_cls)
+
+    model_id = id(model_cls)
+    if model_id in _registered_schemas:
+        return _registered_schemas[model_id]
 
     raw = cast(
         "dict[str, object]",
         model_cls.model_json_schema(ref_template="#/components/schemas/{model}"),
     )
-
     _flatten_defs(raw, schemas_dict)
-
-    if model_id not in added_model_ids:
-        schemas_dict[model_name] = raw
-        added_model_ids.add(model_id)
+    schemas_dict[model_name] = raw
+    _registered_schemas[model_id] = model_name
 
     return model_name
 
@@ -124,11 +128,7 @@ def _unwrap_optional(annotation: Any) -> Any:
 def _get_enum_values(annotation: Any) -> list[object] | None:
     """尝试从枚举或 Literal 类型中提取值列表。"""
     origin = get_origin(annotation)
-    if (
-        origin is not None
-        and origin is not UnionType
-        and (origin is Literal or str(origin).startswith("typing.Literal"))
-    ):
+    if origin is not None and origin is not UnionType and origin is Literal:
         return list(get_args(annotation))
     if isinstance(annotation, type) and issubclass(annotation, Enum):
         return [e.value for e in annotation]
@@ -174,6 +174,12 @@ def _build_parameter_schema(
         schema["type"] = "string"
         schema["format"] = "byte"
     else:
+        import warnings
+
+        warnings.warn(
+            f"Unknown parameter type '{annotation}' — defaulting to 'string' in OpenAPI schema.",
+            stacklevel=3,
+        )
         schema["type"] = "string"
 
     if field_info is not None:
@@ -219,35 +225,17 @@ def _apply_field_constraints(schema: dict[str, object], field_info: FieldInfo) -
 
 
 def generate_openapi_schema(
-    router_metas: list[ServiceMeta],
+    route_infos: list[RouteInfo],
     title: str = "Canary Framework API",
     version: str = "1.0.0",
     description: str = "",
     servers: list[dict[str, str]] | None = None,
     security_schemes: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    """生成OpenAPI 3.0.3 schema。
-
-    从RouterMeta列表生成完整的OpenAPI schema，包括路径、参数、
-    请求体、响应和组件定义。
-
-    Args:
-        :param security_schemes:
-        :param router_metas: 路由器元数据列表。
-        :param title: API标题。
-        :param version: API版本。
-        :param description: API描述。
-        :param servers: 服务器列表，如 [{"url": "http://localhost:8000"}]
-
-    Returns:
-        OpenAPI schema字典。
-    """
+    """从 RouteInfo 列表生成 OpenAPI 3.0.3 schema。"""
     schema: dict[str, object] = {
         "openapi": "3.0.3",
-        "info": {
-            "title": title,
-            "version": version,
-        },
+        "info": {"title": title, "version": version},
         "paths": {},
         "components": {"schemas": {}},
     }
@@ -256,107 +244,82 @@ def generate_openapi_schema(
     if servers:
         schema["servers"] = servers
 
-    added_schema_ids: set[int] = set()
     components = cast("dict[str, object]", schema["components"])
     if security_schemes:
         components["securitySchemes"] = security_schemes
     schemas_dict = cast("dict[str, object]", components["schemas"])
     paths = cast("dict[str, object]", schema["paths"])
 
-    for meta in router_metas:
-        router_tags = meta.tags or []
-        prefix = meta.prefix or ""
+    for info in route_infos:
+        starlette_path = (
+            info.router_prefix + info.starlette_path if info.router_prefix else info.starlette_path
+        )
+        while "//" in starlette_path:
+            starlette_path = starlette_path.replace("//", "/")
 
-        for route_fn in meta.routes:
-            raw_info = getattr(route_fn, ROUTE_ATTR, {})
-            if not raw_info:
-                continue
+        operation: dict[str, object] = {}
+        if info.summary:
+            operation["summary"] = info.summary
+        if info.description:
+            operation["description"] = info.description
+        if info.deprecated:
+            operation["deprecated"] = info.deprecated
+        if info.operation_id:
+            operation["operationId"] = info.operation_id
 
-            method = cast(str, raw_info.get("method", "get")).lower()
-            path = prefix + cast(str, raw_info.get("path", "/"))
-            summary = raw_info.get("summary")
-            description_val = raw_info.get("description")
-            deprecated = cast("bool", raw_info.get("deprecated", False))
-            operation_id = raw_info.get("operation_id")
-            route_tags = cast("list[str]", raw_info.get("tags") or [])
-            response_model = raw_info.get("response_model")
-            request_model = raw_info.get("request_model")
+        merged_tags = list(dict.fromkeys(info.router_tags + info.tags))
+        if merged_tags:
+            operation["tags"] = merged_tags
 
-            merged_tags = list(dict.fromkeys(router_tags + route_tags))
-
-            operation: dict[str, object] = {}
-            if summary:
-                operation["summary"] = summary
-            if description_val:
-                operation["description"] = description_val
-            if deprecated:
-                operation["deprecated"] = deprecated
-            if operation_id:
-                operation["operationId"] = operation_id
-            if merged_tags:
-                operation["tags"] = merged_tags
-
-            parameters: list[dict[str, object]] = []
-
-            starlette_path, path_param_names, query_param_names = parse_route_path(path)
-
-            param_meta = resolve_params(route_fn)
-
-            for param_name in path_param_names:
-                annotation, _, field_info = param_meta.get(param_name, (str, False, None))
-                param_schema = _build_parameter_schema(annotation, field_info)
-                path_param: dict[str, object] = {
+        parameters: list[dict[str, object]] = []
+        for param_name in info.path_params:
+            entry = info.param_meta.get(param_name, (str, False, None))
+            param_schema = _build_parameter_schema(entry[0], entry[2])  # type: ignore[index]
+            parameters.append(
+                {
                     "name": param_name,
                     "in": "path",
                     "required": True,
                     "schema": param_schema,
                 }
-                parameters.append(path_param)
-
-            for param_name in query_param_names:
-                annotation, has_default, field_info = param_meta.get(param_name, (str, False, None))
-                param_schema = _build_parameter_schema(annotation, field_info)
-                query_param: dict[str, object] = {
+            )
+        for param_name in info.query_params:
+            entry = info.param_meta.get(param_name, (str, False, None))
+            param_schema = _build_parameter_schema(entry[0], entry[2])  # type: ignore[index]
+            parameters.append(
+                {
                     "name": param_name,
                     "in": "query",
-                    "required": not has_default,
+                    "required": not entry[1],  # type: ignore[index]
                     "schema": param_schema,
                 }
-                parameters.append(query_param)
+            )
+        if parameters:
+            operation["parameters"] = parameters
 
-            if parameters:
-                operation["parameters"] = parameters
+        if info.request_model is not None:
+            ref_name = _register_model_schema(info.request_model, schemas_dict)
+            operation["requestBody"] = {
+                "description": info.request_model.__doc__ or "",
+                "content": {
+                    "application/json": {"schema": {"$ref": f"#/components/schemas/{ref_name}"}}
+                },
+            }
 
-            if request_model is not None:
-                model_cls = cast("type[BaseModel]", request_model)
-                ref_name = _register_model_schema(model_cls, schemas_dict, added_schema_ids)
-                operation["requestBody"] = {
-                    "description": model_cls.__doc__ or "",
+        responses: dict[str, object] = dict(info.responses)
+        if info.response_model is not None:
+            ref_name = _register_model_schema(info.response_model, schemas_dict)
+            if "200" not in responses:
+                responses["200"] = {
+                    "description": "Successful Response",
                     "content": {
                         "application/json": {"schema": {"$ref": f"#/components/schemas/{ref_name}"}}
                     },
                 }
+        operation["responses"] = responses
 
-            user_responses = cast("dict[str, object]", raw_info.get("responses") or {})
-            responses: dict[str, object] = dict(user_responses)
-
-            if response_model is not None:
-                model_cls = cast("type[BaseModel]", response_model)
-                ref_name = _register_model_schema(model_cls, schemas_dict, added_schema_ids)
-                if "200" not in responses:
-                    responses["200"] = {
-                        "description": "Successful Response",
-                        "content": {
-                            "application/json": {
-                                "schema": {"$ref": f"#/components/schemas/{ref_name}"}
-                            }
-                        },
-                    }
-
-            operation["responses"] = responses
-
-            _ = paths.setdefault(starlette_path, {})
-            cast("dict[str, object]", paths[starlette_path])[method] = operation
+        _ = paths.setdefault(starlette_path, {})
+        cast("dict[str, object]", paths[starlette_path])[info.method.lower()] = operation
 
     return schema
 

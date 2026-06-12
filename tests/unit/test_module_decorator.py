@@ -40,7 +40,8 @@ class TestModuleDecorator:
             pass
 
         meta = get_module_meta(MyModule)
-        assert meta.name == "MyModuleModule"
+        assert meta is not None
+        assert meta.name == "MyModule"
         assert meta.services == []
 
     def test_module_decorator_with_services(self) -> None:
@@ -55,6 +56,7 @@ class TestModuleDecorator:
             pass
 
         meta = get_module_meta(MyModule)
+        assert meta is not None
         assert meta.services == [MyService]
 
     def test_module_decorator_with_undecorated_service_raises(self) -> None:

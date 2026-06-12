@@ -3,12 +3,11 @@
 import pytest
 from starlette.responses import JSONResponse, PlainTextResponse
 
-from canary_framework.common.routing import parse_route_path
 from canary_framework.core.router import (
-    RouterBase,
     _auto_response,
     _convert_param,
 )
+from canary_framework.core.router._utils import parse_route_path
 
 
 @pytest.mark.unit
@@ -100,21 +99,3 @@ class TestAutoResponse:
         """Test other types become PlainTextResponse."""
         result = _auto_response(123)
         assert isinstance(result, PlainTextResponse)
-
-
-@pytest.mark.unit
-class TestRouterBase:
-    """Tests for RouterBase class."""
-
-    def test_initialization(self) -> None:
-        """Test initialization."""
-        router = RouterBase()
-        assert router._starlette_router is None
-
-    def test_asgi_app_lazy_loaded(self) -> None:
-        """Test asgi_app is lazily loaded."""
-        router = RouterBase()
-        assert router._starlette_router is None
-        app = router.asgi_app
-        assert router._starlette_router is not None
-        assert app is router._starlette_router

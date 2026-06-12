@@ -4,9 +4,8 @@ from typing import Any, cast
 
 import pytest
 
-from canary_framework.common import ROUTE_ATTR
-from canary_framework.common.routing import parse_route_path
-from canary_framework.common.types import RouterMeta
+from canary_framework.common import RouteInfo
+from canary_framework.core.router._utils import parse_route_path
 from canary_framework.engine.openapi import generate_openapi_schema
 
 
@@ -49,8 +48,24 @@ class TestParseRoutePath:
 class TestGenerateOpenAPISchema:
     """Tests for generate_openapi_schema function."""
 
-    def test_empty_router_metas(self) -> None:
-        """Test with empty router metas."""
+    def _make_route_info(self, **kwargs: object) -> RouteInfo:
+        async def _dummy() -> None:
+            pass
+
+        defaults: dict[str, object] = {
+            "handler": _dummy,
+            "method": "GET",
+            "path": "/",
+            "starlette_path": "/",
+            "path_params": [],
+            "query_params": [],
+            "param_meta": {},
+        }
+        defaults.update(kwargs)
+        return RouteInfo(**defaults)  # type: ignore[arg-type]
+
+    def test_empty_route_infos(self) -> None:
+        """Test with empty route infos."""
         schema = generate_openapi_schema([])
         assert schema["openapi"] == "3.0.3"
         assert "info" in schema
@@ -72,19 +87,15 @@ class TestGenerateOpenAPISchema:
 
     def test_with_routes(self) -> None:
         """Test with routes."""
-
-        def sample_get() -> None:
-            pass
-
-        setattr(
-            sample_get, ROUTE_ATTR, {"method": "GET", "path": "/test", "summary": "Test endpoint"}
+        route_info = self._make_route_info(
+            method="GET",
+            path="/test",
+            summary="Test endpoint",
+            starlette_path="/test",
+            router_prefix="/api",
+            router_tags=["test"],
         )
-
-        router_meta = RouterMeta(
-            name="test_router", prefix="/api", tags=["test"], routes=[sample_get]
-        )
-
-        schema = generate_openapi_schema([router_meta])
+        schema = generate_openapi_schema([route_info])
         paths = cast(dict[str, Any], schema["paths"])
         assert "/api/test" in paths
         assert "get" in paths["/api/test"]

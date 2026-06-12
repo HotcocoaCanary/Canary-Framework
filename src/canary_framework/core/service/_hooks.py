@@ -10,6 +10,7 @@ Provides find_hooks function for discovering lifecycle hooks on service instance
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any, cast
 
 from canary_framework.common import CF_HOOK_MARKER_MAP, LifecycleHook
 
@@ -46,16 +47,16 @@ def find_hooks(instance: object) -> HookDict:
         LifecycleHook.BEFORE_STARTUP: None,
         LifecycleHook.BEFORE_SHUTDOWN: None,
     }
-    for cls in type(instance).__mro__:
+    child_cls = type(instance)
+    hook_methods: dict[LifecycleHook, object] = {}
+    for cls in reversed(child_cls.__mro__):
         for _name, attr_obj in cls.__dict__.items():
-            if not callable(attr_obj):
-                continue
             for hook, marker in CF_HOOK_MARKER_MAP.items():
-                if getattr(attr_obj, marker, False) and hooks[hook] is None:
-                    hooks[hook] = attr_obj.__get__(instance, cls)
-                    break
-        if all(v is not None for v in hooks.values()):
-            break
+                if getattr(attr_obj, marker, False):
+                    hook_methods[hook] = attr_obj
+
+    for hook, attr_obj in hook_methods.items():
+        hooks[hook] = cast(Any, attr_obj).__get__(instance, child_cls)
     return hooks
 
 

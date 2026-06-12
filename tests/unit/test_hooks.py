@@ -3,7 +3,7 @@
 import pytest
 
 from canary_framework.common import CF_HOOK_MARKER_MAP, LifecycleHook
-from canary_framework.engine.hooks import find_hooks
+from canary_framework.core.service._hooks import find_hooks
 
 
 @pytest.mark.unit

@@ -24,7 +24,7 @@ class MyService(ServiceBase):
 
 ### 2. 初始化
 
-所有服务实例化后调用 `init()` 方法。在此建立连接并访问配置：
+所有服务实例化后调用 `init()` 方法：
 
 ```python
 @service()
@@ -36,13 +36,15 @@ class MyService(ServiceBase):
 使用 `@after_init` 钩子在初始化后运行代码：
 
 ```python
-from canary_framework import after_init
+from canary_framework import after_init, service
+from canary_framework.core.service import ServiceBase
 
 @service()
-class Database(ServiceBase):
+class UserService(ServiceBase):
     @after_init
-    async def connect(self):
-        self.connection = await connect_to_db(self.config.database_url)
+    async def seed_default_users(self):
+        if not await self.db.has_users():
+            await self.db.create_default_users()
 ```
 
 ### 3. 启动
@@ -264,11 +266,11 @@ class Database(ServiceBase):
 
 app = App()
 await app.init()
+await app.startup()
+await app.shutdown()
 ```
 
-### 日志配置
-
-框架在 `init()` 阶段自动配置日志。无需手动调用
+框架在 `init()` 期间自动配置日志。无需手动调用
 `logging.basicConfig()`。
 
 **默认行为**：当您调用 `app.init()` 时，框架为 `cf` 日志器添加

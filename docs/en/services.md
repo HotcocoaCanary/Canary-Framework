@@ -25,6 +25,7 @@ class UserRepository(ServiceBase):
 
 - Services are automatically named `ClassName` + `"Service"` — e.g., `UserRepository` → `UserRepositoryService`
 - Name is auto-generated from the class name
+- To add HTTP routes, define a `router` class attribute with a `Router` instance (see [Routers & HTTP](./web.md))
 
 ## Declaring Dependencies
 
