@@ -2,153 +2,149 @@
 
 import pytest
 
-from canary_framework.common import ROUTE_ATTR, get_router_meta, is_cf_router
-from canary_framework.core.router import RouterBase
-from canary_framework.decorators.router import (
-    delete,
-    get,
-    patch,
-    post,
-    put,
-    router,
-)
+from canary_framework import service
+from canary_framework.common import get_service_meta
+from canary_framework.core.router import Router
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.unit
 class TestRouterDecorator:
-    """Tests for @router decorator."""
+    """Tests for @service decorator with Router."""
 
     def test_router_decorator_marks_class(self) -> None:
-        """Test @router marks class as router."""
+        """Test @service marks class as service."""
 
-        @router()
-        class MyRouter(RouterBase):
+        @service()
+        class MyRouter(ServiceBase):
             pass
 
-        assert is_cf_router(MyRouter)
+        meta_ = get_service_meta(MyRouter)
+        assert meta_ is not None
+        assert meta_.name
 
     def test_router_decorator_inherits_router_base(self) -> None:
-        """Test @router makes class inherit from RouterBase."""
+        """Test @service makes class inherit from ServiceBase."""
 
-        @router()
-        class MyRouter(RouterBase):
+        @service()
+        class MyRouter(ServiceBase):
             pass
 
-        assert issubclass(MyRouter, RouterBase)
+        assert issubclass(MyRouter, ServiceBase)
 
     def test_router_decorator_sets_meta(self) -> None:
-        """Test @router sets metadata."""
+        """Test @service sets metadata."""
 
-        @router()
-        class MyRouter(RouterBase):
+        @service()
+        class MyRouter(ServiceBase):
             pass
 
-        meta = get_router_meta(MyRouter)
+        meta = get_service_meta(MyRouter)
         assert meta is not None
-        assert meta.name == "MyRouterRouter"
-        assert meta.prefix == ""
-        assert meta.tags == []
-        assert meta.routes == []
+        assert meta.name == "MyRouter"
 
     def test_router_decorator_with_prefix(self) -> None:
-        """Test @router with prefix."""
+        """Test Router with prefix."""
 
-        @router(prefix="/api")
-        class MyRouter(RouterBase):
-            pass
+        @service()
+        class MyRouter(ServiceBase):
+            router = Router(prefix="/api")
 
-        meta = get_router_meta(MyRouter)
-        assert meta is not None
-        assert meta.prefix == "/api"
+        assert isinstance(MyRouter.router, Router)
+        assert MyRouter.router.prefix == "/api"
 
     def test_router_decorator_with_tags(self) -> None:
-        """Test @router with tags."""
+        """Test Router with tags."""
 
-        @router(tags=["api", "v1"])
-        class MyRouter(RouterBase):
-            pass
+        @service()
+        class MyRouter(ServiceBase):
+            router = Router(tags=["api", "v1"])
 
-        meta = get_router_meta(MyRouter)
-        assert meta is not None
-        assert meta.tags == ["api", "v1"]
+        assert isinstance(MyRouter.router, Router)
+        assert MyRouter.router.tags == ["api", "v1"]
 
     def test_router_decorator_collects_routes(self) -> None:
-        """Test @router collects routes."""
+        """Test Router collects routes."""
 
-        @router()
-        class MyRouter(RouterBase):
-            @get("/test")
+        @service()
+        class MyRouter(ServiceBase):
+            router = Router()
+
+            @router.get("/test")
             async def test_route(self) -> None:
                 pass
 
-        meta = get_router_meta(MyRouter)
-        assert meta is not None
-        assert len(meta.routes) == 1
+        assert len(MyRouter.router._route_infos) == 1
 
 
 @pytest.mark.unit
 class TestHTTPMethodDecorators:
-    """Tests for HTTP method decorators."""
+    """Tests for Router HTTP method decorators."""
 
     def test_get_decorator(self) -> None:
-        """Test @get decorator."""
+        """Test router.get decorator."""
 
         def my_route() -> None:
             pass
 
-        decorated = get("/test")(my_route)
-        assert hasattr(decorated, ROUTE_ATTR)
-        route_info = getattr(decorated, ROUTE_ATTR)
-        assert route_info["method"] == "GET"
-        assert route_info["path"] == "/test"
+        r = Router()
+        decorated = r.get("/test")(my_route)
+        assert decorated is my_route
+        assert len(r._route_infos) == 1
+        assert r._route_infos[0].method == "GET"
+        assert r._route_infos[0].path == "/test"
 
     def test_post_decorator(self) -> None:
-        """Test @post decorator."""
+        """Test router.post decorator."""
 
         def my_route() -> None:
             pass
 
-        decorated = post("/test")(my_route)
-        assert hasattr(decorated, ROUTE_ATTR)
-        route_info = getattr(decorated, ROUTE_ATTR)
-        assert route_info["method"] == "POST"
-        assert route_info["path"] == "/test"
+        r = Router()
+        decorated = r.post("/test")(my_route)
+        assert decorated is my_route
+        assert len(r._route_infos) == 1
+        assert r._route_infos[0].method == "POST"
+        assert r._route_infos[0].path == "/test"
 
     def test_put_decorator(self) -> None:
-        """Test @put decorator."""
+        """Test router.put decorator."""
 
         def my_route() -> None:
             pass
 
-        decorated = put("/test")(my_route)
-        assert hasattr(decorated, ROUTE_ATTR)
-        route_info = getattr(decorated, ROUTE_ATTR)
-        assert route_info["method"] == "PUT"
-        assert route_info["path"] == "/test"
+        r = Router()
+        decorated = r.put("/test")(my_route)
+        assert decorated is my_route
+        assert len(r._route_infos) == 1
+        assert r._route_infos[0].method == "PUT"
+        assert r._route_infos[0].path == "/test"
 
     def test_delete_decorator(self) -> None:
-        """Test @delete decorator."""
+        """Test router.delete decorator."""
 
         def my_route() -> None:
             pass
 
-        decorated = delete("/test")(my_route)
-        assert hasattr(decorated, ROUTE_ATTR)
-        route_info = getattr(decorated, ROUTE_ATTR)
-        assert route_info["method"] == "DELETE"
-        assert route_info["path"] == "/test"
+        r = Router()
+        decorated = r.delete("/test")(my_route)
+        assert decorated is my_route
+        assert len(r._route_infos) == 1
+        assert r._route_infos[0].method == "DELETE"
+        assert r._route_infos[0].path == "/test"
 
     def test_patch_decorator(self) -> None:
-        """Test @patch decorator."""
+        """Test router.patch decorator."""
 
         def my_route() -> None:
             pass
 
-        decorated = patch("/test")(my_route)
-        assert hasattr(decorated, ROUTE_ATTR)
-        route_info = getattr(decorated, ROUTE_ATTR)
-        assert route_info["method"] == "PATCH"
-        assert route_info["path"] == "/test"
+        r = Router()
+        decorated = r.patch("/test")(my_route)
+        assert decorated is my_route
+        assert len(r._route_infos) == 1
+        assert r._route_infos[0].method == "PATCH"
+        assert r._route_infos[0].path == "/test"
 
     def test_route_with_extra_info(self) -> None:
         """Test route with extra info."""
@@ -156,7 +152,8 @@ class TestHTTPMethodDecorators:
         def my_route() -> None:
             pass
 
-        decorated = get(
+        r = Router()
+        decorated = r.get(
             "/test",
             summary="Test summary",
             description="Test description",
@@ -165,9 +162,10 @@ class TestHTTPMethodDecorators:
             operation_id="testOperation",
         )(my_route)
 
-        route_info = getattr(decorated, ROUTE_ATTR)
-        assert route_info["summary"] == "Test summary"
-        assert route_info["description"] == "Test description"
-        assert route_info["tags"] == ["test"]
-        assert route_info["deprecated"] is True
-        assert route_info["operation_id"] == "testOperation"
+        assert decorated is my_route
+        route_info = r._route_infos[0]
+        assert route_info.summary == "Test summary"
+        assert route_info.description == "Test description"
+        assert route_info.tags == ["test"]
+        assert route_info.deprecated is True
+        assert route_info.operation_id == "testOperation"

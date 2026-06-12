@@ -102,8 +102,9 @@ class Auth(ServiceBase):
 
 ```python
 # services/posts.py
-from canary_framework import router, get, post, put, delete
-from canary_framework.core.router import RouterBase
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
 from pydantic import BaseModel, Field
 from .auth import Auth
 from .database import Database
@@ -119,8 +120,10 @@ class PostResponse(BaseModel):
     content: str = Field(description="Post content")
     author: str = Field(description="Author name")
 
-@router(prefix="/api/posts", tags=["Posts"])
-class Posts(RouterBase):
+@service()
+class Posts(ServiceBase):
+    router = Router(prefix="/api/posts", tags=["Posts"])
+
     db: Database  # 自动注入
     auth: Auth    # 自动注入
 
@@ -129,25 +132,25 @@ class Posts(RouterBase):
             {"id": 1, "title": "First Post", "content": "Hello World!", "author": "admin"}
         ]
 
-    @get("/", summary="List posts", description="Get all blog posts")
+    @router.get("/", summary="List posts", description="Get all blog posts")
     async def list_posts(self):
         return {"posts": self.posts}
 
-    @get("/{post_id}",
-         summary="Get post",
-         description="Get post details by ID",
-         response_model=PostResponse)
+    @router.get("/{post_id}",
+                summary="Get post",
+                description="Get post details by ID",
+                response_model=PostResponse)
     async def get_post(self, post_id: int):
         post = next((p for p in self.posts if p["id"] == post_id), None)
         if post:
             return post
         return {"error": "Post not found"}, 404
 
-    @post("/",
-          summary="Create post",
-          description="Create a new blog post",
-          request_model=PostCreate,
-          response_model=PostResponse)
+    @router.post("/",
+                 summary="Create post",
+                 description="Create a new blog post",
+                 request_model=PostCreate,
+                 response_model=PostResponse)
     async def create_post(self, body: PostCreate):
         new_post = {
             "id": len(self.posts) + 1,
@@ -158,11 +161,11 @@ class Posts(RouterBase):
         self.posts.append(new_post)
         return new_post, 201
 
-    @put("/{post_id}",
-         summary="Update post",
-         description="Update post content",
-         request_model=PostCreate,
-         response_model=PostResponse)
+    @router.put("/{post_id}",
+                summary="Update post",
+                description="Update post content",
+                request_model=PostCreate,
+                response_model=PostResponse)
     async def update_post(self, post_id: int, body: PostCreate):
         post = next((p for p in self.posts if p["id"] == post_id), None)
         if post:
@@ -174,18 +177,20 @@ class Posts(RouterBase):
             return post
         return {"error": "Post not found"}, 404
 
-    @delete("/{post_id}", summary="Delete post", description="Delete a post")
+    @router.delete("/{post_id}", summary="Delete post", description="Delete a post")
     async def delete_post(self, post_id: int):
         self.posts = [p for p in self.posts if p["id"] != post_id]
         return {"message": "Post deleted"}
 ```
 
-与旧版 API 的关键区别：
+关键设计说明：
 
+- `router = Router(prefix="/api/posts", tags=["Posts"])` — 声明 `Router` 类属性，方法装饰器在此实例上调用
+- `@router.get`、`@router.post`、`@router.put`、`@router.delete` 替代了独立的 `@get` / `@post` / `@put` / `@delete`
 - 路径参数如 `{post_id}` 自动绑定 — 作为函数参数声明（`post_id: int`）
 - `request_model` 使请求体自动解析并作为 `body` 参数传入
 - 不再需要 `self, request` — 参数自动注入
-- 不再需要 `deps` 参数 — 依赖通过注解声明（`db: Database`, `auth: Auth`）
+- 依赖通过注解声明（`db: Database`, `auth: Auth`）
 
 ## 6. 配置
 
@@ -216,9 +221,9 @@ from services.database import Database
 from services.auth import Auth
 from services.posts import Posts
 
-@module(services=[AppConfig, Database, Auth, Posts])
+@module(services=[Database, Auth, Posts])
 class BlogApp(ModuleBase):
-    config: AppConfig
+    pass
 
 async def setup():
     app = BlogApp()
@@ -234,8 +239,7 @@ if __name__ == "__main__":
 ```
 
 - `@module(services=[...])` — 无需 `name=` 参数；自动命名为 `BlogAppModule`
-- Config 通过 `issubclass(CanaryConfig)` 从 `@module(services=[AppConfig, ...])` 自动发现
-- 子模块通过类属性名访问：`app.Database`, `app.Auth`, `app.Posts`
+- 模块子服务通过类属性名访问：`app.Database`, `app.Auth`, `app.Posts`
 
 ## 8. 运行应用
 
@@ -266,7 +270,7 @@ curl -X PUT http://localhost:8000/api/posts/2 \
 curl -X DELETE http://localhost:8000/api/posts/2
 ```
 
-## 8. 访问 OpenAPI 文档
+## 9. 访问 OpenAPI 文档
 
 启动应用后，可以访问以下端点：
 
@@ -277,7 +281,7 @@ curl -X DELETE http://localhost:8000/api/posts/2
 ## 您学到了什么
 
 - 使用 `@service()` 定义服务 — 无需手动指定名称
-- 使用 `@router(prefix=...)` 和 HTTP 方法装饰器创建路由
+- 使用 `Router` 类属性和 `@router.get`/`@router.post` 方法装饰器创建路由
 - 通过 Python 类型注解声明依赖（`db: Database`）
 - 路由参数从路径、查询和请求体自动绑定
 - 使用 `@module(services=[...])` 组合所有内容
@@ -285,27 +289,11 @@ curl -X DELETE http://localhost:8000/api/posts/2
 - 使用 Pydantic 模型进行请求验证
 - **框架日志自动配置** — 无需 `logging.basicConfig()`。
   在配置对象上设置 `log_level` 来控制详细程度（默认：`"INFO"`）
-- **配置** — 使用 `@config` 和 `CanaryConfig` 自定义主机、端口、日志级别、OpenAPI 设置等：
-  ```python
-  from canary_framework import config
-  from canary_framework.common.config import CanaryConfig
-
-  @config
-  class AppConfig(CanaryConfig):
-      host: str = "0.0.0.0"
-      port: int = 8080
-      openapi_title: str = "My Blog API"
-      log_level: str = "DEBUG"
-
-  async def setup():
-      app = BlogApp()
-      await app.init()
-      return app
-  ```
 
 ## 下一步
 
 探索详细文档：
+- [配置](./configuration.md)
 - [服务](./services.md)
 - [模块](./modules.md)
 - [Web 路由](./web.md)

@@ -18,7 +18,7 @@ from canary_framework.common import (
     ServiceMeta,
     ServiceNotFoundError,
 )
-from canary_framework.engine.logging import get_logger
+from canary_framework.common.logging import get_logger
 
 _log = get_logger("registry")
 
@@ -106,8 +106,10 @@ class Registry:
         try:
             return self._by_name[name]
         except KeyError:
+            if self.parent is not None:
+                return self.parent.get_by_name(name)
             raise ServiceNotFoundError(
-                f"'{name}' is not registered. Registered: {sorted(self._by_name)}"
+                f"Service with name '{name}' not found in registry."
             ) from None
 
     def get_by_class(self, cls: type) -> ServiceEntry:

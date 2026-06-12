@@ -1,302 +1,267 @@
 # 核心概念
 
-本文档解释 Canary Framework 的核心设计原则和内部架构。
+本文档涵盖 Canary Framework 的内部设计、数据流和机制。
 
-## 设计原则
+## 设计概述
 
-### 1. 装饰器驱动
+Canary Framework 遵循三层架构：
 
-框架使用装饰器保持代码简洁和声明式：
+```
+ common/  ──►  core/  ──►  decorators/  ──►  engine/
+(类型,           (ServiceBase,   (公共 API:        (注册表,
+ 配置,            ModuleBase,     @service,        依赖,
+ 错误,            Router)         @module,          钩子,
+ 路由)                            @config,          OpenAPI,
+                                 生命周期           参数,
+                                 钩子)              日志)
+```
+
+- **common/** — 零框架内部依赖。类型、配置模型、错误层次结构和路由解析，每个其他模块都导入这些。
+- **core/** — 两个基类（`ServiceBase`、`ModuleBase`）和 `Router` 类，提供生命周期、DI 注入、路由管理和 ASGI 集成。
+- **decorators/** — 公共 API。装饰器验证基类继承、附加元数据标记并自动生成名称。
+- **engine/** — 运行时机制：注册表、拓扑排序、钩子发现、OpenAPI 生成、参数解析和日志。
+
+## ServiceBase 内部机制
+
+`ServiceBase`（core/service/_base.py）是所有框架组件的根基类。ModuleBase 继承自它。`Router` 类是独立的 Route 管理器，作为类属性在服务上使用。
+
+### `__init__`
 
 ```python
-@service()
-class MyService(ServiceBase):
-    pass
+def __init__(self):
+    self._cf_hooks: HookDict | None = None     # 懒加载发现的钩子
+    self._cf_parent_registry: object | None = None  # 由父模块注入
 ```
 
-您的代码本身就是配置 — 无需 XML、JSON 或 YAML。
+### 生命周期方法
 
-### 2. 异步优先
+| 方法 | 签名 | 作用 |
+|---|---|---|
+| `init()` | `() → None` | 调用 `AFTER_INIT` 钩子。 |
+| `startup()` | `() → None` | 调用 `BEFORE_STARTUP` 钩子。 |
+| `shutdown()` | `() → None` | 调用 `BEFORE_SHUTDOWN` 钩子。 |
 
-一切都围绕 async/await 构建以实现高性能：
+### `__call__` — ASGI 3 接口
 
 ```python
-@service()
-class MyService(ServiceBase):
-    async def do_something(self):
-        await some_async_operation()
+async def __call__(self, scope, receive, send):
+    if scope["type"] == "lifespan":
+        await self._handle_lifespan(receive, send)
+    else:
+        asgi = getattr(self, "asgi_app", None)
+        if asgi is not None:
+            await asgi(scope, receive, send)
 ```
 
-### 3. 注解驱动依赖注入
+将 ASGI lifespan 事件映射到 `startup()`/`shutdown()`。非 lifespan 请求在可用时委托给 `self.asgi_app`（由子类设置）。
 
-依赖通过 Python 类型注解声明，而非单独的列表：
+### `_handle_lifespan`
+
+实现 ASGI lifespan 协议：
+
+1. 接收 `lifespan.startup` → 调用 `self.startup()` → 发送 `lifespan.startup.complete`
+2. 接收 `lifespan.shutdown` → 调用 `self.shutdown()` → 发送 `lifespan.shutdown.complete` → 退出
+
+### `_invoke_hook`
+
+通过 `find_hooks()`（engine/hooks.py）进行懒加载钩子发现。首次调用时，`find_hooks()` 遍历类 MRO 查找标记了钩子标记（`__cf_after_init__`、`__cf_before_startup__`、`__cf_before_shutdown__`）的方法，并将其绑定到实例。支持同步和异步钩子。钩子引发的任何异常都会被包装在 `LifecycleHookError` 中。
+
+## ModuleBase 内部机制
+
+`ModuleBase`（core/module.py）继承 `ServiceBase` 并编排子服务。
+
+### `init()` 流程
+
+```
+递归注册服务
+    ↓
+topological_sort（Kahn 算法）
+    ↓
+按顺序实例化服务
+    ↓
+DI 注入：resolve_deps → setattr 注入
+    ↓
+在所有 ServiceBase 子项上设置 _cf_parent_registry
+    ↓
+按顺序初始化每个子项
+    ↓
+调用 AFTER_INIT 钩子
+```
+
+**逐步说明：**
+
+1. **注册**（`_register_entry_with_deps`）：对于模块 `services` 列表中的每个服务，在注册表中注册它。对于每个已注册的服务，调用 `resolve_deps(cls)` 发现注解声明的依赖并递归注册它们。
+
+2. **拓扑排序**（`topological_sort`）：使用 Kahn 算法。从 `resolve_deps()` 输出构建依赖图，计算入度，生成有效的启动顺序。检测循环依赖。
+
+3. **实例化**：通过 `entry.cls()` 按拓扑顺序创建所有已注册类的实例。
+
+4. **DI 注入**：对于每个实例，`resolve_deps(type(inst))` 返回 `{attr_name: dep_type}`。对于每个依赖，`setattr(inst, attr_name, registry.get_by_class(dep_type).instance)` 注入已解析的实例。注解键名成为属性名。
+
+5. **父注册表注入**：`inst._cf_parent_registry = registry` 在每个 `ServiceBase` 实例上设置。Router 通过此方式访问同级 RouterMeta，Agent 通过此方式访问注册表。
+
+6. **子项初始化**：每个子项的 `init()` 按拓扑顺序调用。Config 从 `services` 列表自动发现 — 任何通过 `issubclass(CanaryConfig)` 的类被视为配置。
+
+### `asgi_app` 属性
+
+懒加载构建 Starlette `Router`，按启动顺序遍历子服务：
+
+- **Duck-typing 挂载**：如果 `hasattr(inst, "asgi_app")`，则子项通过 Starlette `Mount` 挂载在其 `get_mount_path()`（或 `f"/{name}"` 回退）上。
+- **根路由**：如果 `hasattr(inst, "_cf_get_root_routes")`，子项的根路由列表贡献给模块级别的 Router。Router 通过此方式在根级别提供 `/docs`、`/redoc`、`/openapi.json`。
+
+挂载路径冲突会被检测并抛出 `ValueError`。
+
+### 生命周期传播
+
+所有生命周期方法（init、startup、shutdown）传播到子项：
+- **正向顺序**（拓扑）：init、startup
+- **反向顺序**：shutdown
+
+## Router 内部机制
+
+`Router`（core/router/_base.py）是独立的 Route 管理器，不是 `ServiceBase` 子类。它作为类属性在 `@service()` 或 `@module()` 装饰类上使用。
+
+### 构造器
 
 ```python
-@service()
-class UserService(ServiceBase):
-    db: Database      # 自动解析并注入
-    cache: Cache      # 自动解析并注入
+Router(prefix: str = "", *, tags: list[str] | None = None)
 ```
 
-### 4. 自动命名
+- `prefix` — 应用于此 Router 中所有路由的 URL 前缀（如 `"/api"`）
+- `tags` — 自动应用于此 Router 中所有端点的 OpenAPI 标签
 
-名称从类名派生 — 无需手动指定字符串：
+内部存储 `self._route_infos: list[RouteInfo]`，随着通过方法装饰器注册路由而填充。
 
-- `@service()` + 类 `Database` → 名称 `DatabaseService`
-- `@module(services=[...])` + 类 `App` → 名称 `AppModule`
-- `@router(prefix="/api")` + 类 `Api` → 名称 `ApiRouter`
+### HTTP 方法装饰器
 
-### 5. 可组合性
+每个 `Router` 实例提供方法装饰器（`@router.get`、`@router.post`、`@router.put`、`@router.delete`、`@router.patch`），内部注册 `RouteInfo` 对象：
 
-通过组合简单模块构建复杂系统：
+1. 通过 `parse_route_path(path)` 解析路径 → 拆分为 `starlette_path`、`path_params`、`query_params`
+2. 通过 `resolve_params(fn)` 解析处理器参数类型
+3. 从处理器注解自动检测 `request_model`
+4. 构造包含所有元数据的 `RouteInfo` 数据类
+5. 追加到 `self._route_infos`
 
-```python
-@module(services=[AuthModule, PostsModule, CommentsModule])
-class App(ModuleBase):
-    pass
-```
+装饰器返回原始函数不变（不包装）。
 
-## 架构概述
+### 路由收集
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      Application                         │
-├─────────────────────────────────────────────────────────┤
-│                      Modules                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │ Auth Module  │  │ Posts Module │  │   ...        │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  │
-├─────────────────────────────────────────────────────────┤
-│                      Services                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │   Service    │  │   Service    │  │   Router     │  │
-│  └──────────────┘  └──────────────┘  └──────────────┘  │
-├─────────────────────────────────────────────────────────┤
-│                      Engine                              │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────┐  │
-│  │ Registry │  │ Resolver │  │ Lifecycle│  │ Hooks  │  │
-│  └──────────┘  └──────────┘  └──────────┘  └────────┘  │
-├─────────────────────────────────────────────────────────┤
-│                      Starlette/ASGI                      │
-└─────────────────────────────────────────────────────────┘
-```
+`_collect_routes()` 是一个自由函数，适用于任何对象实例：
 
-## 核心组件
+1. 读取 `getattr(instance, "router", None)` — 如果是 `Router`，遍历 `router._route_infos`
+2. 对于每个 `RouteInfo`，调用 `_route_handler()` 创建 Starlette `Route`
 
-### 1. 装饰器
+### `_route_handler`
 
-装饰器将普通类转换为框架感知的组件：
+1. 从 `RouteInfo` 读取路由元数据
+2. 创建 `endpoint` 闭包：
+   - 从 `request.path_params` 绑定路径参数，进行类型转换
+   - 从 `request.query_params` 绑定查询参数，进行类型转换
+   - 如果设置了 `request_model`，调用 `await request.json()` 并用 Pydantic 解析
+   - 调用 `await handler(...)` 传入解析的 kwargs
+   - 通过 `_auto_response()` 转换返回值
+3. 返回 `Route(starlette_path, endpoint=endpoint, methods=[method])`
 
-- `@service()`：将类标记为服务
-- `@module(services=[...])`：将类标记为模块容器
-- `@router(prefix="", *, tags=None)`：将类标记为路由
-- `@get/@post 等`：将方法标记为路由处理器
-- `@after_init/@before_startup/@before_shutdown`：将方法标记为生命周期钩子
+### OpenAPI 文档
 
-### 2. 基类
+模块中第一个带 `Router` 的服务在 `startup()` 时生成文档：
 
-使用 `@service()`、`@module()` 或 `@router()` 装饰的类必须显式继承基类：
+1. 从自身和通过 `_cf_parent_registry` 的所有同级服务收集 `RouteInfo`
+2. 调用 `generate_openapi_schema()` 传入所有路由信息和配置值
+3. 生成 Swagger UI 和 ReDoc HTML 页面
+4. 为 `/docs`、`/redoc`、`/openapi.json` 创建根路由
+5. 先到先得注册：只有模块中的第一个 Router 注册文档
 
-- `ServiceBase`：带有生命周期方法的服务基类
-- `ModuleBase`：协调服务的模块基类
-- `RouterBase`：带有 ASGI 集成的路由基类
+### 挂载路径
 
-### 3. 引擎
-
-引擎管理框架的核心操作：
-
-- **Registry**：服务注册和查找
-- **Resolver**：`resolve_deps()` 读取注解以发现依赖
-- **Injector**：`topological_sort()` 构建依赖图并排序实例化顺序
-- **Hooks**：生命周期钩子的发现和执行
+带 `Router` 的服务如果设置了 `router.prefix`（如 `"/api"`）则挂载在其上，否则挂载在 `f"/{service_name}"`。
 
 ## 依赖注入流程
 
-新的 DI 系统是注解驱动的：
-
 ```
-1. 遍历声明的服务
-   ↓
-2. 对每个服务，resolve_deps(cls) 读取类型注解
-   ↓
-3. 过滤：仅保留标记了 CF_SERVICE_MARKER 的类型
-   ↓
-4. 递归注册每个发现的依赖
-   ↓
-5. topological_sort(registry) 构建依赖图
-   ↓
-6. 按拓扑顺序实例化服务
-   ↓
-7. 对每个依赖：setattr(instance, annotation_key, dependency_instance)
-   ↓
-8. 运行生命周期阶段
+resolve_deps(cls) → __annotations__ → 按 CF_SERVICE_MARKER 过滤
+    ↓
+{attr_name: dep_type}
+    ↓
+递归注册 → topological_sort（Kahn）
+    ↓
+startup_order: [name1, name2, ...]
+    ↓
+实例化 → setattr 注入 → 生命周期
 ```
 
-### resolve_deps(cls)
+### `resolve_deps(cls)`
 
-此函数读取类的 `__annotations__` 字典，仅返回类型被 `CF_SERVICE_MARKER` 装饰的条目。例如：
+通过 `typing.get_type_hints()` 读取 `cls.__annotations__`，仅返回类型设置了 `CF_SERVICE_MARKER`（即被 `@service` 或 `@module` 装饰的类）的条目：
 
 ```python
+# 对于类：
 @service()
 class Auth(ServiceBase):
     db: Database   # ✓ CF_SERVICE_MARKER — 包含
     x: int         # ✗ 不是服务 — 排除
 
-# resolve_deps(Auth) 返回：{"db": Database}
+# resolve_deps(Auth) → {"db": Database}
 ```
 
-### topological_sort(registry)
+### `topological_sort(registry)`
 
-使用 Kahn 算法配合 `resolve_deps()` 来：
-1. 从所有注册的服务构建完整依赖图
-2. 确定实例化顺序
-3. 检测循环依赖
+使用 Kahn 算法：
 
-### setattr 注入
-
-依赖使用注解键名注入 — 不进行 snake_case 转换：
-
-```python
-@service()
-class UserService(ServiceBase):
-    db: Database   # 注入为 self.db
-    repo: UserRepo # 注入为 self.repo
-```
-
-## 工作原理：模块启动
-
-让我们跟踪启动模块时发生的情况：
-
-### 步骤 1：模块实例化
-
-```python
-app = App()
-```
-
-### 步骤 2：初始化
-
-```python
-await app.init()
-```
-
-1. 从模块的 `services` 列表收集所有服务
-2. 对每个服务，调用 `resolve_deps(cls)` 发现注解
-3. 递归注册所有发现的依赖类型
-4. 调用 `topological_sort(registry)` 确定启动顺序
-5. 按顺序实例化所有服务
-6. 调用 `setattr` 以注解键名注入每个依赖
-7. Config 自动发现：`services` 列表中通过 `issubclass(CanaryConfig)` 检查的类被视为配置
-8. 为每个实例设置 `_cf_parent_registry`
-9. 按顺序调用每个服务的 `init()`
-10. 运行 `@after_init` 钩子
-
-### 步骤 3：启动
-
-```python
-await app.init()
-```
-
-1. 按顺序调用每个服务的 `init()`
-2. 运行 `@after_init` 钩子
-
-### 步骤 3：启动
-
-```python
-await app.startup()
-```
-
-1. 运行 `@before_startup` 钩子
-2. 按顺序调用每个服务的 `startup()`
-
-### 步骤 4：请求处理
-
-模块作为 ASGI 应用：
-- 从服务中收集所有路由
-- 创建 Starlette 路由
-- 在其 prefix 路径上挂载子路由
-- 将请求路由到带有自动绑定参数的处理程序
-
-### 步骤 5：关闭
-
-```python
-await app.shutdown()
-```
-
-1. 运行 `@before_shutdown` 钩子
-2. 按逆序调用每个服务的 `shutdown()`
+1. 从 `resolve_deps()` 构建邻接表
+2. 计算每个节点的入度
+3. 将入度为 0 的节点加入队列
+4. 处理队列，减少入度
+5. 如果未处理全部节点 → `CircularDependencyError`
 
 ## 元数据系统
 
-框架在装饰类上存储元数据：
+装饰器在类上设置元数据标记。这些标记驱动所有框架行为。
+
+### 标记
+
+| 常量 | 值 | 用途 |
+|---|---|---|
+| `CF_SERVICE_MARKER` | `"__cf_service__"` | 在所有 `@service` 和 `@module` 类上设置为 `True` |
+| `CF_SERVICE_META` | `"__cf_service_meta__"` | 存储 `ServiceMeta` / `ModuleMeta` / `RouterMeta` 实例 |
+| `CF_NAME_ATTR` | `"__cf_name__"` | 自动生成的名称（如 `"DatabaseService"`） |
+| `ROUTE_ATTR` | `"__cf_route__"` | HTTP 处理器方法上的路由元数据字典 |
+| `CF_CONFIG_MARKER` | `"__cf_config__"` | 在 `@config` 类上设置为 `True` |
+
+### 元类型
+
+- **`ServiceMeta(name)`** — 由 `@service` 设置
+- **`ModuleMeta(name, services)`** — 由 `@module` 设置，继承 `ServiceMeta`
+- **`RouterMeta(name, prefix, tags, routes)`** — 由 `Router` 类设置，继承 `ServiceMeta`
+
+### 类型检查
+
+`is_cf_service`、`is_cf_module` 和 `is_cf_router` 对存储在 `CF_SERVICE_META` 中的元类型使用 `isinstance` 检查：
 
 ```python
-@service()
-class MyService(ServiceBase):
-    pass
-
-hasattr(MyService, "__cf_service__")     # True
-hasattr(MyService, "__cf_service_meta__")  # True
+def is_cf_service(cls):  # hasattr(cls, CF_SERVICE_MARKER)
+def is_cf_module(cls):   # isinstance(getattr(cls, CF_SERVICE_META, None), ModuleMeta)
+def is_cf_router(cls):   # isinstance(getattr(cls, CF_SERVICE_META, None), RouterMeta)
 ```
-
-元数据类：
-- `ServiceMeta`：服务元数据（自动生成的名称，从注解解析的依赖）
-- `ModuleMeta`：模块元数据（扩展 ServiceMeta，添加 services 列表）
-- `RouterMeta`：路由元数据（扩展 ServiceMeta，添加 prefix、tags、routes）
-
-## 标记系统
-
-框架使用 `CF_SERVICE_MARKER` 来标识服务类。类型检查使用 `isinstance` 针对基类进行：
-
-- `isinstance(obj, ServiceBase)`：检查对象是否为框架服务
-- `isinstance(obj, ModuleBase)`：检查对象是否为框架模块
-- `isinstance(obj, RouterBase)`：检查对象是否为框架路由
-
-辅助函数：
-- `is_cf_service(cls)`：检查类是否为框架服务
-- `is_cf_module(cls)`：检查类是否为框架模块
-- `is_cf_router(cls)`：检查类是否为框架路由
 
 ## ASGI 集成
 
-框架与 Starlette 集成以提供 ASGI 支持：
+1. **`ServiceBase.__call__`** — 处理 ASGI lifespan 协议（startup/shutdown 事件）。将非 lifespan 请求委托给 `asgi_app`。
 
-1. `RouterBase` 收集带有自动绑定参数信息的路由处理器
-2. 将其转换为 Starlette `Route` 对象
-3. 创建 Starlette `Router`
-4. `ModuleBase` 和 `RouterBase` 继承 `ServiceBase.__call__`，处理 ASGI 请求和 lifespan 事件
-5. 模块作为 ASGI 应用
+2. **`ModuleBase.asgi_app`** — 通过 duck-typing 聚合子 ASGI 应用。将带有 `asgi_app` 的子项挂载在其挂载路径上。将带有 `_cf_get_root_routes()` 的子项的根路由贡献出去。
+
+3. **`Router.asgi_app`** — 第一个带有 `Router` 属性的服务从收集的路由处理器（通过 `_collect_routes()`）构建 Starlette `Router`。在 `startup()` 时，生成 OpenAPI schema 并将文档端点注册为根路由（先到先得）。
 
 ## 错误处理
 
-框架定义自定义异常：
+```
+Exception
+└── CanaryFrameworkError
+    ├── ConfigurationError            # 配置加载/验证失败
+    ├── ServiceNotFoundError          # 服务查找失败
+    ├── CircularDependencyError       # 拓扑排序检测到循环
+    ├── DependencyInjectionError      # DI 注入失败（None 实例等）
+    └── LifecycleHookError            # 钩子引发未处理异常
+```
 
-- `CanaryFrameworkError`：基础异常
-- `DependencyInjectionError`：DI 期间错误
-- `CircularDependencyError`：检测到循环依赖
-- `LifecycleHookError`：生命周期钩子错误
-- `ServiceNotFoundError`：注册表中未找到服务
-
-## 可扩展性
-
-框架设计为可扩展的：
-
-- 通过继承 `ServiceBase` 创建自定义基类
-- 构建包装内置装饰器的自定义装饰器
-- 创建打包相关服务的组合模块
-- 与任何 ASGI 兼容的服务器集成
-
-## 性能考虑
-
-- **启动**：由于拓扑排序，时间复杂度为 O(n log n)
-- **运行时**：服务查找 O(1)
-- **内存**：服务是单例，内存使用高效
-- **请求**：由 Starlette 处理，速度极快
-
-## 测试策略
-
-框架设计为可测试的：
-
-- 服务是普通类，易于实例化
-- 依赖通过注解显式声明，易于模拟
-- 生命周期方法可单独调用
-- 无全局状态，测试隔离
+所有框架错误继承自 `CanaryFrameworkError`，调用者可以捕获单一类型来处理所有框架错误。

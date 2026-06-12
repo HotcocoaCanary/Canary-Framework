@@ -5,7 +5,6 @@ import pytest
 from canary_framework.common.types import (
     LifecycleHook,
     ModuleMeta,
-    RouterMeta,
     ServiceEntry,
     ServiceMeta,
 )
@@ -61,31 +60,6 @@ class TestModuleMeta:
         meta = ModuleMeta(name="custom", services=[Service])
         assert meta.name == "custom"
         assert meta.services == [Service]
-
-
-@pytest.mark.unit
-class TestRouterMeta:
-    """Tests for RouterMeta dataclass."""
-
-    def test_default_values(self) -> None:
-        """Test default values are set correctly."""
-        meta = RouterMeta(name="test")
-        assert meta.name == "test"
-        assert meta.prefix == ""
-        assert meta.tags == []
-        assert meta.routes == []
-
-    def test_custom_values(self) -> None:
-        """Test custom values are set correctly."""
-
-        def route_fn() -> None:
-            pass
-
-        meta = RouterMeta(name="custom", prefix="/api", tags=["test"], routes=[route_fn])
-        assert meta.name == "custom"
-        assert meta.prefix == "/api"
-        assert meta.tags == ["test"]
-        assert meta.routes == [route_fn]
 
 
 @pytest.mark.unit

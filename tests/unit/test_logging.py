@@ -2,7 +2,7 @@
 
 import pytest
 
-from canary_framework.engine.logging import ensure_logging, get_logger
+from canary_framework.common.logging import ensure_logging, get_logger
 
 
 @pytest.mark.unit

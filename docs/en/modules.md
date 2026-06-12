@@ -24,10 +24,10 @@ class Auth(ModuleBase):
 Modules can contain services and other modules, creating a hierarchical structure:
 
 ```python
-from canary_framework import module, service, router
+from canary_framework import module, service
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 
 # Core services
 @service()
@@ -43,8 +43,9 @@ class Cache(ServiceBase):
 class AuthService(ServiceBase):
     db: Database
 
-@router(prefix="/auth")
-class AuthApi(RouterBase):
+@service()
+class AuthApi(ServiceBase):
+    router = Router(prefix="/auth")
     auth: AuthService
 
 @module(services=[AuthService, AuthApi])
@@ -57,8 +58,9 @@ class PostsService(ServiceBase):
     db: Database
     cache: Cache
 
-@router(prefix="/posts")
-class PostsApi(RouterBase):
+@service()
+class PostsApi(ServiceBase):
+    router = Router(prefix="/posts")
     posts: PostsService
 
 @module(services=[PostsService, PostsApi])
@@ -167,10 +169,10 @@ class App(ModuleBase):
 ## Complete Example
 
 ```python
-from canary_framework import module, service, router, get
+from canary_framework import module, service
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 
 # Services
 @service()
@@ -187,20 +189,21 @@ class UserService(ServiceBase):
     repo: UserRepo
 
 # Router
-@router(prefix="/api/users")
-class Users(RouterBase):
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/api/users")
     user: UserService
 
-    @get("/")
+    @router.get("/")
     async def list_users(self):
         return {"users": []}
 
 # Modules
 @module(services=[UserRepo, UserService, Users])
-class UsersModule(ModuleBase):
+class UsersMod(ModuleBase):
     pass
 
-@module(services=[Database, UsersModule])
+@module(services=[Database, UsersMod])
 class App(ModuleBase):
     pass
 ```

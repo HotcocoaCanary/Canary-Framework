@@ -24,10 +24,10 @@ class Auth(ModuleBase):
 模块可以包含服务和其他模块，创建层次化结构：
 
 ```python
-from canary_framework import module, service, router
+from canary_framework import module, service
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 
 # 核心服务
 @service()
@@ -43,8 +43,9 @@ class Cache(ServiceBase):
 class AuthService(ServiceBase):
     db: Database
 
-@router(prefix="/auth")
-class AuthApi(RouterBase):
+@service()
+class AuthApi(ServiceBase):
+    router = Router(prefix="/auth")
     auth: AuthService
 
 @module(services=[AuthService, AuthApi])
@@ -57,8 +58,9 @@ class PostsService(ServiceBase):
     db: Database
     cache: Cache
 
-@router(prefix="/posts")
-class PostsApi(RouterBase):
+@service()
+class PostsApi(ServiceBase):
+    router = Router(prefix="/posts")
     posts: PostsService
 
 @module(services=[PostsService, PostsApi])
@@ -110,29 +112,24 @@ await app.shutdown()
 模块可以直接用作 ASGI 应用。它自动挂载所有子路由：
 
 ```python
-from canary_framework import config
-from canary_framework.common.config import CanaryConfig
-
-@config
-class AppConfig(CanaryConfig):
-    host: str = "0.0.0.0"
-    port: int = 8080
+@module(services=[...])
+class App(ModuleBase):
+    pass
 
 async def setup():
-    cfg = AppConfig()
     app = App()
     await app.init()
-    return app, cfg
+    return app
 
 import asyncio
 import uvicorn
 
-app, cfg = asyncio.run(setup())
-uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
+app = asyncio.run(setup())
+uvicorn.run(app, host="0.0.0.0", port=8080, lifespan="on")
 ```
 
 模块将：
-1. 从其服务中收集所有路由
+1. 从其服务中收集所有 Router
 2. 根据其 prefix 将它们挂载在路径上
 3. 处理 ASGI 请求
 
@@ -140,7 +137,6 @@ uvicorn.run(app, host=cfg.host, port=cfg.port, lifespan="on")
 
 使用 `@module()` 装饰的类必须显式继承 `ModuleBase`，该类提供：
 
-- `config` 属性：访问通过 DI 注入的配置
 - `init()` 方法：初始化模块和所有服务
 - `startup()` 方法：启动模块和所有服务
 - `shutdown()` 方法：关闭模块和所有服务
@@ -173,10 +169,10 @@ class App(ModuleBase):
 ## 完整示例
 
 ```python
-from canary_framework import module, service, router, get
+from canary_framework import module, service
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 
 # 服务
 @service()
@@ -193,20 +189,21 @@ class UserService(ServiceBase):
     repo: UserRepo
 
 # 路由
-@router(prefix="/api/users")
-class Users(RouterBase):
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/api/users")
     user: UserService
 
-    @get("/")
+    @router.get("/")
     async def list_users(self):
         return {"users": []}
 
 # 模块
 @module(services=[UserRepo, UserService, Users])
-class UsersModule(ModuleBase):
+class UsersMod(ModuleBase):
     pass
 
-@module(services=[Database, UsersModule])
+@module(services=[Database, UsersMod])
 class App(ModuleBase):
     pass
 ```

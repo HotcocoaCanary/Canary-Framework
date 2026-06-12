@@ -7,20 +7,20 @@ Canary Framework 的完整 API 文档。
 ```python
 from canary_framework import (
     # 装饰器
-    config, service, module, router,
-    get, post, put, delete, patch,
+    config, service, module,
     after_init, before_startup, before_shutdown,
 
-    # 配置
-    CanaryConfig,
+    # Router
+    Router,
 
-    # 基类
-    ServiceBase, ModuleBase, RouterBase,
+    # Config
+    CanaryConfig,
 
     # 异常
     CanaryFrameworkError,
     DependencyInjectionError,
     CircularDependencyError,
+    ConfigurationError,
     LifecycleHookError,
     ServiceNotFoundError,
 
@@ -28,8 +28,15 @@ from canary_framework import (
     LifecycleHook,
 
     # 版本
-    __version__
+    __version__,
 )
+```
+
+`ServiceBase` 和 `ModuleBase` 从 `canary_framework.core` 导入：
+
+```python
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.module import ModuleBase
 ```
 
 ---
@@ -52,6 +59,9 @@ def service() -> Callable[[type], type[ServiceBase]]
 
 **示例：**
 ```python
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+
 @service()
 class Database(ServiceBase):
     pass
@@ -67,17 +77,20 @@ class Database(ServiceBase):
 ```python
 def module(
     *,
-    services: List[type] = None
+    services: list[type] | None = None,
 ) -> Callable[[type], type[ModuleBase]]
 ```
 
 **参数：**
-- `services`（List[type]，仅关键字）：此模块包含的服务、路由和子模块
+- `services`（list[type]，仅关键字）：此模块包含的服务、路由和子模块
 
 `name` 和 `deps` 参数已移除。模块名称自动生成为 `ClassName` + `"Module"`。
 
 **示例：**
 ```python
+from canary_framework import module
+from canary_framework.core.module import ModuleBase
+
 @module(services=[Database, Auth, Api])
 class App(ModuleBase):
     pass
@@ -85,74 +98,71 @@ class App(ModuleBase):
 
 ---
 
-### @router
+### Router
 
-将类标记为路由。
+路由管理器，作为类属性在 `@service()` 或 `@module()` 装饰类中使用。
 
 **签名：**
 ```python
-def router(
-    prefix: str = "",
-    *,
-    tags: List[str] = None
-) -> Callable[[type], type[RouterBase]]
+class Router:
+    def __init__(self, prefix: str = "", *, tags: list[str] | None = None)
 ```
 
 **参数：**
-- `prefix`（str，位置参数，默认 `""`）：所有路由的 URL 前缀
-- `tags`（List[str]，仅关键字）：用于文档的 OpenAPI 标签
-
-`name` 和 `deps` 参数已移除。路由名称自动生成为 `ClassName` + `"Router"`。依赖通过类型注解声明。
+- `prefix`（str，默认 `""`）：应用于此 Router 中所有路由的 URL 前缀
+- `tags`（list[str] | None）：用于文档分组的 OpenAPI 标签
 
 **示例：**
 ```python
-@router(prefix="/api", tags=["API"])
-class Api(RouterBase):
-    pass
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
+
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api", tags=["API"])
+
+    @router.get("/users/{user_id}")
+    async def get_user(self, user_id: int): ...
 ```
 
 ---
 
-### HTTP 方法装饰器
+### Router HTTP 方法装饰器
 
-将方法标记为路由处理器。
+Router 实例提供用于定义路由的方法装饰器：`@router.get`、`@router.post`、`@router.put`、`@router.delete`、`@router.patch`。
 
-**签名：**
+**方法签名：**
 ```python
-def get(path: str, **kwargs) -> Callable
-def post(path: str, **kwargs) -> Callable
-def put(path: str, **kwargs) -> Callable
-def delete(path: str, **kwargs) -> Callable
-def patch(path: str, **kwargs) -> Callable
+def get(path: str, *, summary=None, description=None, response_model=None,
+        request_model=None, tags=None, deprecated=False, operation_id=None,
+        responses=None, path_params=None, query_params=None) -> Callable
+def post(...)  # 相同参数
+def put(...)   # 相同参数
+def delete(...)  # 相同参数
+def patch(...)  # 相同参数
 ```
 
-**参数：**
-- `path`（str，必需）：路由的 URL 路径
-- `summary`（str）：OpenAPI 简短摘要
-- `description`（str）：OpenAPI 详细描述
-- `request_model`（Pydantic BaseModel）：将请求体自动解析为此模型。作为 `body` 参数传入。
-- `response_model`（Pydantic BaseModel）：OpenAPI 响应数据模型
-- `responses`（dict）：自定义响应定义
-- `tags`（list[str]）：OpenAPI 标签
-- `deprecated`（bool）：标记为已弃用
-- `operation_id`（str）：唯一操作标识符
-- `path_params`（dict）：路径参数定义，用于 schema 补充
-- `query_params`（dict）：查询参数定义，用于 schema 补充
+**参数与之前相同**，但现在作为 `@router.get()`、`@router.post()` 等方法调用，而非独立的 `@get()`、`@post()`。
 
 路由处理器**不**接收 `request` 参数。路径参数、查询参数和请求体自动绑定。
 
 **示例：**
 ```python
-@router(prefix="/users")
-class Users(RouterBase):
-    @get("/{user_id}")
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
+
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/users")
+
+    @router.get("/{user_id}")
     async def get_user(self, user_id: int):
-        # user_id 从 URL 路径自动绑定
         pass
 
-    @post("/", request_model=UserCreate)
+    @router.post("/", request_model=UserCreate)
     async def create_user(self, body: UserCreate):
-        # body 从请求体自动解析
         pass
 ```
 
@@ -169,7 +179,7 @@ def config() -> Callable[[type], type[CanaryConfig]]
 
 **参数：** 无。
 
-配置类必须继承 `CanaryConfig`。
+配置类必须继承 `CanaryConfig`。在类上设置 `CF_CONFIG_MARKER`。
 
 **示例：**
 ```python
@@ -198,6 +208,9 @@ def before_shutdown(func) -> HookFunction
 
 **示例：**
 ```python
+from canary_framework import service, after_init, before_shutdown
+from canary_framework.core.service import ServiceBase
+
 @service()
 class Database(ServiceBase):
     @after_init
@@ -228,72 +241,111 @@ from canary_framework.common.config import CanaryConfig
 | `host` | `str` | `"127.0.0.1"` | 服务器绑定地址 |
 | `port` | `int` | `8000` | 服务器端口 (1-65535) |
 | `log_level` | `Literal["DEBUG","INFO","WARNING","ERROR","CRITICAL"]` | `"INFO"` | 框架日志级别 |
-| `openapi_title` | `str` | `"Canary Framework API"` | API 标题 |
-| `openapi_version` | `str` | `"1.0.0"` | API 版本 |
-| `openapi_description` | `str` | `""` | API 描述 |
-| `openapi_servers` | `list[dict]` | `[]` | OpenAPI 服务器列表 |
-| `openapi_security_schemes` | `dict` | `{}` | 安全方案 |
-| `docs_openapi_path` | `str` | `"/openapi.json"` | OpenAPI JSON 路径 |
+| `openapi_title` | `str` | `"Canary Framework API"` | OpenAPI schema 的 API 标题 |
+| `openapi_version` | `str` | `"1.0.0"` | OpenAPI schema 的 API 版本 |
+| `openapi_description` | `str` | `""` | OpenAPI schema 的 API 描述 |
+| `openapi_servers` | `list[dict[str,str]]` | `[]` | OpenAPI 服务器 URL |
+| `openapi_security_schemes` | `dict[str,dict[str,object]]` | `{}` | OpenAPI 安全方案 |
+| `docs_openapi_path` | `str` | `"/openapi.json"` | OpenAPI JSON 端点路径 |
 | `docs_swagger_path` | `str` | `"/docs"` | Swagger UI 路径 |
 | `docs_redoc_path` | `str` | `"/redoc"` | ReDoc 路径 |
-| `docs_swagger_css_cdn` | `str` | Swagger CSS CDN | CSS CDN URL |
-| `docs_swagger_js_cdn` | `str` | Swagger JS CDN | JS CDN URL |
-| `docs_redoc_cdn` | `str` | ReDoc JS CDN | ReDoc CDN URL |
+| `docs_swagger_css_cdn` | `str` | Swagger CSS CDN URL | CSS CDN URL |
+| `docs_swagger_js_cdn` | `str` | Swagger JS CDN URL | JS CDN URL |
+| `docs_redoc_cdn` | `str` | ReDoc JS CDN URL | ReDoc CDN URL |
 
 允许额外字段 — 您可以添加任意自定义配置字段。
+
+---
 
 ### ServiceBase
 
 服务的基类。
 
+**导入：**
+```python
+from canary_framework.core.service import ServiceBase
+```
+
 **属性：**
-- `config`：配置对象（通过 DI 注入）
-- `_cf_hooks`：内部钩子注册表
-- `_cf_parent_registry`：父注册表引用
+- `_cf_hooks`：内部钩子注册表（懒加载）
+- `_cf_parent_registry`：父注册表引用（由父模块设置）
 
 **方法：**
-- `async init()`：初始化服务
-- `async startup()`：启动服务
-- `async shutdown()`：关闭服务
-- `async __call__(scope, receive, send)`：ASGI 应用接口（处理 lifespan 事件）
-- `async _handle_lifespan(receive, send)`：处理 ASGI lifespan 事件
-- `async _invoke_hook(hook)`：调用生命周期钩子
+- `async init()`：初始化服务。调用 `AFTER_INIT` 钩子。
+- `async startup()`：启动服务。调用 `BEFORE_STARTUP` 钩子。
+- `async shutdown()`：关闭服务。调用 `BEFORE_SHUTDOWN` 钩子。
+- `async __call__(scope, receive, send)`：ASGI 3 接口。处理 lifespan 事件并将其他请求委托给 `self.asgi_app`。
+- `async _handle_lifespan(receive, send)`：内部 ASGI lifespan 协议处理器。
+- `async _invoke_hook(hook: LifecycleHook)`：懒加载钩子发现和调用。
 
 ---
 
 ### ModuleBase
 
-模块的基类，扩展 ServiceBase。
+模块的基类，扩展 `ServiceBase`。
+
+**导入：**
+```python
+from canary_framework.core.module import ModuleBase
+```
 
 **属性：**
-- `config`：配置对象
 - `_cf_parent_registry`：父注册表（如果有）
-- `_cf_registry`：服务注册表
-- `_cf_startup_order`：排序后的启动顺序
-- `_cf_asgi_app`：缓存的 ASGI 应用
+- `_cf_registry`：此模块的服务注册表
+- `_cf_startup_order`：拓扑顺序的服务名称列表
+- `_cf_asgi_app`：缓存的 ASGI Starlette Router（懒加载构建）
 
 **属性（只读）：**
-- `asgi_app`：带有挂载子服务的 Starlette 路由
+- `asgi_app`：带有已挂载子 ASGI 应用和根路由的 Starlette `Router`
 
 **方法：**
-- `async init()`：初始化模块和所有服务
-- `async startup()`：启动模块和所有服务
-- `async shutdown()`：关闭模块和所有服务
-- `_register_entry_with_deps(cls, registry)`：递归注册服务及其通过注解解析的依赖
+- `async init()`：递归注册服务、拓扑排序、实例化、DI 注入、初始化子服务。Config 通过 `issubclass(CanaryConfig)` 从 services 列表自动发现。
+- `async startup()`：按拓扑顺序启动模块和所有子服务
+- `async shutdown()`：按逆拓扑顺序关闭模块和所有子服务
+- `_register_entry_with_deps(cls, registry)`：递归注册服务及其注解解析的依赖
 
 ---
 
-### RouterBase
+### Router
 
-路由的基类，扩展 ServiceBase。
+路由管理器类，作为类属性在 `@service()` 或 `@module()` 装饰类中使用。
+不继承 `ServiceBase` — 它是一个独立的工具类。
 
-**属性（只读）：**
-- `asgi_app`：带有收集路由的 Starlette 路由
+**导入：**
+```python
+from canary_framework.core.router import Router
+```
+
+**构造器：**
+```python
+class Router:
+    def __init__(self, prefix: str = "", *, tags: list[str] | None = None)
+```
+
+**参数：**
+- `prefix`（str，默认 `""`）：应用于此 Router 中所有路由的 URL 前缀
+- `tags`（list[str] | None）：用于文档分组的 OpenAPI 标签
 
 **方法：**
-- `async startup()`：启动路由（自动注册 OpenAPI 文档）
-- `get_mount_path()`：获取此路由的挂载路径
-- `_cf_get_root_routes()`：获取 ASGI 应用的根路由
+- `get(path, *, summary=None, description=None, response_model=None, request_model=None, tags=None, deprecated=False, operation_id=None, responses=None, path_params=None, query_params=None) -> Callable`：GET 路由装饰器
+- `post(...)`：POST 路由装饰器（相同参数）
+- `put(...)`：PUT 路由装饰器（相同参数）
+- `delete(...)`：DELETE 路由装饰器（相同参数）
+- `patch(...)`：PATCH 路由装饰器（相同参数）
+
+**示例：**
+```python
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
+
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api", tags=["API"])
+
+    @router.get("/users/{user_id}")
+    async def get_user(self, user_id: int): ...
+```
 
 ---
 
@@ -320,11 +372,11 @@ from canary_framework.common.config import CanaryConfig
 ```
 Exception
 └── CanaryFrameworkError
-    ├── DependencyInjectionError
-    ├── CircularDependencyError
-    ├── LifecycleHookError
-    ├── ConfigurationError
-    └── ServiceNotFoundError
+    ├── ConfigurationError       # 配置加载/验证失败
+    ├── ServiceNotFoundError     # 服务查找失败
+    ├── CircularDependencyError  # 拓扑排序检测到循环
+    ├── DependencyInjectionError # DI 注入失败
+    └── LifecycleHookError       # 钩子引发未处理异常
 ```
 
 ---
@@ -337,13 +389,13 @@ Exception
 
 ### CircularDependencyError
 
-检测到循环依赖。
+拓扑排序期间检测到循环依赖。
 
 ---
 
 ### LifecycleHookError
 
-生命周期钩子中发生错误。
+生命周期钩子中发生错误。包装原始异常。
 
 ---
 
@@ -355,7 +407,7 @@ Exception
 
 ### ConfigurationError
 
-配置错误。
+配置验证或加载错误。
 
 ---
 
@@ -366,17 +418,21 @@ Exception
 用于标识框架类的常量和辅助函数。
 
 **常量：**
-- `CF_SERVICE_MARKER`：`"__cf_service__"`
-- `CF_NAME_ATTR`：`"__cf_name__"`
-- `ROUTE_ATTR`：`"__cf_route__"`
-- `CF_HOOK_MARKER_MAP`：LifecycleHook 到标记字符串的映射
+- `CF_SERVICE_MARKER`：`"__cf_service__"` — 在所有装饰类上设置为 `True`
+- `CF_SERVICE_META`：`"__cf_service_meta__"` — 存储 `ServiceMeta`/`ModuleMeta`/`RouterMeta`
+- `CF_NAME_ATTR`：`"__cf_name__"` — 自动生成的服务/模块/路由名称
+- `ROUTE_ATTR`：`"__cf_route__"` — 处理器方法上的路由元数据字典
+- `CF_CONFIG_MARKER`：`"__cf_config__"` — 在 `@config` 类上设置为 `True`
+- `CF_HOOK_MARKER_MAP`：`LifecycleHook` 到标记字符串的映射
 
 **函数：**
-- `is_cf_service(cls)`：检查类是否为服务
-- `is_cf_module(cls)`：检查类是否为模块
-- `is_cf_router(cls)`：检查类是否为路由
+- `is_cf_service(cls)`：检查类是否具有 `CF_SERVICE_MARKER`
+- `is_cf_module(cls)`：检查类是否在 `CF_SERVICE_META` 中具有 `ModuleMeta`（isinstance 检查）
+- `is_cf_router(cls)`：检查类是否在 `CF_SERVICE_META` 中具有 `RouterMeta`（isinstance 检查）
 - `get_service_meta(cls)`：获取服务元数据
 - `get_module_meta(cls)`：获取模块元数据
+- `get_router_meta(cls)`：获取路由元数据
+- `resolve_deps(cls) -> dict[str, type]`：读取 `__annotations__`，返回类型具有 `CF_SERVICE_MARKER` 的条目
 
 ---
 
@@ -386,34 +442,34 @@ Exception
 
 **ServiceMeta：**
 ```python
-@dataclass
+@dataclass(slots=True)
 class ServiceMeta:
-    name: str                       # 自动生成的服务名称（如 "DatabaseService"）
+    name: str  # 自动生成："DatabaseService"
 ```
 
 **ModuleMeta：**
 ```python
-@dataclass
+@dataclass(slots=True)
 class ModuleMeta(ServiceMeta):
-    services: List[type] = []       # 子服务/模块
+    services: list[type] = []  # 子服务类
 ```
 
 **RouterMeta：**
 ```python
-@dataclass
+@dataclass(slots=True)
 class RouterMeta(ServiceMeta):
-    prefix: str = ""                # URL 前缀
-    tags: List[str] = []            # OpenAPI 标签
-    routes: List[Callable] = []     # 路由处理器方法
+    prefix: str = ""              # URL 前缀
+    tags: list[str] = []          # OpenAPI 标签
+    routes: list[Callable] = []   # 路由处理器方法
 ```
 
 **ServiceEntry：**
 ```python
-@dataclass
+@dataclass(slots=True)
 class ServiceEntry:
-    cls: type                       # 服务类
-    name: str                       # 自动生成的名称
-    instance: object = None         # 服务实例（配置前为 None）
+    cls: type             # 服务类
+    name: str             # 自动生成的名称
+    instance: object = None  # 实例（初始化前为 None）
 ```
 
 **类型别名：**
@@ -425,16 +481,16 @@ class ServiceEntry:
 
 ### Registry
 
-服务注册表类。
+具有父注册表链的服务注册表。
 
 **方法：**
 - `__init__(parent: Registry = None)`：创建带有可选父注册表的注册表
-- `register(cls, *, meta=None)`：注册服务
-- `get_by_name(name)`：按名称获取服务条目
-- `get_by_class(cls)`：按类获取服务条目
-- `has(cls)`：检查服务是否已注册
-- `all_entries()`：获取所有服务条目
-- `names()`：获取所有服务名称
+- `register(cls, *, meta: ServiceMeta)`：注册服务（幂等）
+- `get_by_name(name: str) -> ServiceEntry`：按名称查找
+- `get_by_class(cls: type) -> ServiceEntry`：按类查找（搜索父链）
+- `has(cls: type) -> bool`：检查是否已注册（搜索父链）
+- `all_entries() -> list[ServiceEntry]`：获取此注册表中的所有条目
+- `names() -> list[str]`：获取所有服务名称
 
 ---
 
@@ -443,8 +499,8 @@ class ServiceEntry:
 依赖解析工具。
 
 **函数：**
-- `resolve_deps(cls) -> Dict[str, type]`：读取类的 `__annotations__` 并返回类型标记了 `CF_SERVICE_MARKER` 的条目。这替代了旧的 `deps` 列表。每个返回的键是注解属性名，将用于 `setattr` 注入。
-- `topological_sort(registry) -> List[ServiceEntry]`：使用 Kahn 算法按依赖顺序排序服务。内部使用 `resolve_deps()` 构建依赖图。
+- `resolve_deps(cls) -> dict[str, type]`：读取 `cls.__annotations__` 并返回类型具有 `CF_SERVICE_MARKER` 的条目。每个键是注解属性名，用于 `setattr` 注入。
+- `topological_sort(registry: Registry) -> list[str]`：使用 Kahn 算法按依赖顺序排序服务。内部使用 `resolve_deps()`。在循环依赖时抛出 `CircularDependencyError`。
 
 ---
 
@@ -454,7 +510,7 @@ class ServiceEntry:
 
 **HookDict：**
 ```python
-HookDict = Dict[LifecycleHook, Optional[Callable[..., object]]]
+HookDict = dict[LifecycleHook, Callable[..., object] | None]
 ```
 
 **LifecycleAware 协议：**
@@ -466,13 +522,18 @@ class LifecycleAware(Protocol):
 ```
 
 **函数：**
-- `find_hooks(instance)`：在实例上查找所有生命周期钩子
+- `find_hooks(instance: object) -> HookDict`：遍历 MRO 查找生命周期钩子方法
 
 ---
 
-### Utils
+### 路由
 
-工具函数。
+路由路径解析。
+
+**函数：**
+- `parse_route_path(path: str) -> tuple[str, list[str], list[str]]`：解析路由路径，返回 `(starlette_path, path_params, query_params)`。支持查询参数的 `?param={param}&param2={param2}` 语法：
+  - 输入：`"/op/{kb_id}?count={count}&page={page}"`
+  - 输出：`("/op/{kb_id}", ["kb_id"], ["count", "page"])`
 
 ---
 
@@ -490,9 +551,9 @@ Canary Framework 的当前版本。
 
 装饰类设置了以下内部属性：
 
-- `__cf_service__`：如果使用 `@service()` 装饰则为 `True`
-- `__cf_service_meta__`：元数据对象（ServiceMeta/ModuleMeta/RouterMeta）
-- `__cf_name__`：自动生成的服务/模块/路由名称
+- `__cf_service__`：如果使用 `@service()` 或 `@module()` 装饰则为 `True`
+- `__cf_service_meta__`：元数据对象（`ServiceMeta`/`ModuleMeta`/`RouterMeta`）
+- `__cf_name__`：自动生成的名称（如 `"DatabaseService"`）
 
 钩子方法具有：
 - `__cf_after_init__`：`True`
@@ -501,6 +562,9 @@ Canary Framework 的当前版本。
 
 路由方法具有：
 - `__cf_route__`：`{"method": "GET", "path": "/path", ...}`
+
+配置类具有：
+- `__cf_config__`：`True`
 
 ---
 
@@ -515,10 +579,19 @@ Canary Framework 的当前版本。
 | `@module(name="app", services=[...])` | `@module(services=[...])` — 自动命名 |
 | `@module(name="app", deps=[...])` | 依赖通过注解声明 |
 | `@router(name="api", prefix="/api", deps=[Svc])` | `@router(prefix="/api")` 配合 `svc: Svc` 注解 |
+| `@router(docs=True)` | 文档默认自动启用 |
 | `self.database_service`（snake_case 注入） | `self.db`、`self.cache`（注解键名） |
 | `async def handler(self, request)` | `async def handler(self, ...)` — 参数自动绑定 |
 | `request.path_params["user_id"]` | `def handler(self, user_id: int)` |
 | `request.query_params.get("page")` | `def handler(self, page: int = 1)` |
 | `data = await request.json()` | `def handler(self, body: MyModel)` 配合 `request_model` |
-| `app.auth_module` / `app.auth_service` | `app.AuthModule` / `app.AuthService`（类名访问） |
-| `inject_deps(instance, entry, registry)` | `setattr(instance, key, resolved)` 通过注解键 |
+| `uvicorn.run("main:App")` | `uvicorn.run(app, lifespan="on")` |
+| 普通 dict 传递给 `configure()` | 需要 `CanaryConfig` 子类 |
+| `@after_config` | `@after_init` — configure 阶段已移除 |
+| `await app.configure(cfg)` | `await app.init()` — 单一 init 调用 |
+| `make_subclass()` 工具 | 已移除 — 显式继承 |
+| `CF_MODULE_MARKER` / `CF_ROUTER_MARKER` | 已移除 — 对元类型的 `isinstance` 检查 |
+| `@router(prefix="/api")` 类装饰器 | `router = Router(prefix="/api")` 类属性 |
+| `class X(RouterBase)` | `class X(ServiceBase)` 配合 `router` 属性 |
+| `@get("/path")` | `@router.get("/path")` |
+| `@post("/path")` | `@router.post("/path")` |

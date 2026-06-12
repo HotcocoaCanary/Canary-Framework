@@ -16,10 +16,10 @@ Canary Framework is a **decorator-driven** async service framework for Python. C
 
 ## Core Features
 
-- **Decorator-Driven** — Use `@service`, `@module`, `@router` decorators with explicit base class inheritance
+- **Decorator-Driven** — Use `@service` and `@module` decorators with explicit base class inheritance
 - **Annotation-Based DI** — Declare dependencies with type annotations: `db: DatabaseService`, no boilerplate
 - **Topological Startup** — Kahn's algorithm ensures dependencies start first
-- **Lifecycle Management** — `@after_config`/`@after_init`/`@before_startup`/`@before_shutdown` hooks
+- **Lifecycle Management** — `@after_init` / `@before_startup` / `@before_shutdown` hooks
 - **ASGI Compatible** — Built on Starlette, works with uvicorn and other ASGI servers
 - **Modular Architecture** — Hierarchical composition with nested modules
 - **OpenAPI Support** — Auto-generated Swagger UI and ReDoc documentation
@@ -33,37 +33,38 @@ pip install canary-framework
 ## Quick Start
 
 ```python
-from canary_framework import module, service, router, get, post, after_config
+from canary_framework import service, module, after_init
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 
 @service()
-class DatabaseService(ServiceBase):
-    @after_config
+class Database(ServiceBase):
+    @after_init
     async def connect(self):
         self.conn = "connected"
 
 @service()
 class UserService(ServiceBase):
-    db: DatabaseService
+    db: Database
 
     async def get_user(self, user_id: int):
         return {"id": user_id, "name": "Alice"}
 
-@router(prefix="/api", tags=["users"])
-class ApiRouter(RouterBase):
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api", tags=["users"])
     user_service: UserService
 
-    @get("/users/{user_id}")
+    @router.get("/users/{user_id}")
     async def get_user(self, user_id: int) -> dict:
         return self.user_service.get_user(user_id)
 
-    @post("/users")
+    @router.post("/users")
     async def create_user(self, body: dict) -> dict:
         return {"id": 1, **body}
 
-@module(services=[DatabaseService, UserService, ApiRouter])
+@module(services=[Database, UserService, Api])
 class App(ModuleBase):
     pass
 
@@ -71,7 +72,6 @@ class App(ModuleBase):
 
 async def setup():
     app = App()
-    await app.configure()
     await app.init()
     return app
 
@@ -98,20 +98,23 @@ class AppConfig(CanaryConfig):
     openapi_title: str = "My API"
     log_level: str = "DEBUG"
 
+@module(services=[AppConfig, Database, Api])
+class App(ModuleBase):
+    config: AppConfig
+
 async def setup():
-    cfg = AppConfig()
     app = App()
-    await app.configure(cfg)
     await app.init()
-    return app, cfg
+    return app, app.config
 ```
 
 ## Web Example with OpenAPI
 
 ```python
-from canary_framework import module, router, get, post
+from canary_framework import module
+from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 from pydantic import BaseModel, Field
 
 class UserRequest(BaseModel):
@@ -123,21 +126,23 @@ class UserResponse(BaseModel):
     name: str
     email: str
 
-@router(prefix="/users", tags=["Users"])
-class UsersRouter(RouterBase):
-    @get("/", summary="List users", description="Get all users")
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/users", tags=["Users"])
+
+    @router.get("/", summary="List users", description="Get all users")
     async def list_users(self) -> list[UserResponse]:
         return []
 
-    @post("/",
+    @router.post("/",
           summary="Create user",
           description="Create a new user",
           request_model=UserRequest,
           response_model=UserResponse)
-    async def create_user(self, user: UserRequest) -> UserResponse:
-        return UserResponse(id=1, name=user.name, email=user.email)
+    async def create_user(self, body: UserRequest) -> UserResponse:
+        return UserResponse(id=1, name=body.name, email=body.email)
 
-@module(services=[UsersRouter])
+@module(services=[Users])
 class App(ModuleBase):
     pass
 ```
@@ -158,18 +163,22 @@ src/canary_framework/
 │   ├── routing.py       # Route path parsing
 │   └── types.py         # Data classes, markers, and type aliases
 ├── core/                # Base classes
-│   ├── module.py        # ModuleBase — orchestration and DI
-│   ├── service.py       # ServiceBase — lifecycle and ASGI
-│   └── router.py        # RouterBase — ASGI routing + OpenAPI docs
+│   ├── module/
+│   │   └── _base.py     # ModuleBase — orchestration and DI
+│   ├── service/
+│   │   ├── _base.py     # ServiceBase — lifecycle and ASGI
+│   │   └── _hooks.py    # Lifecycle hook invocation
+│   └── router/
+│       ├── _base.py     # Router — route collection and ASGI routing
+│       └── _utils.py    # Route handler building
 ├── decorators/          # Decorator implementations
 │   ├── module.py        # @module
 │   ├── service.py       # @service
-│   ├── router.py        # @router, @get/@post/...
-│   └── lifecycle.py     # @after_config, @after_init, etc.
+│   ├── config.py        # @config
+│   └── lifecycle.py     # @after_init, @before_startup, @before_shutdown
 └── engine/              # Runtime engine
     ├── registry.py      # Service registry
-    ├── injector.py      # Topological sort
-    ├── hooks.py         # Lifecycle hook discovery
+    ├── dependencies.py  # Topological sort + resolve_deps
     ├── openapi.py       # OpenAPI schema generation
     ├── params.py        # Route parameter resolution
     └── logging.py       # Framework logging
@@ -181,35 +190,28 @@ src/canary_framework/
 @service() class MyService:
     db: DatabaseService      ←  1. User declares dependency via annotation
 
-    ↓ configure phase
-
 resolve_deps(MyService)
     → get_type_hints() reads {db: DatabaseService}
     → filters by CF_SERVICE_MARKER
     → returns {"db": DatabaseService}
 
-    ↓ registration: recursively registers DatabaseService
-    ↓ topological_sort: build dependency graph
+    ↓ topo sort: Kahn's algorithm builds dependency order
     ↓ instantiation: creates instances in order
     ↓ wiring:
 
-setattr(instance, "db", db_instance)   ←  3. Injected with annotation key name
+setattr(instance, "db", db_instance)   ←  2. Injected with annotation key name
 ```
 
 ### Lifecycle Flow
 
 ```
-app.configure(config_instance)
+app.init()
   ├── Register all services + transitive deps
   ├── Topological sort (Kahn's algorithm)
   ├── Instantiate services
   ├── Inject dependencies (annotation-driven)
-  ├── Call configure() on each service (topological order)
-  └── Invoke @after_config hooks
-
-app.init()
-  ├── Invoke @after_init hook
-  └── Call init() on each service (topological order)
+  ├── Call init() on each service (topological order)
+  └── Invoke @after_init hooks
 
 app.startup()
   ├── Invoke @before_startup hook

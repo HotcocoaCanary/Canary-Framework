@@ -5,9 +5,9 @@ import asyncio
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from canary_framework import after_init, before_startup, get, module, router, service
+from canary_framework import after_init, before_startup, module, service
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 from canary_framework.core.service import ServiceBase
 
 
@@ -60,11 +60,12 @@ class TestAsyncOperations:
                 self.count += 1
                 return self.count
 
-        @router()
-        class CounterRouter(RouterBase):
+        @service()
+        class CounterRouter(ServiceBase):
+            router = Router()
             counter_service: CounterService
 
-            @get("/increment")
+            @router.get("/increment")
             async def increment(self) -> dict[str, int]:
                 result = await self.counter_service.increment()
                 return {"count": result}
@@ -81,7 +82,7 @@ class TestAsyncOperations:
             transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
-            requests = [client.get("/CounterRouterRouter/increment") for _ in range(5)]
+            requests = [client.get("/CounterRouter/increment") for _ in range(5)]
             responses = await asyncio.gather(*requests)
 
             # All should succeed
@@ -101,11 +102,12 @@ class TestAsyncOperations:
                 await asyncio.sleep(seconds)
                 return {"status": "done", "duration": seconds}
 
-        @router()
-        class TaskRouter(RouterBase):
+        @service()
+        class TaskRouter(ServiceBase):
+            router = Router()
             long_task_service: LongTaskService
 
-            @get("/task?seconds={seconds}")
+            @router.get("/task?seconds={seconds}")
             async def run_task(self, seconds: float) -> dict[str, str | float]:
                 return await self.long_task_service.do_work(seconds)
 
@@ -121,7 +123,7 @@ class TestAsyncOperations:
             base_url="http://test",
             timeout=5.0,
         ) as client:
-            response = await client.get("/TaskRouterRouter/task?seconds=0.1")
+            response = await client.get("/TaskRouter/task?seconds=0.1")
             assert response.status_code == 200
             result = response.json()
             assert result["status"] == "done"

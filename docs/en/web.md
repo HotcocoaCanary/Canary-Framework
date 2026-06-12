@@ -2,59 +2,67 @@
 
 Canary Framework provides decorator-driven HTTP routing built on Starlette, with automatic parameter binding and OpenAPI 3.0.3 documentation generation.
 
-## Defining a Router
+## Defining Routes
 
-Use the `@router()` decorator with a class that inherits from `RouterBase`:
+Use the `@service()` decorator with a class that inherits from `ServiceBase`, and declare a `Router` class attribute:
 
 ```python
-from canary_framework import router, get, post
-from canary_framework.core.router import RouterBase
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
 
-@router(prefix="/api")
-class Api(RouterBase):
-    @get("/hello")
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api")
+
+    @router.get("/hello")
     async def hello(self):
         return {"message": "Hello"}
 ```
 
-### Router Parameters
+### Router Constructor Parameters
+
+The `Router` class accepts the following constructor arguments:
 
 - **`prefix`** (str, default `""`) — URL prefix applied to all routes in this router
 - **`tags`** (list[str], keyword-only) — OpenAPI tags for documentation grouping
-- Name is auto-generated: `ClassName` + `"Router"`
+- Name is auto-derived from the service class name
 - Dependencies are declared via type annotations on the class body
 
 ## HTTP Method Decorators
 
-Six HTTP method decorators are available: `@get`, `@post`, `@put`, `@delete`, `@patch`.
+Six HTTP method decorators are available on the `Router` instance: `.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`.
 
 ```python
-from canary_framework import router, get, post, put, delete, patch
-from canary_framework.core.router import RouterBase
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
 
-@router(prefix="/items")
-class Items(RouterBase):
-    @get("/")
+@service()
+class Items(ServiceBase):
+    router = Router(prefix="/items")
+
+    @router.get("/")
     async def list_items(self):
         return {"items": []}
 
-    @get("/{item_id}")
+    @router.get("/{item_id}")
     async def get_item(self, item_id: int):
         return {"item_id": item_id}
 
-    @post("/")
+    @router.post("/")
     async def create_item(self, body: dict):
         return body, 201
 
-    @put("/{item_id}")
+    @router.put("/{item_id}")
     async def update_item(self, item_id: int, body: dict):
         return {"id": item_id, **body}
 
-    @patch("/{item_id}")
+    @router.patch("/{item_id}")
     async def patch_item(self, item_id: int, body: dict):
         return {"id": item_id, **body}
 
-    @delete("/{item_id}")
+    @router.delete("/{item_id}")
     async def delete_item(self, item_id: int):
         return {"message": f"Item {item_id} deleted"}
 ```
@@ -66,14 +74,16 @@ Route handlers do **not** receive a `request` parameter. Parameters are auto-bou
 Path parameters in the route pattern are automatically bound to function parameters:
 
 ```python
-@router(prefix="/users")
-class Users(RouterBase):
-    @get("/{user_id}")
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/users")
+
+    @router.get("/{user_id}")
     async def get_user(self, user_id: int):
         # user_id auto-bound from URL path
         return {"user_id": user_id}
 
-    @get("/{user_id}/posts/{post_id}")
+    @router.get("/{user_id}/posts/{post_id}")
     async def get_user_post(self, user_id: int, post_id: int):
         # Both parameters auto-bound
         return {"user_id": user_id, "post_id": post_id}
@@ -86,9 +96,11 @@ The framework automatically converts string path segments to the declared type (
 Non-path function parameters with defaults are automatically bound from the query string:
 
 ```python
-@router(prefix="/search")
-class Search(RouterBase):
-    @get("/")
+@service()
+class Search(ServiceBase):
+    router = Router(prefix="/search")
+
+    @router.get("/")
     async def search(self, q: str = "", page: int = 1, limit: int = 10):
         # q, page, limit auto-bound from query string
         return {"query": q, "page": page, "limit": limit}
@@ -99,9 +111,13 @@ A request to `/search?q=canary&page=2&limit=5` binds `q="canary"`, `page=2`, `li
 Query parameters in route paths use the `?param={param}&param2={param2}` syntax:
 
 ```python
-@get("/search?q={query}&page={page}")
-async def search(self, query: str = "", page: int = 1):
-    ...
+@service()
+class Search(ServiceBase):
+    router = Router(prefix="/search")
+
+    @router.get("/search?q={query}&page={page}")
+    async def search(self, query: str = "", page: int = 1):
+        ...
 ```
 
 ## Request Body
@@ -115,9 +131,11 @@ class CreateItem(BaseModel):
     name: str = Field(description="Item name")
     price: float = Field(description="Item price", gt=0)
 
-@router(prefix="/items")
-class Items(RouterBase):
-    @post("/", request_model=CreateItem)
+@service()
+class Items(ServiceBase):
+    router = Router(prefix="/items")
+
+    @router.post("/", request_model=CreateItem)
     async def create(self, body: CreateItem):
         # body is a validated CreateItem instance
         return {"name": body.name, "price": body.price}, 201
@@ -130,7 +148,7 @@ When `request_model` is specified:
 
 The `body` parameter name is fixed — when `request_model` is set, the parsed model is always passed as `body`.
 
-## Router Dependencies
+## Service Dependencies
 
 Dependencies are declared via type annotations — no `deps` list:
 
@@ -140,11 +158,12 @@ class UserService(ServiceBase):
     async def get_user(self, user_id: int):
         return {"id": user_id, "name": "User"}
 
-@router(prefix="/users")
-class Users(RouterBase):
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/users")
     user_svc: UserService  # Auto-injected
 
-    @get("/{user_id}")
+    @router.get("/{user_id}")
     async def get_user(self, user_id: int):
         user = await self.user_svc.get_user(user_id)
         return user
@@ -152,7 +171,7 @@ class Users(RouterBase):
 
 ## Mounting Routers
 
-When you include a router in a module's `services` list, it is automatically mounted at its prefix:
+When you include a service that has a `router` attribute in a module's `services` list, it is automatically mounted at its prefix:
 
 ```python
 @module(services=[Users, Items, Auth])
@@ -199,9 +218,11 @@ HTTP method decorators support the following OpenAPI documentation parameters:
 Router-level and method-level tags are automatically merged:
 
 ```python
-@router(prefix="/api", tags=["API"])
-class Api(RouterBase):
-    @get("/users", tags=["Users"])
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api", tags=["API"])
+
+    @router.get("/users", tags=["Users"])
     async def get_users(self):
         return {"users": []}
     # Merged tags: ["API", "Users"]
@@ -211,10 +232,10 @@ class Api(RouterBase):
 
 ```python
 from pydantic import BaseModel, Field
-from canary_framework import module, service, router, get, post, put, delete
+from canary_framework import module, service
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 
 class TodoResponse(BaseModel):
     id: int = Field(description="Todo ID")
@@ -250,31 +271,32 @@ class DataStore(ServiceBase):
     async def delete(self, todo_id: int):
         self.todos = [t for t in self.todos if t["id"] != todo_id]
 
-@router(prefix="/todos", tags=["Todos"])
-class Todos(RouterBase):
+@service()
+class Todos(ServiceBase):
+    router = Router(prefix="/todos", tags=["Todos"])
     store: DataStore
 
-    @get("/", summary="List todos", description="Get all todos")
+    @router.get("/", summary="List todos", description="Get all todos")
     async def list_todos(self):
         todos = await self.store.get_all()
         return {"todos": todos}
 
-    @get("/{todo_id}", summary="Get todo", response_model=TodoResponse)
+    @router.get("/{todo_id}", summary="Get todo", response_model=TodoResponse)
     async def get_todo(self, todo_id: int):
         todo = await self.store.get_one(todo_id)
         return todo if todo else ({"error": "Not found"}, 404)
 
-    @post("/", summary="Create todo", request_model=TodoCreate, response_model=TodoResponse)
+    @router.post("/", summary="Create todo", request_model=TodoCreate, response_model=TodoResponse)
     async def create_todo(self, body: TodoCreate):
         todo = await self.store.create(body.model_dump())
         return todo, 201
 
-    @put("/{todo_id}", summary="Update todo", request_model=TodoCreate, response_model=TodoResponse)
+    @router.put("/{todo_id}", summary="Update todo", request_model=TodoCreate, response_model=TodoResponse)
     async def update_todo(self, todo_id: int, body: TodoCreate):
         todo = await self.store.update(todo_id, body.model_dump())
         return todo if todo else ({"error": "Not found"}, 404)
 
-    @delete("/{todo_id}", summary="Delete todo")
+    @router.delete("/{todo_id}", summary="Delete todo")
     async def delete_todo(self, todo_id: int):
         await self.store.delete(todo_id)
         return {"message": "Todo deleted"}
@@ -286,7 +308,7 @@ class App(ModuleBase):
 
 ## Best Practices
 
-1. **Route Organization**: Organize routes by feature (users, posts, todos) using separate router classes
+1. **Route Organization**: Organize routes by feature (users, posts, todos) using separate service classes, each with its own `Router` attribute
 2. **Parameter Validation**: Use Pydantic models with `request_model` for request body validation
 3. **Type Hints**: Use type annotations for path and query parameters for automatic binding
 4. **Error Handling**: Return consistent `(data, status_code)` tuples and use `response_model` for schema documentation

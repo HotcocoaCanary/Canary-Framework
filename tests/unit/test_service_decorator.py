@@ -37,4 +37,5 @@ class TestServiceDecorator:
             pass
 
         meta = get_service_meta(MyService)
-        assert meta.name == "MyServiceService"
+        assert meta is not None
+        assert meta.name == "MyService"

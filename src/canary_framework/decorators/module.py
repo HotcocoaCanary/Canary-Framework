@@ -63,7 +63,7 @@ def module(
                 f"@module '{cls.__name__}': must inherit from ModuleBase. "
                 f"Did you forget 'class {cls.__name__}(ModuleBase):'?"
             )
-        name = cls.__name__ + "Module"
+        name = cls.__name__
         for svc_cls in _services:
             if not is_cf_service(svc_cls):
                 raise TypeError(

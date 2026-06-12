@@ -221,7 +221,7 @@ Each service in the registry is represented by a `ServiceEntry`:
 class ServiceEntry:
     cls: type                  # The service class
     name: str                  # Auto-generated service name
-    instance: object = None    # Service instance (None until configured)
+    instance: object = None    # Service instance (None until initialized)
 ```
 
 ## Topological Sort

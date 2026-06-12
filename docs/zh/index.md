@@ -23,27 +23,43 @@ pip install canary-framework
 以下是一个最简示例，帮助您快速上手：
 
 ```python
-from canary_framework import module, router, get, post
+from canary_framework import service, module, config
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
+from canary_framework.common.config import CanaryConfig
 
-@router(prefix="")
-class Api(RouterBase):
-    @get("/hello")
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api")
+
+    @router.get("/hello")
     async def hello(self):
         return {"message": "Hello, Canary!"}
 
-    @post("/echo")
+    @router.post("/echo")
     async def echo(self, body: dict):
         return {"echo": body}
 
-@module(services=[Api])
-class App(ModuleBase):
-    pass
+@config
+class AppConfig(CanaryConfig):
+    host: str = "0.0.0.0"
+    port: int = 8000
 
-# 使用 uvicorn 运行
-# uvicorn main:App --reload
+@module(services=[AppConfig, Api])
+class App(ModuleBase):
+    config: AppConfig
+
+async def setup():
+    app = App()
+    await app.init()
+    return app
+
+if __name__ == "__main__":
+    import asyncio
+    import uvicorn
+    app = asyncio.run(setup())
+    uvicorn.run(app, host="0.0.0.0", port=8000, lifespan="on")
 ```
 
 ## OpenAPI 文档
@@ -66,6 +82,8 @@ from canary_framework.core.service import ServiceBase
 
 @service()
 class Database(ServiceBase):
+    db_url: str = "sqlite:///app.db"
+
     @after_init
     async def connect(self):
         print("Database connected")
@@ -77,6 +95,7 @@ class Database(ServiceBase):
 
 ```python
 from canary_framework import module
+from canary_framework.core.module import ModuleBase
 
 @module(services=[Database, Api])
 class App(ModuleBase):
@@ -85,17 +104,29 @@ class App(ModuleBase):
 
 ### 路由 (Router)
 
-路由处理 HTTP 请求，参数自动绑定：
+路由通过 `Router` 类属性定义，使用 `@router.get()` / `@router.post()` 方法装饰器。参数自动绑定，自动生成 OpenAPI 3.0.3 文档。
 
 ```python
-from canary_framework import router, get
-from canary_framework.core.router import RouterBase
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
 
-@router(prefix="/users")
-class Users(RouterBase):
-    @get("/")
-    async def list_users(self):
-        return {"users": []}
+@service()
+class Posts(ServiceBase):
+    db: Database
+    router = Router(prefix="/api/posts", tags=["Posts"])
+
+    @router.get("/")
+    async def list_posts(self, page: int = 1, limit: int = 10):
+        return await self.db.query(f"SELECT * FROM posts LIMIT {limit} OFFSET {(page-1)*limit}")
+
+    @router.get("/{post_id}")
+    async def get_post(self, post_id: int):
+        return await self.db.query(f"SELECT * FROM posts WHERE id={post_id}")
+
+    @router.post("/", request_model=PostCreate)
+    async def create_post(self, body: PostCreate):
+        return await self.db.create_post(body), 201
 ```
 
 ### 依赖注入
@@ -108,7 +139,7 @@ from canary_framework.core.service import ServiceBase
 
 @service()
 class UserRepo(ServiceBase):
-    db: Database  # 框架自动注入
+    db: Database  # 框架自动注入为 self.db
 
     async def get_user(self, user_id):
         return await self.db.query(...)

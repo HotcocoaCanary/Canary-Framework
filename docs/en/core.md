@@ -7,24 +7,23 @@ This document covers the internal design, data flow, and mechanics of Canary Fra
 Canary Framework follows a three-layer architecture:
 
 ```
-common/  ──►  core/  ──►  decorators/  ──►  engine/
+ common/  ──►  core/  ──►  decorators/  ──►  engine/
 (types,        (ServiceBase,   (public API:      (registry,
- config,        ModuleBase,     @service,         injector,
- errors,        RouterBase)     @module,          hooks,
- routing)                       @router,          openapi,
-                                @config,          params,
-                                lifecycle         logging)
-                                hooks)
+ config,        ModuleBase,     @service,         dependencies,
+ errors,        Router)         @module,          hooks,
+ routing)                       @config,          openapi,
+                                lifecycle         params,
+                                hooks)            logging)
 ```
 
 - **common/** — Zero framework-internal dependencies. Types, config model, error hierarchy, and route parsing that every other module imports.
-- **core/** — The three base classes (`ServiceBase`, `ModuleBase`, `RouterBase`) that provide lifecycle, DI wiring, and ASGI integration.
+- **core/** — The two base classes (`ServiceBase`, `ModuleBase`) and the `Router` class that provide lifecycle, DI wiring, route management, and ASGI integration.
 - **decorators/** — The public API. Decorators validate base class inheritance, attach metadata markers, and auto-generate names.
 - **engine/** — Runtime machinery: registry, topological sort, hook discovery, OpenAPI generation, parameter resolution, and logging.
 
 ## ServiceBase Internals
 
-`ServiceBase` (core/service.py) is the root base class for all framework components. ModuleBase and RouterBase both inherit from it.
+`ServiceBase` (core/service/_base.py) is the root base class for all framework components. ModuleBase inherits from it. The `Router` class is a standalone route manager used as a class attribute on services.
 
 ### `__init__`
 
@@ -118,50 +117,64 @@ All lifecycle methods (init, startup, shutdown) propagate to children:
 - **Forward order** (topological): init, startup
 - **Reverse order**: shutdown
 
-## RouterBase Internals
+## Router Internals
 
-`RouterBase` (core/router.py) extends `ServiceBase` and provides HTTP routing.
+`Router` (core/router/_base.py) is a standalone route manager, not a `ServiceBase` subclass. It is used as a class attribute on `@service()` or `@module()` decorated classes.
 
-### `asgi_app` Property
+### Constructor
 
-Lazily builds a Starlette `Router` from `_collect_routes()`:
+```python
+Router(prefix: str = "", *, tags: list[str] | None = None)
+```
 
-1. Scans all methods on the class using `dir()` 
-2. Finds methods with `ROUTE_ATTR` (`__cf_route__`) — set by HTTP method decorators
-3. For each route, calls `_route_handler()` to create a Starlette `Route`
+- `prefix` — URL prefix applied to all routes in this router (e.g., `"/api"`)
+- `tags` — OpenAPI tags auto-applied to all endpoints in this router
 
-### Route Building (`_route_handler`)
+Internally stores `self._route_infos: list[RouteInfo]` as routes are registered via the method decorators.
 
-For each decorated method:
+### HTTP Method Decorators
 
-1. Reads `ROUTE_ATTR` dict: `{method, path, request_model, ...}`
-2. `parse_route_path(path)` → extracts Starlette path, path param names, query param names
-3. Creates an `endpoint` closure that:
+Each `Router` instance provides method decorators (`@router.get`, `@router.post`, `@router.put`, `@router.delete`, `@router.patch`) that register `RouteInfo` objects internally:
+
+1. Parses the path via `parse_route_path(path)` → splits into `starlette_path`, `path_params`, `query_params`
+2. Resolves handler parameter types via `resolve_params(fn)`
+3. Auto-detects `request_model` from handler annotations
+4. Constructs a `RouteInfo` dataclass with all metadata
+5. Appends to `self._route_infos`
+
+The decorator returns the original function unchanged (no wrapping).
+
+### Route Collection
+
+`_collect_routes()` is a free function that works on any object instance:
+
+1. Reads `getattr(instance, "router", None)` — if it's a `Router`, iterates `router._route_infos`
+2. For each `RouteInfo`, calls `_route_handler()` to create a Starlette `Route`
+
+### `_route_handler`
+
+1. Reads route metadata from `RouteInfo`
+2. Creates an `endpoint` closure that:
    - Binds path params from `request.path_params` with type conversion
    - Binds query params from `request.query_params` with type conversion
    - If `request_model` is set, calls `await request.json()` and parses with Pydantic
    - Calls `await handler(...)` with resolved kwargs
    - Converts return value via `_auto_response()`
-4. Returns `Route(starlette_path, endpoint=endpoint, methods=[method])`
+3. Returns `Route(starlette_path, endpoint=endpoint, methods=[method])`
 
-### `startup()` — OpenAPI Documentation
+### OpenAPI Documentation
 
-Overrides `ServiceBase.startup()`. On startup:
+The first service with a `Router` in a module generates documentation on `startup()`:
 
-1. Calls `super().startup()` for hook invocation
-2. Collects `RouterMeta` from self and all sibling routers via `_cf_parent_registry`
-3. Calls `generate_openapi_schema()` with all router metas and config values
-4. Generates Swagger UI and ReDoc HTML pages (using CDN URLs from config)
-5. Creates root routes for `/docs`, `/redoc`, `/openapi.json`
-6. First-wins registration: only the first router in a module registers these docs (tracked via `_cf_docs_registered` on the parent registry)
+1. Collects `RouteInfo` from self and all sibling services via `_cf_parent_registry`
+2. Calls `generate_openapi_schema()` with all route infos and config values
+3. Generates Swagger UI and ReDoc HTML pages
+4. Creates root routes for `/docs`, `/redoc`, `/openapi.json`
+5. First-wins registration: only the first router in a module registers docs
 
-### `get_mount_path()`
+### Mount Path
 
-Returns `meta.prefix` if set, otherwise falls back to `/{CF_NAME_ATTR}` (e.g., `"/PostRouter"`).
-
-### `_cf_get_root_routes()`
-
-Returns the documentation root routes when a parent registry exists. The parent module's `asgi_app` property calls this to contribute `/docs`, `/redoc`, `/openapi.json` at the root level.
+Services with a `Router` are mounted at `router.prefix` if set (e.g., `"/api"`), otherwise at `f"/{service_name}"`.
 
 ## Dependency Injection Flow
 
@@ -179,7 +192,7 @@ instantiation → setattr injection → lifecycle
 
 ### `resolve_deps(cls)`
 
-Reads `cls.__annotations__` via `typing.get_type_hints()` and returns only those entries whose type has `CF_SERVICE_MARKER` set (i.e., is a `@service`, `@module`, or `@router` decorated class):
+Reads `cls.__annotations__` via `typing.get_type_hints()` and returns only those entries whose type has `CF_SERVICE_MARKER` set (i.e., is a `@service` or `@module` decorated class):
 
 ```python
 # For class:
@@ -209,7 +222,7 @@ Decorators set metadata markers on classes. These markers drive all framework be
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `CF_SERVICE_MARKER` | `"__cf_service__"` | Set to `True` on all `@service`, `@module`, `@router` classes |
+| `CF_SERVICE_MARKER` | `"__cf_service__"` | Set to `True` on all `@service` and `@module` classes |
 | `CF_SERVICE_META` | `"__cf_service_meta__"` | Stores `ServiceMeta` / `ModuleMeta` / `RouterMeta` instance |
 | `CF_NAME_ATTR` | `"__cf_name__"` | Auto-generated name (e.g., `"DatabaseService"`) |
 | `ROUTE_ATTR` | `"__cf_route__"` | Route metadata dict on HTTP handler methods |
@@ -219,7 +232,7 @@ Decorators set metadata markers on classes. These markers drive all framework be
 
 - **`ServiceMeta(name)`** — Set by `@service`
 - **`ModuleMeta(name, services)`** — Set by `@module`, extends `ServiceMeta`
-- **`RouterMeta(name, prefix, tags, routes)`** — Set by `@router`, extends `ServiceMeta`
+- **`RouterMeta(name, prefix, tags, routes)`** — Set by the `Router` class, extends `ServiceMeta`
 
 ### Type Checks
 
@@ -237,7 +250,7 @@ def is_cf_router(cls):   # isinstance(getattr(cls, CF_SERVICE_META, None), Route
 
 2. **`ModuleBase.asgi_app`** — Aggregates child ASGI apps via duck-typing. Mounts children with `asgi_app` at their mount paths. Contributes root routes from children with `_cf_get_root_routes()`.
 
-3. **`RouterBase.asgi_app`** — Builds a Starlette `Router` from collected route handlers. On `startup()`, generates OpenAPI schema and registers documentation endpoints as root routes (first-wins).
+3. **`Router.asgi_app`** — The first service with a `Router` attribute builds a Starlette `Router` from collected route handlers (via `_collect_routes()`). On `startup()`, generates OpenAPI schema and registers documentation endpoints as root routes (first-wins).
 
 ## Error Handling
 

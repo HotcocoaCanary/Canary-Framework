@@ -1,0 +1,336 @@
+"""Router utilities — route handling, response conversion, doc building, path parsing."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Awaitable, Callable
+from types import FunctionType
+from typing import cast
+
+from pydantic import BaseModel, ValidationError
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from starlette.routing import Route
+
+from canary_framework.common import RouteInfo
+from canary_framework.common.logging import get_logger
+
+_log = get_logger("router")
+
+_PARAM_PATTERN = r"\{(\w+)\}"
+
+
+def parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
+    """Parse a route path to extract path parameters and query parameters."""
+    parts = path.split("?", 1)
+    base_path = parts[0]
+    path_params = re.findall(_PARAM_PATTERN, base_path)
+
+    query_params: list[str] = []
+    if len(parts) > 1:
+        query_params = re.findall(_PARAM_PATTERN, parts[1])
+    return base_path, path_params, query_params
+
+
+_SWAGGER_UI_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Swagger UI</title>
+    <link rel="stylesheet" href="{swagger_css}">
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="{swagger_js}"></script>
+    <script>
+        SwaggerUIBundle({{ url: "{openapi_path}", dom_id: "#swagger-ui" }});
+    </script>
+</body>
+</html>"""
+
+_REDOC_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>ReDoc</title>
+</head>
+<body>
+    <div id="redoc"></div>
+    <script src="{redoc_js}"></script>
+    <script>
+        Redoc.init("{openapi_path}", {{}}, document.getElementById("redoc"));
+    </script>
+</body>
+</html>"""
+
+
+def _convert_param(value: str, param_type: type | None) -> object:
+    """将字符串参数转换为目标类型。
+
+    Args:
+        value: 原始字符串值
+        param_type: 目标类型
+
+    Returns:
+        转换后的值
+    """
+    if param_type is None or param_type is str:
+        return value
+    if param_type is int:
+        return int(value)
+    if param_type is float:
+        return float(value)
+    if param_type is bool:
+        return value.lower() == "true"
+    return value
+
+
+def _convert_nested_models(obj: object) -> object:
+    """递归转换对象中的Pydantic模型为字典。
+
+    Args:
+        obj: 待转换的对象。
+
+    Returns:
+        转换后的对象。
+    """
+    if isinstance(obj, BaseModel):
+        return obj.model_dump()
+    if isinstance(obj, dict):
+        return {k: _convert_nested_models(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_convert_nested_models(item) for item in obj]
+    return obj
+
+
+def _auto_response(result: object) -> Response:
+    """自动将返回值转换为Starlette响应对象。
+
+    根据返回值类型自动选择合适的响应类型：
+    - Response对象：直接返回
+    - dict或list：返回JSONResponse
+    - Pydantic BaseModel：返回JSONResponse（调用model_dump）
+    - str：返回PlainTextResponse
+    - 其他类型：转换为字符串后返回PlainTextResponse
+
+    Args:
+        result: 路由处理函数的返回值。
+
+    Returns:
+        Starlette Response对象。
+
+    Auto-convert return value to Starlette response.
+
+    Automatically selects the appropriate response type based on the return value:
+    - Response object: returned directly
+    - dict or list: JSONResponse
+    - Pydantic BaseModel: JSONResponse (via model_dump)
+    - str: PlainTextResponse
+    - other types: PlainTextResponse with string representation
+
+    Args:
+        result: The return value from the route handler.
+
+    Returns:
+        Starlette Response object.
+    """
+    if isinstance(result, Response):
+        return result
+    if isinstance(result, str):
+        return PlainTextResponse(result)
+    if isinstance(result, BaseModel):
+        return JSONResponse(result.model_dump())
+    if isinstance(result, (dict, list)):
+        converted = _convert_nested_models(result)
+        return JSONResponse(converted)
+    return PlainTextResponse(str(result))
+
+
+def _route_handler(
+    instance: object,
+    route_info: RouteInfo,
+    cls: type,
+    *,
+    starlette_path_override: str | None = None,
+) -> Route:
+    """创建路由处理函数。
+
+    从 RouteInfo 创建一个 Starlette Route 对象，自动处理响应转换和参数解析。
+
+    支持自动参数绑定：
+    - 路径参数：从URL路径提取
+    - 查询参数：从URL路径提取
+    - 请求体：通过request_model指定，自动解析为Pydantic模型
+
+    Args:
+        instance: 路由器实例。
+        route_info: 路由元数据。
+        cls: 路由器类。
+
+    Returns:
+        Starlette Route对象。
+
+    Create a route handler.
+
+    Creates a Starlette Route object from RouteInfo with automatic
+    response conversion and parameter parsing.
+
+    Args:
+        instance: The router instance.
+        route_info: Route metadata.
+        cls: The router class.
+
+    Returns:
+        Starlette Route object.
+    """
+    method = route_info.method
+    starlette_path = (
+        starlette_path_override
+        if starlette_path_override is not None
+        else route_info.starlette_path
+    )
+    request_model = route_info.request_model
+    path_param_names = route_info.path_params
+    query_param_names = route_info.query_params
+    param_meta = route_info.param_meta
+    handler = cast(
+        "Callable[..., Awaitable[object]]",
+        cast(FunctionType, route_info.handler).__get__(instance, cls),
+    )
+
+    param_types: dict[str, object] = {}
+    for name in param_meta:
+        param_types[name] = param_meta[name][0]  # type: ignore[index]
+
+    async def endpoint(request: Request) -> Response:
+        kwargs: dict[str, object] = {}
+
+        for param_name in path_param_names:
+            if param_name in request.path_params:
+                param_type = cast("type | None", param_types.get(param_name))
+                try:
+                    kwargs[param_name] = _convert_param(request.path_params[param_name], param_type)
+                except (ValueError, TypeError):
+                    return JSONResponse(
+                        {"detail": f"Invalid value for path parameter '{param_name}'"},
+                        status_code=400,
+                    )
+
+        for param_name in query_param_names:
+            if param_name in request.query_params:
+                param_type = cast("type | None", param_types.get(param_name))
+                try:
+                    kwargs[param_name] = _convert_param(
+                        request.query_params[param_name], param_type
+                    )
+                except (ValueError, TypeError):
+                    return JSONResponse(
+                        {"detail": f"Invalid value for query parameter '{param_name}'"},
+                        status_code=400,
+                    )
+
+        if request_model is not None:
+            try:
+                body = cast("dict[str, object]", await request.json())
+            except Exception:
+                return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+            model_cls = cast("type[BaseModel]", request_model)
+            try:
+                parsed = model_cls(**body)
+            except ValidationError as e:
+                return JSONResponse({"detail": e.errors()}, status_code=422)
+            result = await handler(parsed, **kwargs)
+        else:
+            result = await handler(**kwargs)
+
+        return _auto_response(result)
+
+    return Route(starlette_path, endpoint=endpoint, methods=[method])
+
+
+def _build_doc_routes(
+    schema: dict[str, object],
+    *,
+    openapi_path: str = "/openapi.json",
+    swagger_path: str = "/docs",
+    redoc_path: str = "/redoc",
+    swagger_css: str = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+    swagger_js: str = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+    redoc_js: str = "https://cdn.jsdelivr.net/npm/redoc@next/bundles/redoc.standalone.js",
+) -> list[Route]:
+    """构建 OpenAPI 文档端点路由。
+
+    创建三个端点：
+    - openapi_path: 提供 OpenAPI JSON schema
+    - swagger_path: 提供 Swagger UI 页面
+    - redoc_path: 提供 ReDoc 页面
+
+    Args:
+        schema: OpenAPI 3.0.3 schema 字典。
+        openapi_path: OpenAPI JSON 端点路径。
+        swagger_path: Swagger UI 页面路径。
+        redoc_path: ReDoc 页面路径。
+        swagger_css: Swagger UI CSS CDN URL。
+        swagger_js: Swagger UI JS CDN URL。
+        redoc_js: ReDoc JS CDN URL。
+
+    Returns:
+        Starlette Route 对象列表。
+
+    Build OpenAPI documentation endpoint routes.
+
+    Creates three endpoints:
+    - openapi_path: Serves the OpenAPI JSON schema
+    - swagger_path: Serves the Swagger UI page
+    - redoc_path: Serves the ReDoc page
+
+    Args:
+        schema: OpenAPI 3.0.3 schema dict.
+        openapi_path: OpenAPI JSON endpoint path.
+        swagger_path: Swagger UI page path.
+        redoc_path: ReDoc page path.
+        swagger_css: Swagger UI CSS CDN URL.
+        swagger_js: Swagger UI JS CDN URL.
+        redoc_js: ReDoc JS CDN URL.
+
+    Returns:
+        List of Starlette Route objects.
+    """
+    routes: list[Route] = []
+
+    async def openapi_endpoint(request: Request) -> JSONResponse:
+        return JSONResponse(schema)
+
+    routes.append(Route(openapi_path, endpoint=openapi_endpoint, methods=["GET"]))
+
+    swagger_html = _SWAGGER_UI_HTML.format(
+        swagger_css=swagger_css,
+        swagger_js=swagger_js,
+        openapi_path=openapi_path,
+    )
+
+    async def swagger_endpoint(request: Request) -> HTMLResponse:
+        return HTMLResponse(swagger_html)
+
+    routes.append(Route(swagger_path, endpoint=swagger_endpoint, methods=["GET"]))
+
+    redoc_html = _REDOC_HTML.format(
+        redoc_js=redoc_js,
+        openapi_path=openapi_path,
+    )
+
+    async def redoc_endpoint(request: Request) -> HTMLResponse:
+        return HTMLResponse(redoc_html)
+
+    routes.append(Route(redoc_path, endpoint=redoc_endpoint, methods=["GET"]))
+
+    return routes
+
+
+__all__ = [
+    "_auto_response",
+    "_build_doc_routes",
+    "_convert_nested_models",
+    "_convert_param",
+    "_route_handler",
+    "parse_route_path",
+]

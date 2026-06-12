@@ -38,6 +38,9 @@ Use `@after_init` hook to run code after initialization:
 ```python
 from canary_framework import after_init
 
+from canary_framework import after_init, service
+from canary_framework.core.service import ServiceBase
+
 @service()
 class UserService(ServiceBase):
     @after_init
@@ -265,8 +268,8 @@ class Database(ServiceBase):
 
 app = App()
 await app.init()
-
-### Logging Configuration
+await app.startup()
+await app.shutdown()
 
 The framework automatically configures logging during `init()`. No manual
 `logging.basicConfig()` is needed.

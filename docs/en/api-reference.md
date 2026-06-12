@@ -7,15 +7,14 @@ Complete API documentation for Canary Framework.
 ```python
 from canary_framework import (
     # Decorators
-    config, service, module, router,
-    get, post, put, delete, patch,
+    config, service, module,
     after_init, before_startup, before_shutdown,
+
+    # Router
+    Router,
 
     # Config
     CanaryConfig,
-
-    # Base Classes (RouterBase is re-exported; ServiceBase/ModuleBase from canary_framework.core)
-    RouterBase,
 
     # Exceptions
     CanaryFrameworkError,
@@ -99,74 +98,70 @@ class App(ModuleBase):
 
 ---
 
-### @router
+### Router
 
-Marks a class as a router.
+A route manager used as a class attribute inside `@service()` or `@module()` decorated classes.
 
 **Signature:**
 ```python
-def router(
-    prefix: str = "",
-    *,
-    tags: list[str] | None = None,
-) -> Callable[[type], type[RouterBase]]
+class Router:
+    def __init__(self, prefix: str = "", *, tags: list[str] | None = None)
 ```
 
 **Parameters:**
-- `prefix` (str, positional, default `""`): URL prefix for all routes
-- `tags` (list[str], keyword-only): OpenAPI tags for documentation
-
-The `name`, `deps`, and `docs` parameters have been removed. The router name is auto-generated as `ClassName` + `"Router"`. Dependencies are declared via type annotations. OpenAPI documentation is auto-enabled by default.
+- `prefix` (str, default `""`): URL prefix for all routes in this router
+- `tags` (list[str] | None): OpenAPI tags for documentation grouping
 
 **Example:**
 ```python
-from canary_framework import router
-from canary_framework.core.router import RouterBase
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
 
-@router(prefix="/api", tags=["API"])
-class Api(RouterBase):
-    pass
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api", tags=["API"])
+
+    @router.get("/users/{user_id}")
+    async def get_user(self, user_id: int): ...
 ```
 
 ---
 
-### HTTP Method Decorators
+### Router HTTP Method Decorators
 
-Mark methods as route handlers.
+Router instances provide method decorators for defining routes: `@router.get`, `@router.post`, `@router.put`, `@router.delete`, `@router.patch`.
 
-**Signatures:**
+**Method signatures:**
 ```python
-def get(path: str, **kwargs) -> Callable
-def post(path: str, **kwargs) -> Callable
-def put(path: str, **kwargs) -> Callable
-def delete(path: str, **kwargs) -> Callable
-def patch(path: str, **kwargs) -> Callable
+def get(path: str, *, summary=None, description=None, response_model=None,
+        request_model=None, tags=None, deprecated=False, operation_id=None,
+        responses=None, path_params=None, query_params=None) -> Callable
+def post(...)  # same params
+def put(...)   # same params
+def delete(...)  # same params
+def patch(...)  # same params
 ```
 
-**Parameters:**
-- `path` (str, required): URL path for the route
-- `summary` (str): Short summary for OpenAPI
-- `description` (str): Detailed description for OpenAPI
-- `request_model` (BaseModel): Auto-parse request body into this model. Passed as `body` parameter.
-- `response_model` (BaseModel): Response data model for OpenAPI
-- `responses` (dict): Custom response definitions
-- `tags` (list[str]): OpenAPI tags
-- `deprecated` (bool): Mark as deprecated
-- `operation_id` (str): Unique operation identifier
-- `path_params` (dict): Path parameter definitions for schema enrichment
-- `query_params` (dict): Query parameter definitions for schema enrichment
+**Parameters same as before** but now called as `@router.get()`, `@router.post()`, etc. instead of standalone `@get()`, `@post()`.
 
 Route handlers do **not** receive a `request` parameter. Path parameters, query parameters, and request body are auto-bound.
 
 **Example:**
 ```python
-@router(prefix="/users")
-class Users(RouterBase):
-    @get("/{user_id}")
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
+
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/users")
+
+    @router.get("/{user_id}")
     async def get_user(self, user_id: int):
         pass
 
-    @post("/", request_model=UserCreate)
+    @router.post("/", request_model=UserCreate)
     async def create_user(self, body: UserCreate):
         pass
 ```
@@ -311,22 +306,46 @@ from canary_framework.core.module import ModuleBase
 
 ---
 
-### RouterBase
+### Router
 
-Base class for routers, extends `ServiceBase`.
+Route manager class used as a class attribute inside `@service()` or `@module()` decorated classes.
+Does not extend `ServiceBase` — it is a standalone utility class.
 
 **Import:**
 ```python
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 ```
 
-**Properties:**
-- `asgi_app`: Starlette `Router` with collected routes (lazily built)
+**Constructor:**
+```python
+class Router:
+    def __init__(self, prefix: str = "", *, tags: list[str] | None = None)
+```
+
+**Parameters:**
+- `prefix` (str, default `""`): URL prefix for all routes in this router
+- `tags` (list[str] | None): OpenAPI tags for documentation grouping
 
 **Methods:**
-- `async startup()`: Overrides `ServiceBase.startup()`. Auto-generates OpenAPI schema from sibling routers, builds documentation endpoints, registers root routes. First-wins registration for docs across sibling routers.
-- `get_mount_path()`: Returns `meta.prefix` if set, otherwise `"/{name}"`
-- `_cf_get_root_routes()`: Returns documentation root routes (`/docs`, `/redoc`, `/openapi.json`) when in a module context
+- `get(path, *, summary=None, description=None, response_model=None, request_model=None, tags=None, deprecated=False, operation_id=None, responses=None, path_params=None, query_params=None) -> Callable`: Decorator for GET routes
+- `post(...)`: Decorator for POST routes (same parameters)
+- `put(...)`: Decorator for PUT routes (same parameters)
+- `delete(...)`: Decorator for DELETE routes (same parameters)
+- `patch(...)`: Decorator for PATCH routes (same parameters)
+
+**Example:**
+```python
+from canary_framework import service
+from canary_framework.core.service import ServiceBase
+from canary_framework.core.router import Router
+
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api", tags=["API"])
+
+    @router.get("/users/{user_id}")
+    async def get_user(self, user_id: int): ...
+```
 
 ---
 
@@ -450,7 +469,7 @@ class RouterMeta(ServiceMeta):
 class ServiceEntry:
     cls: type             # Service class
     name: str             # Auto-generated name
-    instance: object = None  # Instance (None until configured)
+    instance: object = None  # Instance (None until initialized)
 ```
 
 **Type Aliases:**
@@ -532,7 +551,7 @@ Current version of Canary Framework.
 
 Decorated classes have these internal attributes set:
 
-- `__cf_service__`: `True` if decorated with `@service()`, `@module()`, or `@router()`
+- `__cf_service__`: `True` if decorated with `@service()` or `@module()`
 - `__cf_service_meta__`: Metadata object (`ServiceMeta`/`ModuleMeta`/`RouterMeta`)
 - `__cf_name__`: Auto-generated name (e.g., `"DatabaseService"`)
 
@@ -572,3 +591,7 @@ Key changes from the old API:
 | `await app.configure(cfg)` | `await app.init()` — single init call |
 | `make_subclass()` utility | Removed — explicit inheritance |
 | `CF_MODULE_MARKER` / `CF_ROUTER_MARKER` | Removed — `isinstance` checks on meta types |
+| `@router(prefix="/api")` class decorator | `router = Router(prefix="/api")` class attribute |
+| `class X(RouterBase)` | `class X(ServiceBase)` with `router` attribute |
+| `@get("/path")` | `@router.get("/path")` |
+| `@post("/path")` | `@router.post("/path")` |
