@@ -66,14 +66,23 @@ class ServiceMeta:
 
     Attributes:
         name: 服务的全局唯一名称。
+        prefix: URL前缀，应用于该服务中的所有路由（可选）。
+        tags: 该服务的OpenAPI标签（可选）。
+        routes: 路由处理函数列表（可选）。
 
     Metadata stored on a @service-decorated class.
 
     Attributes:
         name: Globally unique service name.
+        prefix: URL prefix applied to all routes in this service (optional).
+        tags: OpenAPI tags for this service (optional).
+        routes: List of route handler functions (optional).
     """
 
     name: str
+    prefix: str = ""
+    tags: list[str] = field(default_factory=list)
+    routes: list[HookFunction] = field(default_factory=list)
 
 
 @dataclass(slots=True)

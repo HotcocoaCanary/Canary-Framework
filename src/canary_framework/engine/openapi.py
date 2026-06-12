@@ -17,7 +17,7 @@ from uuid import UUID
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from canary_framework.common import ROUTE_ATTR, RouterMeta
+from canary_framework.common import ROUTE_ATTR, ServiceMeta
 from canary_framework.common.routing import parse_route_path
 from canary_framework.engine.params import resolve_params
 
@@ -219,7 +219,7 @@ def _apply_field_constraints(schema: dict[str, object], field_info: FieldInfo) -
 
 
 def generate_openapi_schema(
-    router_metas: list[RouterMeta],
+    router_metas: list[ServiceMeta],
     title: str = "Canary Framework API",
     version: str = "1.0.0",
     description: str = "",

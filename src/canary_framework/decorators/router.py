@@ -19,7 +19,7 @@ from canary_framework.common import (
     HookFunction,
     RouterMeta,
 )
-from canary_framework.core import RouterBase
+from canary_framework.core import ServiceBase
 
 
 def _http_method(
@@ -273,8 +273,8 @@ def router(
     prefix: str = "",
     *,
     tags: list[str] | None = None,
-) -> Callable[[type], type[RouterBase]]:
-    """声明一个类为路由服务。
+) -> Callable[[type], type[ServiceBase]]:
+    """声明一个类为路由服务（已弃用，请使用 @service(prefix=..., tags=...)。
 
     将@service语义与HTTP路由分组相结合。
     路由名称自动生成为``类名 + Router``。
@@ -287,7 +287,7 @@ def router(
     Returns:
         装饰后的类。
 
-    Declare a class as a Canary Framework router service.
+    Declare a class as a Canary Framework router service (deprecated, use @service).
 
     Combines ``@service`` semantics with HTTP route grouping.
     The router name is auto-generated as ``ClassName + Router``.
@@ -300,14 +300,21 @@ def router(
     Returns:
         The decorated class.
     """
+    import warnings
+
     _tags = list(tags or [])
 
-    def decorator(cls: type) -> type[RouterBase]:
-        if not issubclass(cls, RouterBase):
+    def decorator(cls: type) -> type[ServiceBase]:
+        if not issubclass(cls, ServiceBase):
             raise TypeError(
-                f"@router '{cls.__name__}': must inherit from RouterBase. "
-                f"Did you forget 'class {cls.__name__}(RouterBase):'?"
+                f"@router '{cls.__name__}': must inherit from ServiceBase. "
+                f"Did you forget 'class {cls.__name__}(ServiceBase):'?"
             )
+        warnings.warn(
+            "@router is deprecated. Use @service(prefix=..., tags=...) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         name = cls.__name__ + "Router"
         routes: list[HookFunction] = []
         for attr_name in dir(cls):

@@ -183,25 +183,49 @@ class ModuleBase(ServiceBase):
         assert self._cf_asgi_app is not None
         return self._cf_asgi_app
 
+    def _cf_get_root_routes(self) -> list[Route]:
+        """合并所有子服务（包括子模块）的根路径路由，去重后返回。
+
+        解决嵌套 Module 场景下 RouterBase 生成的文档路由
+        （如 /docs, /redoc, /openapi.json）无法传播到根 ASGI 应用的问题。
+
+        Aggregate root-level routes from all child services including
+        sub-modules, deduplicated by path.
+        """
+        routes: list[Route] = []
+        seen: set[str] = set()
+        registry = self._cf_registry
+        if registry is not None:
+            for name in self._cf_startup_order:
+                entry = registry.get_by_name(name)
+                inst = entry.instance
+                if inst is not None and hasattr(inst, "_cf_get_root_routes"):
+                    for route in inst._cf_get_root_routes():
+                        if route.path not in seen:
+                            routes.append(route)
+                            seen.add(route.path)
+        return routes
+
     @override
     async def startup(self) -> None:
         """启动模块及其所有子服务。
 
-        调用BEFORE_STARTUP钩子，然后按拓扑顺序调用每个子服务的startup方法。
+        调用BEFORE_STARTUP钩子和OpenAPI设置（通过super），
+        然后按拓扑顺序调用每个子服务的startup方法。
 
         Raises:
             DependencyInjectionError: 如果服务实例为None。
 
         Start the module and all its child services.
 
-        Invokes the BEFORE_STARTUP hook, then calls startup on each child service
-        in topological order.
+        Invokes the BEFORE_STARTUP hook and OpenAPI setup (via super),
+        then calls startup on each child service in topological order.
 
         Raises:
             DependencyInjectionError: If a service instance is None.
         """
         _log.info("Starting module: %s", type(self).__name__)
-        await self._invoke_hook(LifecycleHook.BEFORE_STARTUP)
+        await super().startup()
         registry = self._cf_registry
         if registry is not None:
             for name in self._cf_startup_order:
