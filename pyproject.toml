@@ -9,7 +9,8 @@ description = "Lightweight decorator-driven Python async service framework with 
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.13.4",
-    "starlette>=1.2.1",
+    "pydantic-settings>=2.12.1",
+    "starlette>=1.3.0",
 ]
 readme = "README.md"
 license = { text = "Apache-2.0" }
