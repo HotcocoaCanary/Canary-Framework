@@ -78,51 +78,65 @@ def _generate_schema_name(model_cls: type[BaseModel]) -> str:
     return cast(str, origin.__name__) + "_" + "_".join(arg_names)
 
 
-def _register_model_schema(
-    model_cls: type[BaseModel],
+def _build_model_schema(
+    model_cls: Any,
     schemas_dict: dict[str, object],
-) -> str:
-    """注册模型 schema，展平 $defs 并返回 schema 引用名。
+) -> dict[str, object]:
+    """将模型类型转换为 OpenAPI schema dict。
 
-    使用 ref_template 确保 $ref 指向 #/components/schemas/{model}，
-    递归展平所有嵌套的 $defs，按 schema name 去重。
+    支持 Pydantic BaseModel 子类（注册到 components/schemas 并返回 $ref）
+    以及 list[T] / dict 等泛型容器（生成 inline array / object schema）。
     """
+    origin: Any = getattr(model_cls, "__origin__", None)
+
+    # list[T] → {"type": "array", "items": ...}
+    if origin is list:
+        args = getattr(model_cls, "__args__", ())
+        item_schema: dict[str, object] = (
+            _build_model_schema(args[0], schemas_dict) if args else {}
+        )
+        return {"type": "array", "items": item_schema}
+
+    # dict[K, V] → {"type": "object"}
+    if origin is dict:
+        return {"type": "object"}
+
+    # 确定实际 Pydantic 基类（泛型别名取其 __origin__）
+    if isinstance(model_cls, type) and issubclass(model_cls, BaseModel):
+        pydantic_cls: type[BaseModel] = model_cls  # type: ignore[assignment]
+    elif (
+        origin is not None
+        and origin is not UnionType
+        and isinstance(origin, type)
+        and issubclass(origin, BaseModel)
+    ):
+        pydantic_cls = origin  # type: ignore[assignment]
+    else:
+        return {}
+
+    # 用 model_cls（可能含泛型参数）生成唯一名称，但用基类生成 schema
     model_name = _generate_schema_name(model_cls)
-
-    model_id = id(model_cls)
-    if model_id in _registered_schemas:
-        return _registered_schemas[model_id]
-
-    raw = cast(
-        "dict[str, object]",
-        model_cls.model_json_schema(ref_template="#/components/schemas/{model}"),
-    )
-    _flatten_defs(raw, schemas_dict)
-    schemas_dict[model_name] = raw
-    _registered_schemas[model_id] = model_name
-
-    return model_name
+    model_id = id(pydantic_cls)
+    if model_id not in _registered_schemas:
+        raw = cast(
+            "dict[str, object]",
+            pydantic_cls.model_json_schema(ref_template="#/components/schemas/{model}"),
+        )
+        _flatten_defs(raw, schemas_dict)
+        schemas_dict[model_name] = raw
+        _registered_schemas[model_id] = model_name
+    return {"$ref": f"#/components/schemas/{model_name}"}
 
 
-def _is_optional(annotation: Any) -> bool:
-    """检测类型是否为 Optional[T] 或 T | None。"""
+def _strip_optional(annotation: Any) -> tuple[Any, bool]:
+    """从 Optional[T] 或 T | None 中提取 T，同时返回是否 nullable。"""
     origin = get_origin(annotation)
-    if origin is None:
-        return False
     if origin is UnionType:
         args = get_args(annotation)
-        return type(None) in args
-    return False
-
-
-def _unwrap_optional(annotation: Any) -> Any:
-    """从 Optional[T] 或 T | None 中提取 T。"""
-    args = get_args(annotation)
-    if args:
-        for arg in args:
-            if arg is not type(None):
-                return arg
-    return annotation
+        inner = next((a for a in args if a is not type(None)), None)
+        if inner is not None:
+            return inner, True
+    return annotation, False
 
 
 def _get_enum_values(annotation: Any) -> list[object] | None:
@@ -145,10 +159,9 @@ def _build_parameter_schema(
     """
     schema: dict[str, object] = {}
 
-    if _is_optional(annotation):
-        inner = _unwrap_optional(annotation)
+    annotation, nullable = _strip_optional(annotation)
+    if nullable:
         schema["nullable"] = True
-        annotation = inner
 
     enum_values = _get_enum_values(annotation)
 
@@ -298,23 +311,19 @@ def generate_openapi_schema(
             operation["parameters"] = parameters
 
         if info.request_model is not None:
-            ref_name = _register_model_schema(info.request_model, schemas_dict)
+            request_schema = _build_model_schema(info.request_model, schemas_dict)
             operation["requestBody"] = {
-                "description": info.request_model.__doc__ or "",
-                "content": {
-                    "application/json": {"schema": {"$ref": f"#/components/schemas/{ref_name}"}}
-                },
+                "description": getattr(info.request_model, "__doc__", "") or "",
+                "content": {"application/json": {"schema": request_schema}},
             }
 
         responses: dict[str, object] = dict(info.responses)
         if info.response_model is not None:
-            ref_name = _register_model_schema(info.response_model, schemas_dict)
+            response_schema = _build_model_schema(info.response_model, schemas_dict)
             if "200" not in responses:
                 responses["200"] = {
                     "description": "Successful Response",
-                    "content": {
-                        "application/json": {"schema": {"$ref": f"#/components/schemas/{ref_name}"}}
-                    },
+                    "content": {"application/json": {"schema": response_schema}},
                 }
         operation["responses"] = responses
 
