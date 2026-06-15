@@ -99,7 +99,7 @@ class TestComplexApp:
 
         # Create and configure app
         app = MainApp()
-        await app.init()
+        app.init()
 
         # Test both modules
         async with AsyncClient(

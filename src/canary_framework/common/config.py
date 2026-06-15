@@ -25,10 +25,6 @@ class CanaryConfig(BaseModel):
 
     model_config = {"extra": "allow"}
 
-    # ---- Server ----
-    host: str = Field(default="127.0.0.1", description="Server bind address")
-    port: int = Field(default=8000, description="Server port", ge=1, le=65535)
-
     # ---- Logging ----
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO", description="Framework log level"

@@ -43,7 +43,6 @@ def find_hooks(instance: object) -> HookDict:
         Dictionary containing all lifecycle hooks with hook functions or None.
     """
     hooks: HookDict = {
-        LifecycleHook.AFTER_INIT: None,
         LifecycleHook.BEFORE_STARTUP: None,
         LifecycleHook.BEFORE_SHUTDOWN: None,
     }

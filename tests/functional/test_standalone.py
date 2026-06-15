@@ -22,7 +22,7 @@ class TestStandaloneService:
             pass
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # No routes defined, should 404
@@ -46,7 +46,7 @@ class TestStandaloneService:
                 return {"id": user_id, "name": "Alice"}
 
         app = UserService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Route works
@@ -83,7 +83,7 @@ class TestStandaloneService:
                 return {"result": a + b}
 
         app = MathService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/add?a=10&b=20")
@@ -107,7 +107,7 @@ class TestStandaloneService:
                 return item
 
         app = ShopService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/items", json={"name": "book", "price": 9.99})
@@ -127,7 +127,7 @@ class TestStandaloneService:
                 return {"result": num * num}
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/square?num=abc")
@@ -149,7 +149,7 @@ class TestStandaloneService:
                 return item
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -174,7 +174,7 @@ class TestStandaloneService:
                 return item
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/items", json={"name": "book"})
@@ -196,7 +196,7 @@ class TestStandaloneService:
                 return {"version": "v2"}
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # v2 route works
@@ -213,7 +213,7 @@ class TestStandaloneService:
             pass
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             for path in ("/docs", "/redoc", "/openapi.json"):

@@ -21,7 +21,6 @@ from canary_framework.common import (
     CanaryConfig,
     DependencyInjectionError,
     LifecycleAware,
-    LifecycleHook,
     ServiceMeta,
     get_module_meta,
     get_service_meta,
@@ -68,11 +67,11 @@ class ModuleBase(ServiceBase):
         self._cf_asgi_app: StarletteRouter | None = None
 
     @override
-    async def init(self) -> None:
+    def init(self) -> None:
         """初始化模块及其所有子服务。
 
         实例化所有服务、注入依赖、按拓扑顺序调用每个服务的init方法，
-        然后调用AFTER_INIT钩子。
+
 
         Raises:
             DependencyInjectionError: 如果服务实例为None。
@@ -80,7 +79,7 @@ class ModuleBase(ServiceBase):
         Initialize the module and all its child services.
 
         Instantiates all services, injects dependencies, calls init on each
-        child service in topological order, then invokes the AFTER_INIT hook.
+        child service in topological order.
 
         Raises:
             DependencyInjectionError: If a service instance is None.
@@ -89,7 +88,6 @@ class ModuleBase(ServiceBase):
 
         meta = get_module_meta(type(self))
         if meta is None or not meta.services:
-            await self._invoke_hook(LifecycleHook.AFTER_INIT)
             return
 
         ensure_logging("INFO")
@@ -129,9 +127,9 @@ class ModuleBase(ServiceBase):
             if child is None:
                 raise DependencyInjectionError(f"Service '{name}' instance is None during init.")
             if not isinstance(child, CanaryConfig):
-                await cast(LifecycleAware, child).init()
+                child.init()  # type: ignore[attr-defined]
 
-        await super().init()
+        super().init()
 
     @property
     def asgi_app(self) -> StarletteRouter:
