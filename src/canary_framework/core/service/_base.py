@@ -52,6 +52,25 @@ class ServiceBase:
         self._cf_root_routes: list[Route] | None = None
         super().__init__()
 
+    @property
+    def config(self) -> CanaryConfig | None:
+        """获取模块的配置对象。
+
+        由父模块在初始化时自动传播，无需通过 DI 注入。
+
+        Returns:
+            配置实例，如果模块未声明 config 则返回 None。
+
+        Get the module's config object.
+
+        Propagated automatically by the parent module during init,
+        no DI injection needed.
+
+        Returns:
+            The config instance, or None if no config is declared.
+        """
+        return getattr(self, "_cf_config", None)
+
     def init(self) -> None:
         """初始化服务。
 
@@ -250,9 +269,7 @@ class ServiceBase:
         if not route_infos:
             return
 
-        cfg = getattr(self, "config", None)
-        if not isinstance(cfg, CanaryConfig):
-            cfg = CanaryConfig()
+        cfg = self.config or CanaryConfig()
         schema = generate_openapi_schema(
             route_infos,
             title=cfg.openapi_title,

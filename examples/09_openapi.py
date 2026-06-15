@@ -75,9 +75,9 @@ class HealthService(ServiceBase):
 
 
 # ── Root Module ──────────────────────────────────────────
-@module(services=[AppConfig, PetService, HealthService])
+@module(config=AppConfig, services=[PetService, HealthService])
 class App(ModuleBase):
-    config: AppConfig
+    pass
 
 
 if __name__ == "__main__":

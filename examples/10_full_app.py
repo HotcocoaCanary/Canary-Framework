@@ -200,10 +200,9 @@ class CommentModule(ModuleBase):
 
 
 # ── Root Module ──────────────────────────────────────────
-@module(services=[AppConfig, Database, AuthModule, PostModule, CommentModule])
+@module(config=AppConfig, services=[Database, AuthModule, PostModule, CommentModule])
 class App(ModuleBase):
     router = Router(tags=["system"])
-    config: AppConfig
 
     @router.get("/", summary="API root")
     async def root(self) -> dict:

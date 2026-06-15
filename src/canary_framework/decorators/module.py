@@ -15,6 +15,7 @@ from canary_framework.common import (
     CF_NAME_ATTR,
     CF_SERVICE_MARKER,
     CF_SERVICE_META,
+    CanaryConfig,
     ModuleMeta,
     is_cf_service,
 )
@@ -24,6 +25,7 @@ from canary_framework.core import ModuleBase
 def module(
     *,
     services: list[type] | None = None,
+    config: type[CanaryConfig] | None = None,
 ) -> Callable[[type], type[ModuleBase]]:
     """声明一个类为模块。
 
@@ -33,6 +35,7 @@ def module(
 
     Args:
         services: 模块直接包含的子服务类列表。
+        config: 模块的配置类（如有）。
 
     Raises:
         TypeError: 如果services中的任何服务未被装饰。
@@ -48,6 +51,7 @@ def module(
 
     Args:
         services: Direct child services.
+        config: Optional config class for the module.
 
     Raises:
         TypeError: If any service in ``services`` is not decorated.
@@ -64,6 +68,11 @@ def module(
                 f"Did you forget 'class {cls.__name__}(ModuleBase):'?"
             )
         name = cls.__name__
+        if config is not None and not issubclass(config, CanaryConfig):
+            raise TypeError(
+                f"@module '{name}': config must inherit from CanaryConfig. "
+                f"Got '{config.__name__}'."
+            )
         for svc_cls in _services:
             if not is_cf_service(svc_cls):
                 raise TypeError(
@@ -71,7 +80,7 @@ def module(
                     f"is not decorated with @service or @module."
                 )
 
-        meta = ModuleMeta(name=name, services=_services)
+        meta = ModuleMeta(name=name, services=_services, config_cls=config)
         setattr(cls, CF_SERVICE_MARKER, True)
         setattr(cls, CF_SERVICE_META, meta)
         setattr(cls, CF_NAME_ATTR, name)

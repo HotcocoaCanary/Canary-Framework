@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, cast
 
+from canary_framework.common.config import CanaryConfig
+
 
 class LifecycleHook(StrEnum):
     """生命周期钩子阶段枚举。
@@ -55,14 +57,17 @@ class ServiceMeta:
 
     Attributes:
         name: 服务的全局唯一名称。
+        config_cls: 服务的配置类（如有）。
 
     Metadata stored on a @service-decorated class.
 
     Attributes:
         name: Globally unique service name.
+        config_cls: Optional config class for the service.
     """
 
     name: str
+    config_cls: type[CanaryConfig] | None = None
 
 
 @dataclass(slots=True)

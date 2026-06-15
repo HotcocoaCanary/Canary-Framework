@@ -40,9 +40,9 @@ class Api(ServiceBase):
 
 
 # ── Root Module ──────────────────────────────────────────
-@module(services=[AppConfig, Api])
+@module(config=AppConfig, services=[Api])
 class App(ModuleBase):
-    config: AppConfig  # injected via DI
+    pass
 
 
 if __name__ == "__main__":
