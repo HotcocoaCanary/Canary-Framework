@@ -21,7 +21,7 @@ class TestModuleBase:
     async def test_init_empty_module(self) -> None:
         """Test init on empty module."""
         module = ModuleBase()
-        await module.init()
+        module.init()
 
     def test_asgi_app_lazy_loaded(self) -> None:
         """Test asgi_app is lazily loaded."""

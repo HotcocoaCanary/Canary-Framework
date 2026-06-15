@@ -1,51 +1,34 @@
-"""Unit tests for decorators.lifecycle module."""
+"""Unit tests for lifecycle decorators."""
 
 import pytest
 
-from canary_framework.common import CF_HOOK_MARKER_MAP, LifecycleHook
-from canary_framework.decorators.lifecycle import (
-    after_init,
-    before_shutdown,
-    before_startup,
-)
+from canary_framework import before_shutdown, before_startup
 
 
 @pytest.mark.unit
 class TestLifecycleDecorators:
     """Tests for lifecycle decorators."""
 
-    def test_after_init_decorator(self) -> None:
-        """Test @after_init decorator."""
-
-        @after_init
-        def my_hook() -> None:
-            pass
-
-        assert getattr(my_hook, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_INIT], False) is True
-
     def test_before_startup_decorator(self) -> None:
         """Test @before_startup decorator."""
+        events: list[str] = []
 
         @before_startup
         def my_hook() -> None:
-            pass
+            events.append("startup")
 
-        assert getattr(my_hook, CF_HOOK_MARKER_MAP[LifecycleHook.BEFORE_STARTUP], False) is True
+        assert hasattr(my_hook, "__cf_before_startup__")
+        my_hook()
+        assert events == ["startup"]
 
     def test_before_shutdown_decorator(self) -> None:
         """Test @before_shutdown decorator."""
+        events: list[str] = []
 
         @before_shutdown
         def my_hook() -> None:
-            pass
+            events.append("shutdown")
 
-        assert getattr(my_hook, CF_HOOK_MARKER_MAP[LifecycleHook.BEFORE_SHUTDOWN], False) is True
-
-    def test_decorator_preserves_function(self) -> None:
-        """Test decorator preserves function."""
-
-        def original() -> str:
-            return "test"
-
-        decorated = after_init(original)
-        assert decorated() == "test"
+        assert hasattr(my_hook, "__cf_before_shutdown__")
+        my_hook()
+        assert events == ["shutdown"]

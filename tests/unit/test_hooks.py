@@ -15,12 +15,8 @@ class TestFindHooks:
 
         class TestClass:
             def __init__(self) -> None:
-                self.after_init_called = False
                 self.before_startup_called = False
                 self.before_shutdown_called = False
-
-            def after_init(self) -> None:
-                self.after_init_called = True
 
             def before_startup(self) -> None:
                 self.before_startup_called = True
@@ -28,8 +24,6 @@ class TestFindHooks:
             def before_shutdown(self) -> None:
                 self.before_shutdown_called = True
 
-        # Add markers
-        setattr(TestClass.after_init, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_INIT], True)
         setattr(TestClass.before_startup, CF_HOOK_MARKER_MAP[LifecycleHook.BEFORE_STARTUP], True)
         setattr(TestClass.before_shutdown, CF_HOOK_MARKER_MAP[LifecycleHook.BEFORE_SHUTDOWN], True)
 
@@ -37,12 +31,10 @@ class TestFindHooks:
         hooks = find_hooks(instance)
 
         assert isinstance(hooks, dict)
-        assert LifecycleHook.AFTER_INIT in hooks
         assert LifecycleHook.BEFORE_STARTUP in hooks
         assert LifecycleHook.BEFORE_SHUTDOWN in hooks
-        assert callable(hooks[LifecycleHook.AFTER_INIT])
-        assert callable(hooks[LifecycleHook.BEFORE_STARTUP])
-        assert callable(hooks[LifecycleHook.BEFORE_SHUTDOWN])
+        assert hooks[LifecycleHook.BEFORE_STARTUP] is not None
+        assert hooks[LifecycleHook.BEFORE_SHUTDOWN] is not None
 
     def test_find_no_hooks(self) -> None:
         """Test find no hooks returns dict with Nones."""
@@ -53,7 +45,6 @@ class TestFindHooks:
         instance = TestClass()
         hooks = find_hooks(instance)
 
-        assert hooks[LifecycleHook.AFTER_INIT] is None
         assert hooks[LifecycleHook.BEFORE_STARTUP] is None
         assert hooks[LifecycleHook.BEFORE_SHUTDOWN] is None
 
@@ -61,15 +52,11 @@ class TestFindHooks:
         """Test find only some hooks."""
 
         class TestClass:
-            def after_init(self) -> None:
-                pass
-
-        setattr(TestClass.after_init, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_INIT], True)
+            pass
 
         instance = TestClass()
         hooks = find_hooks(instance)
 
-        assert callable(hooks[LifecycleHook.AFTER_INIT])
         assert hooks[LifecycleHook.BEFORE_STARTUP] is None
         assert hooks[LifecycleHook.BEFORE_SHUTDOWN] is None
 
@@ -77,10 +64,7 @@ class TestFindHooks:
         """Test hooks from parent class are found."""
 
         class ParentClass:
-            def after_init(self) -> None:
-                pass
-
-        setattr(ParentClass.after_init, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_INIT], True)
+            pass
 
         class ChildClass(ParentClass):
             pass
@@ -88,4 +72,4 @@ class TestFindHooks:
         instance = ChildClass()
         hooks = find_hooks(instance)
 
-        assert callable(hooks[LifecycleHook.AFTER_INIT])
+        assert hooks[LifecycleHook.BEFORE_STARTUP] is None

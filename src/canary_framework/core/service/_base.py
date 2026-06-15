@@ -52,17 +52,12 @@ class ServiceBase:
         self._cf_root_routes: list[Route] | None = None
         super().__init__()
 
-    async def init(self) -> None:
+    def init(self) -> None:
         """初始化服务。
 
-        调用AFTER_INIT钩子。
-
         Initialize the service.
-
-        Invokes the AFTER_INIT hook.
         """
         _log.debug("Initializing service: %s", type(self).__name__)
-        await self._invoke_hook(LifecycleHook.AFTER_INIT)
 
     async def startup(self) -> None:
         """启动服务。

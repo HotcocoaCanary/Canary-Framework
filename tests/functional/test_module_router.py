@@ -26,7 +26,7 @@ class TestModuleRouter:
                 return {"status": "ok"}
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/status")
@@ -57,7 +57,7 @@ class TestModuleRouter:
                 return {"from": "root"}
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r1 = await client.get("/root")
@@ -97,7 +97,7 @@ class TestModuleRouter:
                 return {"from": "root"}
 
         app = RootModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r1 = await client.get("/root")
@@ -139,7 +139,7 @@ class TestModuleRouter:
                 return {"from": "root-module"}
 
         app = RootModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/root-status")).status_code == 200
@@ -169,7 +169,7 @@ class TestModuleRouter:
                 return {"mode": self.config_provider.get_mode()}
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/mode")

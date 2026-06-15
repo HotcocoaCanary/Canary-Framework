@@ -3,7 +3,6 @@
 import pytest
 
 from canary_framework.common import CF_HOOK_MARKER_MAP, LifecycleHook
-from canary_framework.common.errors import LifecycleHookError
 from canary_framework.core.service import ServiceBase
 
 
@@ -23,12 +22,8 @@ class TestServiceBase:
         class MyService(ServiceBase):
             def __init__(self) -> None:
                 super().__init__()
-                self.after_init_called = False
                 self.before_startup_called = False
                 self.before_shutdown_called = False
-
-            def after_init(self) -> None:
-                self.after_init_called = True
 
             def before_startup(self) -> None:
                 self.before_startup_called = True
@@ -36,14 +31,12 @@ class TestServiceBase:
             def before_shutdown(self) -> None:
                 self.before_shutdown_called = True
 
-        setattr(MyService.after_init, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_INIT], True)
         setattr(MyService.before_startup, CF_HOOK_MARKER_MAP[LifecycleHook.BEFORE_STARTUP], True)
         setattr(MyService.before_shutdown, CF_HOOK_MARKER_MAP[LifecycleHook.BEFORE_SHUTDOWN], True)
 
         service = MyService()
 
-        await service.init()
-        assert service.after_init_called
+        service.init()
 
         await service.startup()
         assert service.before_startup_called
@@ -58,28 +51,16 @@ class TestServiceBase:
         class MyService(ServiceBase):
             def __init__(self) -> None:
                 super().__init__()
-                self.after_init_called = False
-
-            async def after_init(self) -> None:
-                self.after_init_called = True
-
-        setattr(MyService.after_init, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_INIT], True)
 
         service = MyService()
-        await service.init()
-        assert service.after_init_called
+        service.init()
 
     @pytest.mark.asyncio
-    async def test_hook_error_wrapped(self) -> None:
-        """Test that hook errors are wrapped in LifecycleHookError."""
+    async def test_init_no_effect(self) -> None:
+        """Test that init() runs without errors when no hooks are registered."""
 
         class MyService(ServiceBase):
-            def after_init(self) -> None:
-                raise ValueError("Test error")
-
-        setattr(MyService.after_init, CF_HOOK_MARKER_MAP[LifecycleHook.AFTER_INIT], True)
+            pass
 
         service = MyService()
-
-        with pytest.raises(LifecycleHookError):
-            await service.init()
+        service.init()  # should not raise

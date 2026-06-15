@@ -49,7 +49,7 @@ class TestEdgeCases:
             missing_dep: _SomeDep
 
         app = ServiceWithDep()
-        await app.init()
+        app.init()
         assert getattr(app, "missing_dep", None) is None
 
     # ── Boolean query param edge cases ─────────────────────────────
@@ -67,7 +67,7 @@ class TestEdgeCases:
                 return {"flag": flag}
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             for val in ("true", "True", "TRUE", "tRuE"):
@@ -93,7 +93,7 @@ class TestEdgeCases:
                 return {"home": "yes"}
 
         app = RootService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/")
@@ -119,7 +119,7 @@ class TestEdgeCases:
                 return {"method": "post"}
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/item")
@@ -142,7 +142,7 @@ class TestEdgeCases:
                 return {"ok": "yes"}
 
         app = MyService()
-        await app.init()
+        app.init()
         await app.startup()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -170,7 +170,7 @@ class TestEdgeCases:
             pass
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/custom/test")
@@ -191,7 +191,7 @@ class TestEdgeCases:
                 return {"ok": "yes"}
 
         app = MyService()
-        await app.init()
+        app.init()
         await app.startup()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -230,7 +230,7 @@ class TestEdgeCases:
             pass
 
         app = Level1()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/Level2/Level3/LeafService/data")
@@ -267,7 +267,7 @@ class TestEdgeCases:
                 return Item(name="test")
 
         app = MyService()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/str")

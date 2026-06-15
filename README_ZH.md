@@ -16,10 +16,10 @@ Canary Framework 是一个**装饰器驱动**的 Python 异步服务框架。核
 
 ## 核心特性
 
-- **装饰器驱动** — 使用 `@service`、`@module`、`@router` 等装饰器，需显式基类继承
-- **注解式依赖注入** — 用类型注解声明依赖：`db: DatabaseService`，无样板代码
+- **装饰器驱动** — 使用 `@service` 和 `@module` 装饰器，需显式基类继承
+- **注解式依赖注入** — 用类型注解声明依赖：`db: Database`，无样板代码
 - **拓扑启动** — Kahn 算法确保依赖优先启动
-- **生命周期管理** — `@after_config`/`@after_init`/`@before_startup`/`@before_shutdown` 钩子
+- **生命周期管理** — `@after_init` / `@before_startup` / `@before_shutdown` 钩子
 - **ASGI 兼容** — 基于 Starlette，支持 uvicorn 等 ASGI 服务器
 - **模块化架构** — 层级化组合，模块可嵌套
 - **OpenAPI 支持** — 自动生成 Swagger UI 和 ReDoc 文档
@@ -33,37 +33,38 @@ pip install canary-framework
 ## 快速开始
 
 ```python
-from canary_framework import module, service, router, get, post, after_config
+from canary_framework import service, module, after_init
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 
 @service()
-class DatabaseService(ServiceBase):
-    @after_config
+class Database(ServiceBase):
+    @after_init
     async def connect(self):
         self.conn = "connected"
 
 @service()
 class UserService(ServiceBase):
-    db: DatabaseService
+    db: Database
 
     async def get_user(self, user_id: int):
         return {"id": user_id, "name": "Alice"}
 
-@router(prefix="/api", tags=["users"])
-class ApiRouter(RouterBase):
+@service()
+class Api(ServiceBase):
+    router = Router(prefix="/api", tags=["users"])
     user_service: UserService
 
-    @get("/users/{user_id}")
+    @router.get("/users/{user_id}")
     async def get_user(self, user_id: int) -> dict:
         return self.user_service.get_user(user_id)
 
-    @post("/users")
+    @router.post("/users")
     async def create_user(self, body: dict) -> dict:
         return {"id": 1, **body}
 
-@module(services=[DatabaseService, UserService, ApiRouter])
+@module(services=[Database, UserService, Api])
 class App(ModuleBase):
     pass
 
@@ -71,7 +72,6 @@ class App(ModuleBase):
 
 async def setup():
     app = App()
-    await app.configure()
     await app.init()
     return app
 
@@ -98,20 +98,23 @@ class AppConfig(CanaryConfig):
     openapi_title: str = "My API"
     log_level: str = "DEBUG"
 
+@module(services=[AppConfig, Database, Api])
+class App(ModuleBase):
+    config: AppConfig
+
 async def setup():
-    cfg = AppConfig()
     app = App()
-    await app.configure(cfg)
     await app.init()
-    return app, cfg
+    return app, app.config
 ```
 
 ## Web 示例（带 OpenAPI）
 
 ```python
-from canary_framework import module, router, get, post
+from canary_framework import service, module
+from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import RouterBase
+from canary_framework.core.router import Router
 from pydantic import BaseModel, Field
 
 class UserRequest(BaseModel):
@@ -123,21 +126,23 @@ class UserResponse(BaseModel):
     name: str
     email: str
 
-@router(prefix="/users", tags=["Users"])
-class UsersRouter(RouterBase):
-    @get("/", summary="获取用户列表", description="获取所有用户")
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/users", tags=["Users"])
+
+    @router.get("/", summary="获取用户列表", description="获取所有用户")
     async def list_users(self) -> list[UserResponse]:
         return []
 
-    @post("/",
+    @router.post("/",
           summary="创建用户",
           description="创建新用户",
           request_model=UserRequest,
           response_model=UserResponse)
-    async def create_user(self, user: UserRequest) -> UserResponse:
-        return UserResponse(id=1, name=user.name, email=user.email)
+    async def create_user(self, body: UserRequest) -> UserResponse:
+        return UserResponse(id=1, name=body.name, email=body.email)
 
-@module(services=[UsersRouter])
+@module(services=[Users])
 class App(ModuleBase):
     pass
 ```
@@ -158,18 +163,22 @@ src/canary_framework/
 │   ├── routing.py       # 路由路径解析
 │   └── types.py         # 数据类、标记和类型别名
 ├── core/                # 基类
-│   ├── module.py        # ModuleBase — 编排和依赖注入
-│   ├── service.py       # ServiceBase — 生命周期和 ASGI
-│   └── router.py        # RouterBase — ASGI 路由 + OpenAPI 文档
+│   ├── module/
+│   │   └── _base.py     # ModuleBase — 编排和依赖注入
+│   ├── service/
+│   │   ├── _base.py     # ServiceBase — 生命周期和 ASGI
+│   │   └── _hooks.py    # 生命周期钩子调用
+│   └── router/
+│       ├── _base.py     # Router — 路由收集和 ASGI 路由
+│       └── _utils.py    # 路由处理器构建
 ├── decorators/          # 装饰器实现
 │   ├── module.py        # @module
 │   ├── service.py       # @service
-│   ├── router.py        # @router, @get/@post/...
-│   └── lifecycle.py     # @after_config, @after_init 等
+│   ├── config.py        # @config
+│   └── lifecycle.py     # @after_init, @before_startup, @before_shutdown
 └── engine/              # 运行时引擎
     ├── registry.py      # 服务注册表
-    ├── injector.py      # 拓扑排序
-    ├── hooks.py         # 生命周期钩子发现
+    ├── dependencies.py  # 拓扑排序 + resolve_deps
     ├── openapi.py       # OpenAPI schema 生成
     ├── params.py        # 路由参数解析
     └── logging.py       # 框架日志
@@ -179,37 +188,30 @@ src/canary_framework/
 
 ```
 @service() class MyService:
-    db: DatabaseService      ←  1. 用户通过类型注解声明依赖
-
-    ↓ configure 阶段
+    db: Database      ←  1. 用户通过类型注解声明依赖
 
 resolve_deps(MyService)
-    → get_type_hints() 读取 {db: DatabaseService}
+    → get_type_hints() 读取 {db: Database}
     → 按 CF_SERVICE_MARKER 过滤
-    → 返回 {"db": DatabaseService}
+    → 返回 {"db": Database}
 
-    ↓ 注册：递归注册 DatabaseService
-    ↓ 拓扑排序：构建依赖图
+    ↓ 拓扑排序：Kahn 算法构建依赖顺序
     ↓ 实例化：按顺序创建实例
     ↓ 注入：
 
-setattr(instance, "db", db_instance)   ←  3. 按注解键名注入
+setattr(instance, "db", db_instance)   ←  2. 按注解键名注入
 ```
 
 ### 生命周期流程
 
 ```
-app.configure(config_instance)
+app.init()
   ├── 注册所有服务及传递依赖
   ├── 拓扑排序 (Kahn 算法)
   ├── 实例化服务
   ├── 注入依赖 (注解驱动)
-  ├── 按拓扑顺序调用每个服务的 configure()
-  └── 调用 @after_config 钩子
-
-app.init()
-  ├── 调用 @after_init 钩子
-  └── 按拓扑顺序调用每个服务的 init()
+  ├── 按拓扑顺序调用每个服务的 init()
+  └── 调用 @after_init 钩子
 
 app.startup()
   ├── 调用 @before_startup 钩子

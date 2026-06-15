@@ -17,19 +17,16 @@ class LifecycleHook(StrEnum):
     """生命周期钩子阶段枚举。
 
     定义了框架支持的三个生命周期钩子阶段：
-    - AFTER_INIT: 初始化完成后
     - BEFORE_STARTUP: 启动前
     - BEFORE_SHUTDOWN: 关闭前
 
     Lifecycle phases for hook registration.
 
     Defines three lifecycle hook phases supported by the framework:
-    - AFTER_INIT: After initialization is complete
     - BEFORE_STARTUP: Before startup
     - BEFORE_SHUTDOWN: Before shutdown
     """
 
-    AFTER_INIT = "after_init"
     BEFORE_STARTUP = "before_startup"
     BEFORE_SHUTDOWN = "before_shutdown"
 
@@ -46,16 +43,8 @@ Represents a function that can accept any arguments and return any type.
 
 
 class LifecycleAware(Protocol):
-    """生命周期感知接口。
+    """生命周期感知接口。"""
 
-    定义服务和模块必须实现的生命周期方法。
-
-    Lifecycle-aware interface.
-
-    Defines lifecycle methods that services and modules must implement.
-    """
-
-    async def init(self) -> None: ...
     async def startup(self) -> None: ...
     async def shutdown(self) -> None: ...
 
@@ -163,7 +152,6 @@ class RouteInfo:
 # 生命周期钩子标记映射
 # Lifecycle hook marker mapping
 CF_HOOK_MARKER_MAP: dict[LifecycleHook, str] = {
-    LifecycleHook.AFTER_INIT: "__cf_after_init__",
     LifecycleHook.BEFORE_STARTUP: "__cf_before_startup__",
     LifecycleHook.BEFORE_SHUTDOWN: "__cf_before_shutdown__",
 }

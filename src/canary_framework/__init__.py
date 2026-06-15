@@ -2,7 +2,6 @@
 
 Core exports:
     - Decorators: :func:`service`, :func:`module`,
-      :func:`after_init`, :func:`before_startup`, :func:`before_shutdown`,
       :class:`Router`
     - Lifecycle:  :class:`LifecycleHook`
     - Exceptions: :class:`CanaryFrameworkError` and subclasses
@@ -24,7 +23,6 @@ from canary_framework.common import (
 )
 from canary_framework.core.router import Router
 from canary_framework.decorators import (
-    after_init,
     before_shutdown,
     before_startup,
     config,
@@ -43,7 +41,6 @@ __all__ = [
     "Router",
     "ServiceNotFoundError",
     "__version__",
-    "after_init",
     "before_shutdown",
     "before_startup",
     "config",

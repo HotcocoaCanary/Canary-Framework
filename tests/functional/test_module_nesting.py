@@ -34,7 +34,7 @@ class TestModuleNesting:
             pass
 
         app = RootModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/SubModule/ApiService/data")
@@ -65,7 +65,7 @@ class TestModuleNesting:
             pass
 
         app = RootModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/MidModule/DeepService/deep")
@@ -104,7 +104,7 @@ class TestModuleNesting:
             pass
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r1 = await client.get("/UserModule/UserService/me")
@@ -144,7 +144,7 @@ class TestModuleNesting:
             pass
 
         app = RootModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/ChildModule/ConsumerService/data")
@@ -172,7 +172,7 @@ class TestModuleNesting:
             pass
 
         app = RootModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/LeafService/leaf")
@@ -195,7 +195,7 @@ class TestModuleNesting:
             pass
 
         app = RootModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             for path in ("/docs", "/redoc", "/openapi.json"):

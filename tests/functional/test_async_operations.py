@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from canary_framework import after_init, before_startup, module, service
+from canary_framework import before_startup, module, service
 from canary_framework.core.module import ModuleBase
 from canary_framework.core.router import Router
 from canary_framework.core.service import ServiceBase
@@ -23,7 +23,6 @@ class TestAsyncOperations:
 
         @service()
         class AsyncService(ServiceBase):
-            @after_init
             async def async_init(self) -> None:
                 await asyncio.sleep(0.01)
                 events.append("async-init")
@@ -38,10 +37,9 @@ class TestAsyncOperations:
             pass
 
         app = MyModule()
-        await app.init()
+        app.init()
         await app.startup()
 
-        assert "async-init" in events
         assert "async-startup" in events
 
     @pytest.mark.asyncio
@@ -75,7 +73,7 @@ class TestAsyncOperations:
             pass
 
         app = CounterApp()
-        await app.init()
+        app.init()
 
         # Make concurrent requests
         async with AsyncClient(
@@ -116,7 +114,7 @@ class TestAsyncOperations:
             pass
 
         app = TaskApp()
-        await app.init()
+        app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),

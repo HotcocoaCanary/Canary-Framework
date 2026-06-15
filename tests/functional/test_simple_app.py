@@ -5,7 +5,6 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
 from canary_framework import (
-    after_init,
     before_startup,
     module,
     service,
@@ -36,6 +35,8 @@ class TestSimpleApp:
                 super().__init__()
                 self.todos: list[TodoItem] = []
                 self.next_id = 1
+                self.create(TodoItem(title="Learn Canary", completed=True))
+                self.create(TodoItem(title="Build an app", completed=False))
 
             def get_all(self) -> list[TodoItem]:
                 return self.todos
@@ -70,11 +71,10 @@ class TestSimpleApp:
         # Define the main module
         @module(services=[TodoRouter])
         class TodoApp(ModuleBase):
-            @after_init
             async def setup_test_data(self) -> None:
                 # Add some test data
                 self.TodoRouter.todo_service.create(  # type: ignore[attr-defined]
-                    TodoItem(title="Learn Canary Framework", completed=True)
+                    TodoItem(title="Learn Canary", completed=True)
                 )
                 self.TodoRouter.todo_service.create(  # type: ignore[attr-defined]
                     TodoItem(title="Build awesome app", completed=False)
@@ -86,7 +86,7 @@ class TestSimpleApp:
 
         # Create and configure the app
         app = TodoApp()
-        await app.init()
+        app.init()
 
         # Test the API endpoints
         async with AsyncClient(
@@ -98,7 +98,7 @@ class TestSimpleApp:
             assert response.status_code == 200
             todos = response.json()
             assert len(todos) == 2
-            assert todos[0]["title"] == "Learn Canary Framework"
+            assert todos[0]["title"] == "Learn Canary"
             assert todos[0]["completed"] is True
 
             response = await client.post(
@@ -130,7 +130,7 @@ class TestSimpleApp:
             pass
 
         app = MyApp()
-        await app.init()
+        app.init()
         await app.startup()
 
         async with AsyncClient(

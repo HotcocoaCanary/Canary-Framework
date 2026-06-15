@@ -22,7 +22,7 @@ class TestModuleFlat:
             pass
 
         app = EmptyModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/docs")
@@ -41,7 +41,7 @@ class TestModuleFlat:
             pass
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/docs")
@@ -64,7 +64,7 @@ class TestModuleFlat:
             pass
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Route works
@@ -103,7 +103,7 @@ class TestModuleFlat:
             pass
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Both routes work
@@ -147,7 +147,7 @@ class TestModuleFlat:
             pass
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/ApiService/count")
@@ -179,7 +179,7 @@ class TestModuleFlat:
             pass
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/ApiService/has-dep")
@@ -209,7 +209,7 @@ class TestModuleFlat:
             pass
 
         app = AppModule()
-        await app.init()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/MainService/val")
