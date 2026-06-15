@@ -24,27 +24,18 @@ class MyService(ServiceBase):
 
 ### 2. Initialization
 
-The `init()` method is called after all services are instantiated:
+The `init()` method is called after all services are instantiated. Override it to set up connections, seed data, or perform any post-instantiation setup:
 
 ```python
-@service()
-class MyService(ServiceBase):
-    async def init(self):
-        pass
-```
-
-Use `@after_init` hook to run code after initialization:
-
-```python
-from canary_framework import after_init
-
-from canary_framework import after_init, service
+from canary_framework import service
 from canary_framework.core.service import ServiceBase
 
 @service()
 class UserService(ServiceBase):
-    @after_init
-    async def seed_default_users(self):
+    db: Database
+
+    async def init(self):
+        await super().init()
         if not await self.db.has_users():
             await self.db.create_default_users()
 ```
@@ -98,11 +89,10 @@ class Database(ServiceBase):
 
 ## Lifecycle Hooks
 
-Three decorators are available for hooking into the lifecycle:
+Two decorators are available for hooking into the lifecycle:
 
 | Decorator | Phase | Timing |
 |-----------|-------|--------|
-| `@after_init` | Initialization | After `init()` is called |
 | `@before_startup` | Startup | Before `startup()` is called |
 | `@before_shutdown` | Shutdown | Before `shutdown()` is called |
 
@@ -113,7 +103,7 @@ Hooks can be either synchronous or asynchronous:
 ```python
 @service()
 class MyService(ServiceBase):
-    @after_init
+    @before_startup
     async def async_hook(self):
         await some_async_operation()
 ```
@@ -151,7 +141,7 @@ The execution order follows topological sort:
 ```python
 from canary_framework import (
     service, module,
-    after_init, before_startup, before_shutdown
+    before_startup, before_shutdown
 )
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
@@ -160,9 +150,9 @@ calls = []
 
 @service()
 class A(ServiceBase):
-    @after_init
-    def init_a(self):
-        calls.append("A: after_init")
+    async def init(self):
+        await super().init()
+        calls.append("A: init")
 
     @before_startup
     def startup_a(self):
@@ -176,9 +166,9 @@ class A(ServiceBase):
 class B(ServiceBase):
     a: A  # B depends on A
 
-    @after_init
-    def init_b(self):
-        calls.append("B: after_init")
+    async def init(self):
+        await super().init()
+        calls.append("B: init")
 
     @before_startup
     def startup_b(self):
@@ -199,8 +189,8 @@ await app.startup()
 await app.shutdown()
 
 # Resulting order:
-# A: after_init
-# B: after_init
+# A: init
+# B: init
 # A: before_startup
 # B: before_startup
 # B: before_shutdown
@@ -218,7 +208,7 @@ from canary_framework.core.module import ModuleBase
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8000
@@ -252,7 +242,7 @@ Config is a regular DI service. Add it to your module and inject it:
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     database_url: str = "sqlite:///mydb.db"
     debug: bool = True
@@ -261,8 +251,8 @@ class AppConfig(CanaryConfig):
 class Database(ServiceBase):
     config: AppConfig
 
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         url = self.config.database_url
         self.connection = await connect(url)
 
@@ -294,7 +284,7 @@ await app.init()
 framework log level:
 
 ```python
-@config
+@config()
 class AppConfig(CanaryConfig):
     log_level: str = "DEBUG"  # Show debug-level framework logs
     # ... other config fields ...
@@ -320,7 +310,7 @@ except LifecycleHookError as e:
 
 ## Best Practices
 
-1. **Use `@after_init` for connections and data setup**: Establish connections and set up initial data during init
+1. **Override `init()` for connections and data setup**: Establish connections and set up initial data during init
 2. **Use `@before_startup` for validation**: Verify everything is ready before serving
 3. **Use `@before_shutdown` for cleanup**: Gracefully close connections and save state
 4. **Keep hooks focused**: Each hook should do one thing well

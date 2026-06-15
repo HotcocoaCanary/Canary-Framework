@@ -24,25 +24,18 @@ class MyService(ServiceBase):
 
 ### 2. 初始化
 
-所有服务实例化后调用 `init()` 方法：
+所有服务实例化后调用 `init()` 方法。重写它来建立连接、填充种子数据或执行任何实例化后的设置：
 
 ```python
-@service()
-class MyService(ServiceBase):
-    async def init(self):
-        pass
-```
-
-使用 `@after_init` 钩子在初始化后运行代码：
-
-```python
-from canary_framework import after_init, service
+from canary_framework import service
 from canary_framework.core.service import ServiceBase
 
 @service()
 class UserService(ServiceBase):
-    @after_init
-    async def seed_default_users(self):
+    db: Database
+
+    async def init(self):
+        await super().init()
         if not await self.db.has_users():
             await self.db.create_default_users()
 ```
@@ -96,11 +89,10 @@ class Database(ServiceBase):
 
 ## 生命周期钩子
 
-有三个装饰器可用于钩住生命周期：
+有两个装饰器可用于钩住生命周期：
 
 | 装饰器 | 阶段 | 时机 |
 |-----------|-------|--------|
-| `@after_init` | 初始化 | `init()` 调用后 |
 | `@before_startup` | 启动 | `startup()` 调用前 |
 | `@before_shutdown` | 关闭 | `shutdown()` 调用前 |
 
@@ -111,7 +103,7 @@ class Database(ServiceBase):
 ```python
 @service()
 class MyService(ServiceBase):
-    @after_init
+    @before_startup
     async def async_hook(self):
         await some_async_operation()
 ```
@@ -149,7 +141,7 @@ await app.shutdown()
 ```python
 from canary_framework import (
     service, module,
-    after_init, before_startup, before_shutdown
+    before_startup, before_shutdown
 )
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
@@ -158,9 +150,9 @@ calls = []
 
 @service()
 class A(ServiceBase):
-    @after_init
-    def init_a(self):
-        calls.append("A: after_init")
+    async def init(self):
+        await super().init()
+        calls.append("A: init")
 
     @before_startup
     def startup_a(self):
@@ -174,9 +166,9 @@ class A(ServiceBase):
 class B(ServiceBase):
     a: A  # B 依赖 A
 
-    @after_init
-    def init_b(self):
-        calls.append("B: after_init")
+    async def init(self):
+        await super().init()
+        calls.append("B: init")
 
     @before_startup
     def startup_b(self):
@@ -197,8 +189,8 @@ await app.startup()
 await app.shutdown()
 
 # 结果顺序：
-# A: after_init
-# B: after_init
+# A: init
+# B: init
 # A: before_startup
 # B: before_startup
 # B: before_shutdown
@@ -216,7 +208,7 @@ from canary_framework.core.module import ModuleBase
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8000
@@ -250,7 +242,7 @@ Config 是普通的 DI 服务。将其加入模块并通过注解注入：
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     database_url: str = "sqlite:///mydb.db"
     debug: bool = True
@@ -259,8 +251,8 @@ class AppConfig(CanaryConfig):
 class Database(ServiceBase):
     config: AppConfig
 
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         url = self.config.database_url
         self.connection = await connect(url)
 
@@ -293,7 +285,7 @@ await app.init()
 框架日志级别：
 
 ```python
-@config
+@config()
 class AppConfig(CanaryConfig):
     log_level: str = "DEBUG"  # 显示 debug 级别的框架日志
     # ... 其他配置字段 ...
@@ -319,7 +311,7 @@ except LifecycleHookError as e:
 
 ## 最佳实践
 
-1. **使用 `@after_init` 建立连接和设置数据**：初始化期间建立连接和设置初始数据
+1. **重写 `init()` 建立连接和设置数据**：初始化期间建立连接和设置初始数据
 2. **使用 `@before_startup` 进行验证**：提供服务前验证一切就绪
 3. **使用 `@before_shutdown` 进行清理**：优雅关闭连接并保存状态
 4. **保持钩子专注**：每个钩子应该只做好一件事

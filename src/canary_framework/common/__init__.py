@@ -1,6 +1,6 @@
 """Framework-wide shared infrastructure — types, errors, and markers."""
 
-from canary_framework.common.config import CF_CONFIG_MARKER, CanaryConfig
+from canary_framework.common.config import CanaryConfig
 from canary_framework.common.errors import (
     CanaryFrameworkError,
     CircularDependencyError,
@@ -25,10 +25,10 @@ from canary_framework.common.types import (
     get_service_meta,
     is_cf_module,
     is_cf_service,
+    unwrap_optional,
 )
 
 __all__ = [
-    "CF_CONFIG_MARKER",
     "CF_HOOK_MARKER_MAP",
     "CF_NAME_ATTR",
     "CF_SERVICE_MARKER",
@@ -51,4 +51,5 @@ __all__ = [
     "get_service_meta",
     "is_cf_module",
     "is_cf_service",
+    "unwrap_optional",
 ]

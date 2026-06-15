@@ -8,7 +8,7 @@ Complete API documentation for Canary Framework.
 from canary_framework import (
     # Decorators
     config, service, module,
-    after_init, before_startup, before_shutdown,
+    before_startup, before_shutdown,
 
     # Router
     Router,
@@ -186,7 +186,7 @@ The config class must inherit from `CanaryConfig`. Sets `CF_CONFIG_MARKER` on th
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -201,21 +201,20 @@ Mark methods as lifecycle hooks.
 
 **Signatures:**
 ```python
-def after_init(func) -> HookFunction
 def before_startup(func) -> HookFunction
 def before_shutdown(func) -> HookFunction
 ```
 
 **Example:**
 ```python
-from canary_framework import service, after_init, before_shutdown
+from canary_framework import service, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
 class Database(ServiceBase):
-    @after_init
-    async def connect(self):
-        pass
+    async def init(self):
+        await super().init()
+        # connection setup
 
     @before_shutdown
     async def disconnect(self):
@@ -271,7 +270,7 @@ from canary_framework.core.service import ServiceBase
 - `_cf_parent_registry`: Parent registry reference (set by parent module)
 
 **Methods:**
-- `async init()`: Initialize the service. Invokes `AFTER_INIT` hook.
+- `async init()`: Initialize the service. Sets up logging and configs.
 - `async startup()`: Start the service. Invokes `BEFORE_STARTUP` hook.
 - `async shutdown()`: Shutdown the service. Invokes `BEFORE_SHUTDOWN` hook.
 - `async __call__(scope, receive, send)`: ASGI 3 interface. Handles lifespan events and delegates other requests to `self.asgi_app`.
@@ -356,7 +355,6 @@ class Api(ServiceBase):
 Lifecycle hook phases.
 
 **Values:**
-- `LifecycleHook.AFTER_INIT`: `"after_init"`
 - `LifecycleHook.BEFORE_STARTUP`: `"before_startup"`
 - `LifecycleHook.BEFORE_SHUTDOWN`: `"before_shutdown"`
 
@@ -556,7 +554,6 @@ Decorated classes have these internal attributes set:
 - `__cf_name__`: Auto-generated name (e.g., `"DatabaseService"`)
 
 Hook methods have:
-- `__cf_after_init__`: `True`
 - `__cf_before_startup__`: `True`
 - `__cf_before_shutdown__`: `True`
 
@@ -587,7 +584,6 @@ Key changes from the old API:
 | `data = await request.json()` | `def handler(self, body: MyModel)` with `request_model` |
 | `uvicorn.run("main:App")` | `uvicorn.run(app, lifespan="on")` |
 | Plain dict passed to `configure()` | `CanaryConfig` subclass required |
-| `@after_config` | `@after_init` — configure phase removed |
 | `await app.configure(cfg)` | `await app.init()` — single init call |
 | `make_subclass()` utility | Removed — explicit inheritance |
 | `CF_MODULE_MARKER` / `CF_ROUTER_MARKER` | Removed — `isinstance` checks on meta types |

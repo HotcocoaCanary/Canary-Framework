@@ -10,7 +10,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol, cast
+from types import UnionType
+from typing import Any, Protocol, cast, get_args, get_origin
 
 from canary_framework.common.config import CanaryConfig
 
@@ -18,13 +19,13 @@ from canary_framework.common.config import CanaryConfig
 class LifecycleHook(StrEnum):
     """生命周期钩子阶段枚举。
 
-    定义了框架支持的三个生命周期钩子阶段：
+    定义了框架支持的两个生命周期钩子阶段：
     - BEFORE_STARTUP: 启动前
     - BEFORE_SHUTDOWN: 关闭前
 
     Lifecycle phases for hook registration.
 
-    Defines three lifecycle hook phases supported by the framework:
+    Defines two lifecycle hook phases supported by the framework:
     - BEFORE_STARTUP: Before startup
     - BEFORE_SHUTDOWN: Before shutdown
     """
@@ -49,6 +50,28 @@ class LifecycleAware(Protocol):
 
     async def startup(self) -> None: ...
     async def shutdown(self) -> None: ...
+
+
+def unwrap_optional(tp: Any) -> tuple[Any, bool]:
+    """从 Optional[T] 或 T | None 中提取内部类型 T。
+
+    支持 typing.Optional (typing.Union[T, None]) 和 Python 3.10+ 的 T | None。
+    返回 (inner_type, is_nullable)。
+
+    Extract inner type from Optional[T] or T | None.
+
+    Supports both typing.Optional and T | None syntax.
+    Returns (inner_type, is_nullable).
+    """
+    import typing as _typing
+
+    origin = get_origin(tp)
+    if origin is UnionType or origin is _typing.Union:
+        args = get_args(tp)
+        inner = [a for a in args if a is not type(None)]
+        if len(inner) == 1:
+            return inner[0], True
+    return tp, False
 
 
 @dataclass(slots=True)
@@ -264,4 +287,5 @@ __all__ = [
     "get_service_meta",
     "is_cf_module",
     "is_cf_service",
+    "unwrap_optional",
 ]

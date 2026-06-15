@@ -13,9 +13,6 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 
 from canary_framework.common import RouteInfo
-from canary_framework.common.logging import get_logger
-
-_log = get_logger("router")
 
 _PARAM_PATTERN = r"\{(\w+)\}"
 

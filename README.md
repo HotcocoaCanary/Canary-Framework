@@ -19,7 +19,7 @@ Canary Framework is a **decorator-driven** async service framework for Python. C
 - **Decorator-Driven** — Use `@service` and `@module` decorators with explicit base class inheritance
 - **Annotation-Based DI** — Declare dependencies with type annotations: `db: DatabaseService`, no boilerplate
 - **Topological Startup** — Kahn's algorithm ensures dependencies start first
-- **Lifecycle Management** — `@after_init` / `@before_startup` / `@before_shutdown` hooks
+- **Lifecycle Management** — `@before_startup` / `@before_shutdown` hooks
 - **ASGI Compatible** — Built on Starlette, works with uvicorn and other ASGI servers
 - **Modular Architecture** — Hierarchical composition with nested modules
 - **OpenAPI Support** — Auto-generated Swagger UI and ReDoc documentation
@@ -33,15 +33,15 @@ pip install canary-framework
 ## Quick Start
 
 ```python
-from canary_framework import service, module, after_init
+from canary_framework import service, module
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
 from canary_framework.core.router import Router
 
 @service()
 class Database(ServiceBase):
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         self.conn = "connected"
 
 @service()
@@ -91,7 +91,7 @@ Use `@config` with `CanaryConfig` to customize framework behavior:
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -159,8 +159,9 @@ Access automatically generated documentation:
 ```
 src/canary_framework/
 ├── common/              # Shared infrastructure
+│   ├── config.py        # CanaryConfig
 │   ├── errors.py        # Framework exceptions
-│   ├── routing.py       # Route path parsing
+│   ├── logging.py       # Framework logging
 │   └── types.py         # Data classes, markers, and type aliases
 ├── core/                # Base classes
 │   ├── module/
@@ -175,13 +176,12 @@ src/canary_framework/
 │   ├── module.py        # @module
 │   ├── service.py       # @service
 │   ├── config.py        # @config
-│   └── lifecycle.py     # @after_init, @before_startup, @before_shutdown
+│   └── lifecycle.py     # @before_startup, @before_shutdown
 └── engine/              # Runtime engine
     ├── registry.py      # Service registry
     ├── dependencies.py  # Topological sort + resolve_deps
     ├── openapi.py       # OpenAPI schema generation
-    ├── params.py        # Route parameter resolution
-    └── logging.py       # Framework logging
+    └── params.py        # Route parameter resolution
 ```
 
 ### Dependency Injection Flow
@@ -211,7 +211,6 @@ app.init()
   ├── Instantiate services
   ├── Inject dependencies (annotation-driven)
   ├── Call init() on each service (topological order)
-  └── Invoke @after_init hooks
 
 app.startup()
   ├── Invoke @before_startup hook
@@ -221,6 +220,23 @@ app.shutdown()
   ├── Invoke @before_shutdown hook
   └── Call shutdown() on each service (reverse topological order)
 ```
+
+## Examples
+
+The [examples/](./examples/) directory contains runnable, tested examples:
+
+| File | Description |
+|---|---|
+| `01_standalone.py` | Single service with Router, standalone mode |
+| `02_module_compose.py` | Module composing multiple services |
+| `03_nested_modules.py` | Nested module hierarchy |
+| `04_module_router.py` | Module with its own Router |
+| `05_config.py` | Configuration with @config() + CanaryConfig |
+| `06_lifecycle.py` | Lifecycle hooks (before_startup, before_shutdown) |
+| `07_validation.py` | Pydantic request/response validation |
+| `08_parameters.py` | Path, query, body parameter binding |
+| `09_openapi.py` | OpenAPI title/version/description customization |
+| `10_full_app.py` | Complete blog API with nested modules |
 
 ## Testing
 

@@ -70,8 +70,7 @@ def module(
         name = cls.__name__
         if config is not None and not issubclass(config, CanaryConfig):
             raise TypeError(
-                f"@module '{name}': config must inherit from CanaryConfig. "
-                f"Got '{config.__name__}'."
+                f"@module '{name}': config must inherit from CanaryConfig. Got '{config.__name__}'."
             )
         for svc_cls in _services:
             if not is_cf_service(svc_cls):

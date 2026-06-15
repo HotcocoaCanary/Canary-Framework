@@ -8,7 +8,7 @@ Canary Framework 的完整 API 文档。
 from canary_framework import (
     # 装饰器
     config, service, module,
-    after_init, before_startup, before_shutdown,
+    before_startup, before_shutdown,
 
     # Router
     Router,
@@ -186,7 +186,7 @@ def config() -> Callable[[type], type[CanaryConfig]]
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -201,21 +201,20 @@ class AppConfig(CanaryConfig):
 
 **签名：**
 ```python
-def after_init(func) -> HookFunction
 def before_startup(func) -> HookFunction
 def before_shutdown(func) -> HookFunction
 ```
 
 **示例：**
 ```python
-from canary_framework import service, after_init, before_shutdown
+from canary_framework import service, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
 class Database(ServiceBase):
-    @after_init
-    async def connect(self):
-        pass
+    async def init(self):
+        await super().init()
+        # 建立连接
 
     @before_shutdown
     async def disconnect(self):
@@ -271,7 +270,7 @@ from canary_framework.core.service import ServiceBase
 - `_cf_parent_registry`：父注册表引用（由父模块设置）
 
 **方法：**
-- `async init()`：初始化服务。调用 `AFTER_INIT` 钩子。
+- `async init()`：初始化服务。设置日志和配置。
 - `async startup()`：启动服务。调用 `BEFORE_STARTUP` 钩子。
 - `async shutdown()`：关闭服务。调用 `BEFORE_SHUTDOWN` 钩子。
 - `async __call__(scope, receive, send)`：ASGI 3 接口。处理 lifespan 事件并将其他请求委托给 `self.asgi_app`。
@@ -356,7 +355,6 @@ class Api(ServiceBase):
 生命周期钩子阶段。
 
 **值：**
-- `LifecycleHook.AFTER_INIT`：`"after_init"`
 - `LifecycleHook.BEFORE_STARTUP`：`"before_startup"`
 - `LifecycleHook.BEFORE_SHUTDOWN`：`"before_shutdown"`
 
@@ -556,7 +554,6 @@ Canary Framework 的当前版本。
 - `__cf_name__`：自动生成的名称（如 `"DatabaseService"`）
 
 钩子方法具有：
-- `__cf_after_init__`：`True`
 - `__cf_before_startup__`：`True`
 - `__cf_before_shutdown__`：`True`
 
@@ -587,7 +584,6 @@ Canary Framework 的当前版本。
 | `data = await request.json()` | `def handler(self, body: MyModel)` 配合 `request_model` |
 | `uvicorn.run("main:App")` | `uvicorn.run(app, lifespan="on")` |
 | 普通 dict 传递给 `configure()` | 需要 `CanaryConfig` 子类 |
-| `@after_config` | `@after_init` — configure 阶段已移除 |
 | `await app.configure(cfg)` | `await app.init()` — 单一 init 调用 |
 | `make_subclass()` 工具 | 已移除 — 显式继承 |
 | `CF_MODULE_MARKER` / `CF_ROUTER_MARKER` | 已移除 — 对元类型的 `isinstance` 检查 |

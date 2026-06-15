@@ -40,8 +40,9 @@ class Database(ServiceBase):
 class Api(ServiceBase):
     router = Router(prefix="/api")
 
+    @before_startup
     async def load_routes(self):
-        print("[Api] after_init: routes configured")
+        print("[Api] before_startup: routes ready")
 
     @router.get("/status")
     async def status(self) -> dict:

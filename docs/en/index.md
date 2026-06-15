@@ -26,15 +26,15 @@ Lightweight, decorator-driven Python async service framework. Core philosophy: *
 The smallest unit. Encapsulates business logic with lifecycle hooks and annotation-driven dependency injection.
 
 ```python
-from canary_framework import service, after_init, before_shutdown
+from canary_framework import service, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
 class Database(ServiceBase):
     db_url: str = "sqlite:///app.db"
 
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         self.connection = await create_pool(self.db_url)
 
     @before_shutdown
@@ -93,7 +93,7 @@ Pydantic-based configuration with sensible defaults and type validation. Extra f
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -121,7 +121,7 @@ A complete minimal working example: Database service + PostService + a service w
 from pydantic import BaseModel
 from canary_framework import (
     service, module, config,
-    before_shutdown, after_init,
+    before_shutdown, 
 )
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
@@ -139,8 +139,8 @@ class Database(ServiceBase):
     def __init__(self):
         self.connected = False
 
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         self.connected = True
 
     @before_shutdown
@@ -157,8 +157,8 @@ class PostService(ServiceBase):
     def __init__(self):
         self.posts = []
 
-    @after_init
-    async def seed(self):
+    async def init(self):
+        await super().init()
         self.posts = [{"id": 1, "title": "Hello", "content": "World"}]
 
     async def list_posts(self):
@@ -197,7 +197,7 @@ class PostRouter(ServiceBase):
 class BlogApp(ModuleBase):
     config: AppConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8000
@@ -229,7 +229,7 @@ src/canary_framework/
 ├── common/
 │   ├── config.py
 │   ├── types.py
-│   ├── routing.py
+│   ├── logging.py
 │   └── errors.py
 ├── core/
 │   ├── module/
@@ -249,8 +249,7 @@ src/canary_framework/
     ├── registry.py
     ├── dependencies.py
     ├── openapi.py
-    ├── params.py
-    └── logging.py
+    └── params.py
 ```
 
 ## Design Principles

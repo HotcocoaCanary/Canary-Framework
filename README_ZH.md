@@ -19,7 +19,7 @@ Canary Framework 是一个**装饰器驱动**的 Python 异步服务框架。核
 - **装饰器驱动** — 使用 `@service` 和 `@module` 装饰器，需显式基类继承
 - **注解式依赖注入** — 用类型注解声明依赖：`db: Database`，无样板代码
 - **拓扑启动** — Kahn 算法确保依赖优先启动
-- **生命周期管理** — `@after_init` / `@before_startup` / `@before_shutdown` 钩子
+- **生命周期管理** — `@before_startup` / `@before_shutdown` 钩子
 - **ASGI 兼容** — 基于 Starlette，支持 uvicorn 等 ASGI 服务器
 - **模块化架构** — 层级化组合，模块可嵌套
 - **OpenAPI 支持** — 自动生成 Swagger UI 和 ReDoc 文档
@@ -33,15 +33,15 @@ pip install canary-framework
 ## 快速开始
 
 ```python
-from canary_framework import service, module, after_init
+from canary_framework import service, module
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
 from canary_framework.core.router import Router
 
 @service()
 class Database(ServiceBase):
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         self.conn = "connected"
 
 @service()
@@ -91,7 +91,7 @@ if __name__ == "__main__":
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -159,8 +159,9 @@ class App(ModuleBase):
 ```
 src/canary_framework/
 ├── common/              # 共享基础设施
+│   ├── config.py        # CanaryConfig
 │   ├── errors.py        # 框架异常
-│   ├── routing.py       # 路由路径解析
+│   ├── logging.py       # 框架日志
 │   └── types.py         # 数据类、标记和类型别名
 ├── core/                # 基类
 │   ├── module/
@@ -175,13 +176,12 @@ src/canary_framework/
 │   ├── module.py        # @module
 │   ├── service.py       # @service
 │   ├── config.py        # @config
-│   └── lifecycle.py     # @after_init, @before_startup, @before_shutdown
+│   └── lifecycle.py     # @before_startup, @before_shutdown
 └── engine/              # 运行时引擎
     ├── registry.py      # 服务注册表
     ├── dependencies.py  # 拓扑排序 + resolve_deps
     ├── openapi.py       # OpenAPI schema 生成
-    ├── params.py        # 路由参数解析
-    └── logging.py       # 框架日志
+    └── params.py        # 路由参数解析
 ```
 
 ### 依赖注入流程
@@ -211,7 +211,6 @@ app.init()
   ├── 实例化服务
   ├── 注入依赖 (注解驱动)
   ├── 按拓扑顺序调用每个服务的 init()
-  └── 调用 @after_init 钩子
 
 app.startup()
   ├── 调用 @before_startup 钩子
@@ -221,6 +220,23 @@ app.shutdown()
   ├── 调用 @before_shutdown 钩子
   └── 逆拓扑顺序调用每个服务的 shutdown()
 ```
+
+## 示例
+
+[examples/](./examples/) 目录包含可运行的、经过测试的示例：
+
+| 文件 | 描述 |
+|---|---|
+| `01_standalone.py` | 单服务 + Router 独立模式 |
+| `02_module_compose.py` | 模块组合多个服务 |
+| `03_nested_modules.py` | 嵌套模块层级 |
+| `04_module_router.py` | 模块自带 Router |
+| `05_config.py` | 使用 @config() + CanaryConfig 配置 |
+| `06_lifecycle.py` | 生命周期钩子 (before_startup, before_shutdown) |
+| `07_validation.py` | Pydantic 请求/响应验证 |
+| `08_parameters.py` | 路径、查询、请求体参数绑定 |
+| `09_openapi.py` | OpenAPI 标题/版本/描述自定义 |
+| `10_full_app.py` | 完整博客 API + 嵌套模块 |
 
 ## 测试
 

@@ -18,7 +18,7 @@ from uuid import UUID
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from canary_framework.common import RouteInfo
+from canary_framework.common import RouteInfo, unwrap_optional
 
 _TYPE_MAP: dict[str, str] = {
     "int": "integer",
@@ -34,7 +34,6 @@ _TYPE_FORMAT_MAP: dict[type, str] = {
     UUID: "uuid",
     bytes: "byte",
 }
-
 
 _registered_schemas: dict[int, str] = {}
 
@@ -92,9 +91,7 @@ def _build_model_schema(
     # list[T] → {"type": "array", "items": ...}
     if origin is list:
         args = getattr(model_cls, "__args__", ())
-        item_schema: dict[str, object] = (
-            _build_model_schema(args[0], schemas_dict) if args else {}
-        )
+        item_schema: dict[str, object] = _build_model_schema(args[0], schemas_dict) if args else {}
         return {"type": "array", "items": item_schema}
 
     # dict[K, V] → {"type": "object"}
@@ -103,14 +100,14 @@ def _build_model_schema(
 
     # 确定实际 Pydantic 基类（泛型别名取其 __origin__）
     if isinstance(model_cls, type) and issubclass(model_cls, BaseModel):
-        pydantic_cls: type[BaseModel] = model_cls  # type: ignore[assignment]
+        pydantic_cls: type[BaseModel] = model_cls
     elif (
         origin is not None
         and origin is not UnionType
         and isinstance(origin, type)
         and issubclass(origin, BaseModel)
     ):
-        pydantic_cls = origin  # type: ignore[assignment]
+        pydantic_cls = origin
     else:
         return {}
 
@@ -126,17 +123,6 @@ def _build_model_schema(
         schemas_dict[model_name] = raw
         _registered_schemas[model_id] = model_name
     return {"$ref": f"#/components/schemas/{model_name}"}
-
-
-def _strip_optional(annotation: Any) -> tuple[Any, bool]:
-    """从 Optional[T] 或 T | None 中提取 T，同时返回是否 nullable。"""
-    origin = get_origin(annotation)
-    if origin is UnionType:
-        args = get_args(annotation)
-        inner = next((a for a in args if a is not type(None)), None)
-        if inner is not None:
-            return inner, True
-    return annotation, False
 
 
 def _get_enum_values(annotation: Any) -> list[object] | None:
@@ -159,7 +145,7 @@ def _build_parameter_schema(
     """
     schema: dict[str, object] = {}
 
-    annotation, nullable = _strip_optional(annotation)
+    annotation, nullable = unwrap_optional(annotation)
     if nullable:
         schema["nullable"] = True
 
