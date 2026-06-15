@@ -37,7 +37,7 @@ First, let's create a database service:
 
 ```python
 # services/database.py
-from canary_framework import service, after_init, before_shutdown
+from canary_framework import service, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
@@ -45,8 +45,8 @@ class Database(ServiceBase):
     def __init__(self):
         self.connection = None
 
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         self.connection = "connected"
         print("Database connected")
 
@@ -60,7 +60,7 @@ class Database(ServiceBase):
 ```
 
 - `@service()` automatically names this service `DatabaseService`
-- Lifecycle hooks `@after_init` and `@before_shutdown` manage connection setup and teardown
+- Override `init()` for connection setup; use `@before_shutdown` for teardown
 
 ## 4. Auth Service
 
@@ -68,7 +68,7 @@ Now, let's create an auth service that depends on the database:
 
 ```python
 # services/auth.py
-from canary_framework import service, after_init
+from canary_framework import service
 from canary_framework.core.service import ServiceBase
 from .database import Database
 
@@ -79,8 +79,8 @@ class Auth(ServiceBase):
     def __init__(self):
         self.users = {}
 
-    @after_init
-    async def init_default_users(self):
+    async def init(self):
+        await super().init()
         self.users = {
             "admin": {"name": "Admin", "role": "admin"},
             "user": {"name": "User", "role": "user"}
@@ -200,7 +200,7 @@ Create a configuration class using `@config` and `CanaryConfig`:
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8080

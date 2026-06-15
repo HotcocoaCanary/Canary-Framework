@@ -37,7 +37,7 @@ def __init__(self):
 
 | Method | Signature | What it does |
 |---|---|---|
-| `init()` | `() → None` | Invokes `AFTER_INIT` hook. |
+| `init()` | `() → None` | Sets up logging and configs. |
 | `startup()` | `() → None` | Invokes `BEFORE_STARTUP` hook. |
 | `shutdown()` | `() → None` | Invokes `BEFORE_SHUTDOWN` hook. |
 
@@ -64,7 +64,7 @@ Implements the ASGI lifespan protocol:
 
 ### `_invoke_hook`
 
-Lazy hook discovery via `find_hooks()` (engine/hooks.py). On first invocation, `find_hooks()` traverses the class MRO looking for methods marked with hook markers (`__cf_after_init__`, `__cf_before_startup__`, `__cf_before_shutdown__`) and binds them to the instance. Supports both sync and async hooks. Any exception raised by a hook is wrapped in `LifecycleHookError`.
+Lazy hook discovery via `find_hooks()` (engine/hooks.py). On first invocation, `find_hooks()` traverses the class MRO looking for methods marked with hook markers (`__cf_before_startup__`, `__cf_before_shutdown__`) and binds them to the instance. Supports both sync and async hooks. Any exception raised by a hook is wrapped in `LifecycleHookError`.
 
 ## ModuleBase Internals
 
@@ -84,8 +84,6 @@ DI wiring: resolve_deps → setattr injection
 set _cf_parent_registry on all ServiceBase children
     ↓
 init each child in order
-    ↓
-invoke AFTER_INIT hook
 ```
 
 **Step-by-step:**

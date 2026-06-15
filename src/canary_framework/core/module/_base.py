@@ -11,6 +11,7 @@ in topological order, and exposes a starlette Router for ASGI mounting.
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from typing import cast, override
 
 from starlette.routing import Mount, Route
@@ -28,6 +29,8 @@ from canary_framework.common import (
     is_cf_service,
 )
 from canary_framework.common.logging import ensure_logging, get_logger
+from canary_framework.core.router import Router as _Router
+from canary_framework.core.router import _collect_routes
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.dependencies import resolve_deps, topological_sort
 from canary_framework.engine.registry import Registry
@@ -86,7 +89,9 @@ class ModuleBase(ServiceBase):
         else:
             ensure_logging("INFO")
 
-    def _iter_instances(self, *, skip_none: bool = False):
+    def _iter_instances(
+        self, *, skip_none: bool = False
+    ) -> Generator[tuple[str, object], None, None]:
         """迭代所有子服务实例（按启动顺序）。
 
         Iterate all child service instances in startup order.
@@ -99,9 +104,7 @@ class ModuleBase(ServiceBase):
             if inst is None:
                 if skip_none:
                     continue
-                raise DependencyInjectionError(
-                    f"Service '{name}' instance is None."
-                )
+                raise DependencyInjectionError(f"Service '{name}' instance is None.")
             yield name, inst
 
     @override
@@ -144,7 +147,7 @@ class ModuleBase(ServiceBase):
             if isinstance(inst, ServiceBase):
                 inst._cf_parent_registry = registry
                 if not hasattr(inst, "_cf_config") or inst._cf_config is None:
-                    inst._cf_config = self._cf_config
+                    inst._cf_config = self._cf_config  # type: ignore[attr-defined]
             cls_name = entry.cls.__name__
             if not cls_name.startswith("_cf_"):
                 setattr(self, cls_name, inst)
@@ -177,9 +180,6 @@ class ModuleBase(ServiceBase):
         that have an asgi_app attribute, plus root-level routes from children.
         """
         if self._cf_asgi_app is None:
-            from canary_framework.core.router._base import Router as _Router
-            from canary_framework.core.router._base import _collect_routes
-
             routes: list[Mount | Route] = []
             mount_paths: set[str] = set()
 
@@ -193,24 +193,19 @@ class ModuleBase(ServiceBase):
                 if asgi is not None:
                     app = cast(ASGIApp, asgi)
                     mount_path = (
-                        inst.get_mount_path()
-                        if hasattr(inst, "get_mount_path")
-                        else f"/{name}"
+                        inst.get_mount_path() if hasattr(inst, "get_mount_path") else f"/{name}"
                     )
                     if mount_path in mount_paths:
-                        raise ValueError(
-                            f"Mount path collision: '{mount_path}' is already in use."
-                        )
+                        raise ValueError(f"Mount path collision: '{mount_path}' is already in use.")
                     routes.append(Mount(mount_path, app=app))
                     mount_paths.add(mount_path)
-                if hasattr(inst, "_cf_get_root_routes"):
-                    for route in inst._cf_get_root_routes():
-                        if route.path in mount_paths:
-                            raise ValueError(
-                                f"Root route path collision: '{route.path}' is already in use."
-                            )
-                        routes.append(route)
-                        mount_paths.add(route.path)
+            for route in self._cf_get_root_routes():
+                if route.path in mount_paths:
+                    raise ValueError(
+                        f"Root route path collision: '{route.path}' is already in use."
+                    )
+                routes.append(route)
+                mount_paths.add(route.path)
             if self._cf_root_routes:
                 for route in self._cf_root_routes:
                     if route.path not in mount_paths:

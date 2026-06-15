@@ -41,7 +41,7 @@ class Api(ServiceBase):
     async def echo(self, body: dict):
         return {"echo": body}
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8000
@@ -77,15 +77,15 @@ if __name__ == "__main__":
 服务是应用的构建块，封装业务逻辑：
 
 ```python
-from canary_framework import service, after_init, before_shutdown
+from canary_framework import service, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
 class Database(ServiceBase):
     db_url: str = "sqlite:///app.db"
 
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         print("Database connected")
 ```
 

@@ -37,7 +37,7 @@ def __init__(self):
 
 | 方法 | 签名 | 作用 |
 |---|---|---|
-| `init()` | `() → None` | 调用 `AFTER_INIT` 钩子。 |
+| `init()` | `() → None` | 设置日志和配置。 |
 | `startup()` | `() → None` | 调用 `BEFORE_STARTUP` 钩子。 |
 | `shutdown()` | `() → None` | 调用 `BEFORE_SHUTDOWN` 钩子。 |
 
@@ -64,7 +64,7 @@ async def __call__(self, scope, receive, send):
 
 ### `_invoke_hook`
 
-通过 `find_hooks()`（engine/hooks.py）进行懒加载钩子发现。首次调用时，`find_hooks()` 遍历类 MRO 查找标记了钩子标记（`__cf_after_init__`、`__cf_before_startup__`、`__cf_before_shutdown__`）的方法，并将其绑定到实例。支持同步和异步钩子。钩子引发的任何异常都会被包装在 `LifecycleHookError` 中。
+通过 `find_hooks()`（engine/hooks.py）进行懒加载钩子发现。首次调用时，`find_hooks()` 遍历类 MRO 查找标记了钩子标记（`__cf_before_startup__`、`__cf_before_shutdown__`）的方法，并将其绑定到实例。支持同步和异步钩子。钩子引发的任何异常都会被包装在 `LifecycleHookError` 中。
 
 ## ModuleBase 内部机制
 
@@ -84,8 +84,6 @@ DI 注入：resolve_deps → setattr 注入
 在所有 ServiceBase 子项上设置 _cf_parent_registry
     ↓
 按顺序初始化每个子项
-    ↓
-调用 AFTER_INIT 钩子
 ```
 
 **逐步说明：**

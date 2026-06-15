@@ -12,9 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-CF_CONFIG_MARKER = "__cf_config__"
-"""Marker attribute set by @config decorator on config classes."""
-
 
 class CanaryConfig(BaseModel):
     """Canary Framework configuration base class.
@@ -65,4 +62,4 @@ class CanaryConfig(BaseModel):
     )
 
 
-__all__ = ["CF_CONFIG_MARKER", "CanaryConfig"]
+__all__ = ["CanaryConfig"]

@@ -4,7 +4,7 @@
 
 Lifecycle hook decorators implementation.
 
-Provides @after_init, @before_startup, @before_shutdown decorators.
+Provides @before_startup, @before_shutdown decorators.
 """
 
 from __future__ import annotations

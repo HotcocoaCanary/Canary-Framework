@@ -1,13 +1,12 @@
 """ServiceBase — 具有钩子调用功能的生命周期感知服务基类。
 
 提供init/startup/shutdown生命周期方法，
-支持通过@after_init、@before_startup、@before_shutdown装饰器声明式地注册钩子。
+支持通过@before_startup、@before_shutdown装饰器声明式地注册钩子。
 
 ServiceBase — lifecycle-aware service with hook invocation.
 
 Provides init / startup / shutdown lifecycle with
-declarative hook support via @after_init,
-@before_startup, @before_shutdown.
+declarative hook support via @before_startup, @before_shutdown.
 """
 
 from __future__ import annotations
@@ -26,6 +25,7 @@ from canary_framework.common import (
 )
 from canary_framework.common.config import CanaryConfig
 from canary_framework.common.logging import get_logger
+from canary_framework.core.router import Router, _build_doc_routes, _collect_routes
 from canary_framework.core.service._hooks import HookDict, find_hooks
 
 _log = get_logger("service")
@@ -51,6 +51,14 @@ class ServiceBase:
         self._starlette_router: StarletteRouter | None = None
         self._cf_root_routes: list[Route] | None = None
         super().__init__()
+
+    def _get_router(self) -> Router | None:
+        """获取服务的 Router 实例（如有）。
+
+        Get the service's Router instance if one exists.
+        """
+        router = getattr(self, "router", None)
+        return router if isinstance(router, Router) else None
 
     @property
     def config(self) -> CanaryConfig | None:
@@ -133,10 +141,8 @@ class ServiceBase:
 
     def get_mount_path(self) -> str:
         """返回服务在模块 ASGI 应用中的挂载路径。"""
-        from canary_framework.core.router import Router
-
-        router = getattr(self, "router", None)
-        if isinstance(router, Router) and router.prefix:
+        router = self._get_router()
+        if router is not None and router.prefix:
             return router.prefix
         return f"/{getattr(type(self), CF_NAME_ATTR, type(self).__name__)}"
 
@@ -169,8 +175,6 @@ class ServiceBase:
         Returns:
             StarletteRouter instance.
         """
-        from canary_framework.core.router import _collect_routes
-
         if self._starlette_router is None:
             include_prefix = self._cf_parent_registry is None
             routes = _collect_routes(self, include_router_prefix=include_prefix)
@@ -244,11 +248,9 @@ class ServiceBase:
 
     def _cf_collect_route_infos(self) -> list[RouteInfo]:
         """收集自身及子服务的所有 RouteInfo。"""
-        from canary_framework.core.router import Router
-
         route_infos: list[RouteInfo] = []
-        router = getattr(self, "router", None)
-        if isinstance(router, Router):
+        router = self._get_router()
+        if router is not None:
             route_infos.extend(router._route_infos)
 
         registry = getattr(self, "_cf_registry", None)
@@ -262,7 +264,6 @@ class ServiceBase:
 
     async def _cf_generate_openapi(self) -> None:
         """收集全部路由，生成 OpenAPI schema 和文档端点。"""
-        from canary_framework.core.router import _build_doc_routes
         from canary_framework.engine.openapi import generate_openapi_schema
 
         route_infos = self._cf_collect_route_infos()

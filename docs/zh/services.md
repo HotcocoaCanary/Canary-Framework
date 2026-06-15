@@ -53,7 +53,7 @@ class UserRepo(ServiceBase):
 服务经历明确定义的生命周期：
 
 1. **实例化**：创建服务实例
-2. **初始化**：调用 `init()`；运行 `@after_init` 钩子
+2. **初始化**：调用 `init()`；重写 `init()` 来建立连接和填充种子数据
 3. **启动**：调用 `startup()`；之前运行 `@before_startup` 钩子
 4. **关闭**：运行 `@before_shutdown` 钩子，然后调用 `shutdown()`
 
@@ -70,7 +70,7 @@ class UserRepo(ServiceBase):
 ## 完整示例
 
 ```python
-from canary_framework import service, after_init, before_startup, before_shutdown
+from canary_framework import service, before_startup, before_shutdown
 from canary_framework.core.service import ServiceBase
 
 @service()
@@ -79,13 +79,10 @@ class Cache(ServiceBase):
         self.store = {}
         self.connection = None
 
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         self.connection = "connected"
         print("Cache connected")
-
-    @after_init
-    async def warmup(self):
         self.store["default"] = {"value": "default"}
         print("Cache warmed up")
 

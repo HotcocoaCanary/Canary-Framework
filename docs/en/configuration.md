@@ -33,7 +33,7 @@ The `@config` decorator marks a class as the framework configuration. The class 
 from canary_framework import config
 from canary_framework.common.config import CanaryConfig
 
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -66,7 +66,7 @@ Config is auto-discovered from `@module(services=[...])` — any class that pass
 - **`port`** — Server port. Default `8000`. Must be in range 1-65535.
 
 ```python
-@config
+@config()
 class AppConfig(CanaryConfig):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -91,7 +91,7 @@ The `"cf"` logger is automatically configured with a `StreamHandler` during `ini
 - **`openapi_security_schemes`** — Security scheme definitions.
 
 ```python
-@config
+@config()
 class AppConfig(CanaryConfig):
     openapi_title: str = "My API"
     openapi_version: str = "2.0.0"
@@ -108,7 +108,7 @@ class AppConfig(CanaryConfig):
 - **`docs_redoc_cdn`** — CDN URL for ReDoc assets.
 
 ```python
-@config
+@config()
 class AppConfig(CanaryConfig):
     docs_swagger_path: str = "/swagger"
     docs_redoc_path: str = "/documentation"
@@ -120,7 +120,7 @@ class AppConfig(CanaryConfig):
 Add any custom configuration fields to your config class. Pydantic's `model_config = {"extra": "allow"}` accepts arbitrary extra fields:
 
 ```python
-@config
+@config()
 class AppConfig(CanaryConfig):
     database_url: str = "sqlite:///app.db"  # Custom field
     api_key: str = ""                       # Custom field
@@ -130,8 +130,8 @@ class AppConfig(CanaryConfig):
 class Database(ServiceBase):
     config: AppConfig
 
-    @after_init
-    async def connect(self):
+    async def init(self):
+        await super().init()
         url = self.config.database_url  # Access custom field via injected config
         self.pool = await connect(url)
 ```

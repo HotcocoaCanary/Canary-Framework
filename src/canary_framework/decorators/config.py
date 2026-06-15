@@ -9,11 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from canary_framework.common import (
-    CF_CONFIG_MARKER,
-    CF_NAME_ATTR,
-    CanaryConfig,
-)
+from canary_framework.common import CF_NAME_ATTR, CanaryConfig
 
 
 def config() -> Callable[[type], type[CanaryConfig]]:
@@ -40,7 +36,6 @@ def config() -> Callable[[type], type[CanaryConfig]]:
             )
         name = cls.__name__
         setattr(cls, CF_NAME_ATTR, name)
-        setattr(cls, CF_CONFIG_MARKER, True)
         return cls
 
     return decorator

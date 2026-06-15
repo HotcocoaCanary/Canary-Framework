@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from collections.abc import Callable
-from types import UnionType
 from typing import get_args, get_origin
 
 from canary_framework.common import (
     CF_SERVICE_MARKER,
     CircularDependencyError,
     ServiceNotFoundError,
+    unwrap_optional,
 )
 from canary_framework.common.logging import get_logger
 from canary_framework.engine.registry import Registry
@@ -46,16 +46,15 @@ def resolve_deps(cls: type) -> dict[str, type]:
         return {}
 
     resolved: dict[str, type] = {}
-    import typing as _typing
 
     for name, tp in hints.items():
+        tp, _ = unwrap_optional(tp)
         origin = get_origin(tp)
-        if origin is not None:
+        if origin is Callable:
             args = get_args(tp)
-            if origin in (Callable,) or origin is UnionType or origin is _typing.Union:
-                inner = [a for a in args if a is not type(None)]
-                if len(inner) == 1:
-                    tp = inner[0]
+            inner = [a for a in args if a is not type(None)]
+            if len(inner) == 1:
+                tp = inner[0]
         if isinstance(tp, type) and hasattr(tp, CF_SERVICE_MARKER):
             resolved[name] = tp
     return resolved
