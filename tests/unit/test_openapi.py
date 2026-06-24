@@ -5,43 +5,7 @@ from typing import Any, cast
 import pytest
 
 from canary_framework.common import RouteInfo
-from canary_framework.core.router._utils import parse_route_path
 from canary_framework.engine.openapi import generate_openapi_schema
-
-
-@pytest.mark.unit
-class TestParseRoutePath:
-    """Tests for parse_route_path function."""
-
-    def test_parse_simple_path(self) -> None:
-        """Test parse simple path with no params."""
-        path, path_params, query_params = parse_route_path("/simple")
-        assert path == "/simple"
-        assert path_params == []
-        assert query_params == []
-
-    def test_parse_path_with_params(self) -> None:
-        """Test parse path with path params."""
-        path, path_params, query_params = parse_route_path("/items/{item_id}")
-        assert path == "/items/{item_id}"
-        assert path_params == ["item_id"]
-        assert query_params == []
-
-    def test_parse_with_query_params(self) -> None:
-        """Test parse with query params."""
-        path, path_params, query_params = parse_route_path("/items?page={page}&limit={limit}")
-        assert path == "/items"
-        assert path_params == []
-        assert query_params == ["page", "limit"]
-
-    def test_parse_with_path_and_query_params(self) -> None:
-        """Test parse with both path and query params."""
-        path, path_params, query_params = parse_route_path(
-            "/items/{item_id}?page={page}&limit={limit}"
-        )
-        assert path == "/items/{item_id}"
-        assert path_params == ["item_id"]
-        assert query_params == ["page", "limit"]
 
 
 @pytest.mark.unit

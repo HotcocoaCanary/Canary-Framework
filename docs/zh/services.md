@@ -54,8 +54,8 @@ class UserRepo(ServiceBase):
 
 1. **实例化**：创建服务实例
 2. **初始化**：调用 `init()`；重写 `init()` 来建立连接和填充种子数据
-3. **启动**：调用 `startup()`；之前运行 `@before_startup` 钩子
-4. **关闭**：运行 `@before_shutdown` 钩子，然后调用 `shutdown()`
+3. **启动**：调用 `startup()`；之前运行 `async def startup(self):\n        await super().startup()` 钩子
+4. **关闭**：运行 `async def shutdown(self):\n        await super().shutdown()` 钩子，然后调用 `shutdown()`
 
 您可以使用生命周期装饰器介入这些阶段。有关详细信息，请参阅[生命周期](./lifecycle.md)文档。
 
@@ -86,12 +86,12 @@ class Cache(ServiceBase):
         self.store["default"] = {"value": "default"}
         print("Cache warmed up")
 
-    @before_startup
+    async def startup(self):\n        await super().startup()
     async def verify(self):
         assert self.connection is not None
         print("Cache verified")
 
-    @before_shutdown
+    async def shutdown(self):\n        await super().shutdown()
     async def cleanup(self):
         self.connection = None
         print("Cache disconnected")

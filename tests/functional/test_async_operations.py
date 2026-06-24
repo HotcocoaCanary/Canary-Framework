@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from canary_framework import before_startup, module, service
+from canary_framework import module, service
 from canary_framework.core.module import ModuleBase
 from canary_framework.core.router import Router
 from canary_framework.core.service import ServiceBase
@@ -27,8 +27,8 @@ class TestAsyncOperations:
                 await asyncio.sleep(0.01)
                 events.append("async-init")
 
-            @before_startup
-            async def async_startup(self) -> None:
+            async def startup(self) -> None:
+                await super().startup()
                 await asyncio.sleep(0.01)
                 events.append("async-startup")
 
@@ -105,7 +105,7 @@ class TestAsyncOperations:
             router = Router()
             long_task_service: LongTaskService
 
-            @router.get("/task?seconds={seconds}")
+            @router.get("/task")
             async def run_task(self, seconds: float) -> dict[str, str | float]:
                 return await self.long_task_service.do_work(seconds)
 

@@ -21,7 +21,7 @@ from canary_framework import (
     DependencyInjectionError,
     CircularDependencyError,
     ConfigurationError,
-    LifecycleHookError,
+    CanaryFrameworkError,
     ServiceNotFoundError,
 
     # 枚举
@@ -216,7 +216,7 @@ class Database(ServiceBase):
         await super().init()
         # 建立连接
 
-    @before_shutdown
+    async def shutdown(self):\n        await super().shutdown()
     async def disconnect(self):
         pass
 ```
@@ -374,7 +374,7 @@ Exception
     ├── ServiceNotFoundError     # 服务查找失败
     ├── CircularDependencyError  # 拓扑排序检测到循环
     ├── DependencyInjectionError # DI 注入失败
-    └── LifecycleHookError       # 钩子引发未处理异常
+    └── CanaryFrameworkError       # 钩子引发未处理异常
 ```
 
 ---
@@ -391,7 +391,7 @@ Exception
 
 ---
 
-### LifecycleHookError
+### CanaryFrameworkError
 
 生命周期钩子中发生错误。包装原始异常。
 
@@ -520,7 +520,7 @@ class LifecycleAware(Protocol):
 ```
 
 **函数：**
-- `find_hooks(instance: object) -> HookDict`：遍历 MRO 查找生命周期钩子方法
+- `(instance: object) -> HookDict`：遍历 MRO 查找生命周期钩子方法
 
 ---
 

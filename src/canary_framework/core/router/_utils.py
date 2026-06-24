@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Awaitable, Callable
 from types import FunctionType
 from typing import cast
@@ -13,21 +12,6 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 
 from canary_framework.common import RouteInfo
-
-_PARAM_PATTERN = r"\{(\w+)\}"
-
-
-def parse_route_path(path: str) -> tuple[str, list[str], list[str]]:
-    """Parse a route path to extract path parameters and query parameters."""
-    parts = path.split("?", 1)
-    base_path = parts[0]
-    path_params = re.findall(_PARAM_PATTERN, base_path)
-
-    query_params: list[str] = []
-    if len(parts) > 1:
-        query_params = re.findall(_PARAM_PATTERN, parts[1])
-    return base_path, path_params, query_params
-
 
 _SWAGGER_UI_HTML = """<!DOCTYPE html>
 <html>
@@ -200,29 +184,20 @@ def _route_handler(
     async def endpoint(request: Request) -> Response:
         kwargs: dict[str, object] = {}
 
-        for param_name in path_param_names:
-            if param_name in request.path_params:
-                param_type = cast("type | None", param_types.get(param_name))
-                try:
-                    kwargs[param_name] = _convert_param(request.path_params[param_name], param_type)
-                except (ValueError, TypeError):
-                    return JSONResponse(
-                        {"detail": f"Invalid value for path parameter '{param_name}'"},
-                        status_code=400,
-                    )
-
-        for param_name in query_param_names:
-            if param_name in request.query_params:
-                param_type = cast("type | None", param_types.get(param_name))
-                try:
-                    kwargs[param_name] = _convert_param(
-                        request.query_params[param_name], param_type
-                    )
-                except (ValueError, TypeError):
-                    return JSONResponse(
-                        {"detail": f"Invalid value for query parameter '{param_name}'"},
-                        status_code=400,
-                    )
+        for p_names, p_source, p_type_name in (
+            (path_param_names, request.path_params, "path"),
+            (query_param_names, request.query_params, "query"),
+        ):
+            for param_name in p_names:
+                if param_name in p_source:
+                    param_type = cast("type | None", param_types.get(param_name))
+                    try:
+                        kwargs[param_name] = _convert_param(p_source[param_name], param_type)
+                    except (ValueError, TypeError):
+                        return JSONResponse(
+                            {"detail": f"Invalid value for {p_type_name} parameter '{param_name}'"},
+                            status_code=400,
+                        )
 
         if request_model is not None:
             try:
@@ -235,7 +210,18 @@ def _route_handler(
                 parsed = model_cls(**body)
             except ValidationError as e:
                 return JSONResponse({"detail": e.errors()}, status_code=422)
-            result = await handler(parsed, **kwargs)
+
+            model_param_name = None
+            for pname, ptype in param_types.items():
+                if ptype is request_model:
+                    model_param_name = pname
+                    break
+
+            if model_param_name:
+                kwargs[model_param_name] = parsed
+                result = await handler(**kwargs)
+            else:
+                result = await handler(parsed, **kwargs)
         else:
             result = await handler(**kwargs)
 
@@ -329,5 +315,4 @@ __all__ = [
     "_convert_nested_models",
     "_convert_param",
     "_route_handler",
-    "parse_route_path",
 ]
