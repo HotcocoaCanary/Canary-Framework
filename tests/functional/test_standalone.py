@@ -78,7 +78,7 @@ class TestStandaloneService:
         class MathService(ServiceBase):
             router = Router()
 
-            @router.get("/add?a={a}&b={b}")
+            @router.get("/add")
             async def add(self, a: int, b: int) -> dict[str, int]:
                 return {"result": a + b}
 
@@ -122,7 +122,7 @@ class TestStandaloneService:
         class MyService(ServiceBase):
             router = Router()
 
-            @router.get("/square?num={num}")
+            @router.get("/square")
             async def square(self, num: int) -> dict[str, int]:
                 return {"result": num * num}
 

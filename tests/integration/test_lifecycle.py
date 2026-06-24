@@ -3,8 +3,6 @@
 import pytest
 
 from canary_framework import (
-    before_shutdown,
-    before_startup,
     module,
     service,
 )
@@ -27,12 +25,12 @@ class TestLifecycle:
             def on_init(self) -> None:
                 events.append("service-init")
 
-            @before_startup
-            def on_startup(self) -> None:
+            async def startup(self) -> None:
+                await super().startup()
                 events.append("service-startup")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
+            async def shutdown(self) -> None:
+                await super().shutdown()
                 events.append("service-shutdown")
 
         @module(services=[MyService])
@@ -40,12 +38,12 @@ class TestLifecycle:
             def on_init(self) -> None:
                 events.append("module-init")
 
-            @before_startup
-            def on_startup(self) -> None:
+            async def startup(self) -> None:
+                await super().startup()
                 events.append("module-startup")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
+            async def shutdown(self) -> None:
+                await super().shutdown()
                 events.append("module-shutdown")
 
         app = MyModule()
@@ -69,22 +67,22 @@ class TestLifecycle:
 
         @service()
         class Service1(ServiceBase):
-            @before_startup
-            def on_startup(self) -> None:
+            async def startup(self) -> None:
+                await super().startup()
                 startup_order.append("Service1")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
+            async def shutdown(self) -> None:
+                await super().shutdown()
                 shutdown_order.append("Service1")
 
         @service()
         class Service2(ServiceBase):
-            @before_startup
-            def on_startup(self) -> None:
+            async def startup(self) -> None:
+                await super().startup()
                 startup_order.append("Service2")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
+            async def shutdown(self) -> None:
+                await super().shutdown()
                 shutdown_order.append("Service2")
 
         @module(services=[Service1, Service2])

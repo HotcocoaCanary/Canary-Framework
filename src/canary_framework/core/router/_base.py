@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from pydantic import BaseModel
 from starlette.routing import Route
 
-from canary_framework.common import HookFunction, RouteInfo
-from canary_framework.core.router._utils import _route_handler, parse_route_path
+from canary_framework.common import RouteInfo
+from canary_framework.core.router._utils import _route_handler
 from canary_framework.engine.params import resolve_params
 
 
@@ -55,7 +56,7 @@ class Router:
         deprecated: bool = False,
         operation_id: str | None = None,
         responses: dict[str, object] | None = None,
-    ) -> Callable[[HookFunction], HookFunction]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """内部方法：为指定 HTTP 方法注册路由。
 
         Args:
@@ -90,9 +91,12 @@ class Router:
         Returns:
             Decorator function.
         """
-        starlette_path, path_params, query_params = parse_route_path(path)
+        from starlette.routing import compile_path
 
-        def decorator(fn: HookFunction) -> HookFunction:
+        _, starlette_path, path_regex_dict = compile_path(path)
+        path_params = list(path_regex_dict.keys())
+
+        def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
             params = resolve_params(fn)
             param_meta: dict[str, object] = {}
             for name, (ann, has_default, field_info) in params.items():
@@ -100,13 +104,20 @@ class Router:
 
             # Auto-detect request_model from handler type annotations
             effective_request_model = request_model
-            if effective_request_model is None:
+            if effective_request_model is None and method not in ("GET", "DELETE"):
                 for pname, (pann, _, _) in params.items():
-                    if pname in path_params or pname in query_params:
+                    if pname in path_params:
                         continue
                     if isinstance(pann, type) and issubclass(pann, BaseModel):
                         effective_request_model = pann
                         break
+
+            query_params = []
+            for pname, (pann, _, _) in params.items():
+                if pname not in path_params and (
+                    effective_request_model is None or pann is not effective_request_model
+                ):
+                    query_params.append(pname)
             info = RouteInfo(
                 handler=fn,
                 method=method,
@@ -143,7 +154,7 @@ class Router:
         deprecated: bool = False,
         operation_id: str | None = None,
         responses: dict[str, object] | None = None,
-    ) -> Callable[[HookFunction], HookFunction]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """注册 GET 路由。
 
         Register a GET route.
@@ -173,7 +184,7 @@ class Router:
         deprecated: bool = False,
         operation_id: str | None = None,
         responses: dict[str, object] | None = None,
-    ) -> Callable[[HookFunction], HookFunction]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """注册 POST 路由。
 
         Register a POST route.
@@ -203,7 +214,7 @@ class Router:
         deprecated: bool = False,
         operation_id: str | None = None,
         responses: dict[str, object] | None = None,
-    ) -> Callable[[HookFunction], HookFunction]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """注册 PUT 路由。
 
         Register a PUT route.
@@ -233,7 +244,7 @@ class Router:
         deprecated: bool = False,
         operation_id: str | None = None,
         responses: dict[str, object] | None = None,
-    ) -> Callable[[HookFunction], HookFunction]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """注册 DELETE 路由。
 
         Register a DELETE route.
@@ -263,7 +274,7 @@ class Router:
         deprecated: bool = False,
         operation_id: str | None = None,
         responses: dict[str, object] | None = None,
-    ) -> Callable[[HookFunction], HookFunction]:
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """注册 PATCH 路由。
 
         Register a PATCH route.

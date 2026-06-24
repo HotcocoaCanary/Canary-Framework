@@ -27,17 +27,17 @@ class CalcApi(ServiceBase):
         return {"result": a / b}
 
     # Query parameters — declared in the route path with ?key={key}
-    @router.get("/search?q={query}&page={page}&limit={limit}")
+    @router.get("/search")
     async def search(self, query: str = "", page: int = 1, limit: int = 10) -> dict:
         return {"query": query, "page": page, "limit": limit}
 
     # Boolean query parameters
-    @router.get("/feature?enabled={flag}")
+    @router.get("/feature")
     async def feature(self, flag: bool) -> dict:
         return {"enabled": flag}
 
     # Mixed: path + query
-    @router.get("/users/{user_id}/posts?tag={tag}")
+    @router.get("/users/{user_id}/posts")
     async def user_posts(self, user_id: int, tag: str = "") -> dict:
         return {"user_id": user_id, "tag": tag}
 
@@ -50,9 +50,9 @@ class App(ModuleBase):
 # Try these curl commands:
 #   curl http://127.0.0.1:8000/calc/square/5
 #   curl http://127.0.0.1:8000/calc/divide/10/3
-#   curl "http://127.0.0.1:8000/calc/search?q=hello&page=2"
-#   curl http://127.0.0.1:8000/calc/feature?enabled=true
-#   curl http://127.0.0.1:8000/calc/feature?enabled=1
+#   curl "http://127.0.0.1:8000/calc/search?query=hello&page=2"
+#   curl http://127.0.0.1:8000/calc/feature?flag=true
+#   curl http://127.0.0.1:8000/calc/feature?flag=1
 #   curl http://127.0.0.1:8000/calc/users/42/posts?tag=python
 
 if __name__ == "__main__":

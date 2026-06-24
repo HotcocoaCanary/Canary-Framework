@@ -9,40 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import StrEnum
 from types import UnionType
 from typing import Any, Protocol, cast, get_args, get_origin
 
 from canary_framework.common.config import CanaryConfig
-
-
-class LifecycleHook(StrEnum):
-    """生命周期钩子阶段枚举。
-
-    定义了框架支持的两个生命周期钩子阶段：
-    - BEFORE_STARTUP: 启动前
-    - BEFORE_SHUTDOWN: 关闭前
-
-    Lifecycle phases for hook registration.
-
-    Defines two lifecycle hook phases supported by the framework:
-    - BEFORE_STARTUP: Before startup
-    - BEFORE_SHUTDOWN: Before shutdown
-    """
-
-    BEFORE_STARTUP = "before_startup"
-    BEFORE_SHUTDOWN = "before_shutdown"
-
-
-HookFunction = Callable[..., object]
-"""钩子函数类型别名。
-
-表示可以接受任意参数并返回任意类型的函数。
-
-Type alias for hook functions.
-
-Represents a function that can accept any arguments and return any type.
-"""
 
 
 class LifecycleAware(Protocol):
@@ -158,7 +128,7 @@ class RouteInfo:
     to avoid duplicate parsing at runtime and OpenAPI generation time.
     """
 
-    handler: HookFunction
+    handler: Callable[..., object]
     method: str
     path: str
     starlette_path: str
@@ -175,14 +145,6 @@ class RouteInfo:
     responses: dict[str, object] = field(default_factory=dict)
     router_prefix: str = ""
     router_tags: list[str] = field(default_factory=list)
-
-
-# 生命周期钩子标记映射
-# Lifecycle hook marker mapping
-CF_HOOK_MARKER_MAP: dict[LifecycleHook, str] = {
-    LifecycleHook.BEFORE_STARTUP: "__cf_before_startup__",
-    LifecycleHook.BEFORE_SHUTDOWN: "__cf_before_shutdown__",
-}
 
 
 def is_cf_service(cls: type) -> bool:
@@ -260,7 +222,7 @@ def get_module_meta(cls: type) -> ModuleMeta | None:
     Get metadata for a module class.
 
     Args:
-        cls: The module class.
+        cls: 模块类。
 
     Returns:
         ModuleMeta object, or None if not found.
@@ -272,13 +234,10 @@ def get_module_meta(cls: type) -> ModuleMeta | None:
 
 
 __all__ = [
-    "CF_HOOK_MARKER_MAP",
     "CF_NAME_ATTR",
     "CF_SERVICE_MARKER",
     "CF_SERVICE_META",
-    "HookFunction",
     "LifecycleAware",
-    "LifecycleHook",
     "ModuleMeta",
     "RouteInfo",
     "ServiceEntry",

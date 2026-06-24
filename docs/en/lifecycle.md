@@ -51,61 +51,22 @@ class MyService(ServiceBase):
         pass
 ```
 
-Use `@before_startup` hook to run code before startup:
-
-```python
-from canary_framework import before_startup
-
-@service()
-class Server(ServiceBase):
-    @before_startup
-    async def verify_connections(self):
+    async def startup(self):
+        await super().startup()
         assert self.db.connection is not None
         assert self.cache.connection is not None
 ```
 
 ### 4. Shutdown
 
-The `shutdown()` method is called when the application is stopping:
+The `shutdown()` method is called when the application is stopping.
 
 ```python
-@service()
-class MyService(ServiceBase):
-    async def shutdown(self):
-        pass
-```
-
-Use `@before_shutdown` hook to run code before shutdown:
-
-```python
-from canary_framework import before_shutdown
-
 @service()
 class Database(ServiceBase):
-    @before_shutdown
-    async def disconnect(self):
+    async def shutdown(self):
+        await super().shutdown()
         await self.connection.close()
-```
-
-## Lifecycle Hooks
-
-Two decorators are available for hooking into the lifecycle:
-
-| Decorator | Phase | Timing |
-|-----------|-------|--------|
-| `@before_startup` | Startup | Before `startup()` is called |
-| `@before_shutdown` | Shutdown | Before `shutdown()` is called |
-
-## Hook Methods
-
-Hooks can be either synchronous or asynchronous:
-
-```python
-@service()
-class MyService(ServiceBase):
-    @before_startup
-    async def async_hook(self):
-        await some_async_operation()
 ```
 
 ## Module Lifecycle
@@ -154,11 +115,11 @@ class A(ServiceBase):
         await super().init()
         calls.append("A: init")
 
-    @before_startup
+    async def startup(self):\n        await super().startup()
     def startup_a(self):
         calls.append("A: before_startup")
 
-    @before_shutdown
+    async def shutdown(self):\n        await super().shutdown()
     def shutdown_a(self):
         calls.append("A: before_shutdown")
 
@@ -170,11 +131,11 @@ class B(ServiceBase):
         await super().init()
         calls.append("B: init")
 
-    @before_startup
+    async def startup(self):\n        await super().startup()
     def startup_b(self):
         calls.append("B: before_startup")
 
-    @before_shutdown
+    async def shutdown(self):\n        await super().shutdown()
     def shutdown_b(self):
         calls.append("B: before_shutdown")
 
@@ -297,21 +258,21 @@ or the `cf` logger, the framework skips its own setup.
 
 ## Error Handling
 
-If a hook raises an exception, it's wrapped in `LifecycleHookError`:
+If a hook raises an exception, it's wrapped in `CanaryFrameworkError`:
 
 ```python
-from canary_framework.common import LifecycleHookError
+from canary_framework.common import CanaryFrameworkError
 
 try:
     await app.init()
-except LifecycleHookError as e:
+except CanaryFrameworkError as e:
     print(f"Lifecycle error: {e}")
 ```
 
 ## Best Practices
 
 1. **Override `init()` for connections and data setup**: Establish connections and set up initial data during init
-2. **Use `@before_startup` for validation**: Verify everything is ready before serving
-3. **Use `@before_shutdown` for cleanup**: Gracefully close connections and save state
+2. **Use `async def startup(self):\n        await super().startup()` for validation**: Verify everything is ready before serving
+3. **Use `async def shutdown(self):\n        await super().shutdown()` for cleanup**: Gracefully close connections and save state
 4. **Keep hooks focused**: Each hook should do one thing well
 5. **Handle errors gracefully**: Catch and log exceptions in hooks

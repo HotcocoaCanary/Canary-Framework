@@ -64,7 +64,7 @@ Implements the ASGI lifespan protocol:
 
 ### `_invoke_hook`
 
-Lazy hook discovery via `find_hooks()` (engine/hooks.py). On first invocation, `find_hooks()` traverses the class MRO looking for methods marked with hook markers (`__cf_before_startup__`, `__cf_before_shutdown__`) and binds them to the instance. Supports both sync and async hooks. Any exception raised by a hook is wrapped in `LifecycleHookError`.
+Lazy hook discovery via `()` (engine/hooks.py). On first invocation, `()` traverses the class MRO looking for methods marked with hook markers (`__cf_before_startup__`, `__cf_before_shutdown__`) and binds them to the instance. Supports both sync and async hooks. Any exception raised by a hook is wrapped in `CanaryFrameworkError`.
 
 ## ModuleBase Internals
 
@@ -259,7 +259,7 @@ Exception
     ├── ServiceNotFoundError          # Service lookup failure
     ├── CircularDependencyError       # Topological sort cycle detected
     ├── DependencyInjectionError      # DI wiring failure (None instance, etc.)
-    └── LifecycleHookError            # Hook raised unhandled exception
+    └── CanaryFrameworkError            # Hook raised unhandled exception
 ```
 
 All framework errors inherit from `CanaryFrameworkError`, so callers can catch a single type for all framework errors.
