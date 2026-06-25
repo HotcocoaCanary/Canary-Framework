@@ -4,8 +4,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from canary_framework import Canary, module, service
-from canary_framework.core.web.router import Router
+from canary_framework import module, service
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import Router
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.functional
@@ -23,7 +25,7 @@ class TestComplexApp:
             email: str
 
         @service()
-        class UserService:
+        class UserService(ServiceBase):
             def __init__(self) -> None:
                 super().__init__()
                 self.users: list[User] = []
@@ -37,7 +39,7 @@ class TestComplexApp:
                 return self.users
 
         @service()
-        class UserRouter:
+        class UserRouter(ServiceBase):
             router = Router()
             user_service: UserService
 
@@ -50,7 +52,7 @@ class TestComplexApp:
                 return self.user_service.create(user)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
 
         @module(services=[UserService, UserRouter])
-        class UserModule:
+        class UserModule(ModuleBase):
             pass
 
         # Product module
@@ -60,7 +62,7 @@ class TestComplexApp:
             price: float
 
         @service()
-        class ProductService:
+        class ProductService(ServiceBase):
             def __init__(self) -> None:
                 super().__init__()
                 self.products: list[Product] = []
@@ -74,7 +76,7 @@ class TestComplexApp:
                 return self.products
 
         @service()
-        class ProductRouter:
+        class ProductRouter(ServiceBase):
             router = Router()
             product_service: ProductService
 
@@ -87,16 +89,17 @@ class TestComplexApp:
                 return self.product_service.create(product)
 
         @module(services=[ProductService, ProductRouter])
-        class ProductModule:
+        class ProductModule(ModuleBase):
             pass
 
         # Main app module
         @module(services=[UserModule, ProductModule])
-        class MainApp:
+        class MainApp(ModuleBase):
             pass
 
         # Create and configure app
-        app = Canary(MainApp())
+        app = MainApp()
+        app.init()
 
         # Test both modules
         async with AsyncClient(
@@ -105,20 +108,20 @@ class TestComplexApp:
         ) as client:
             # Test user module
             response = await client.post(
-                "/UserRouter/users",
+                "/UserModule/UserRouter/users",
                 json={"name": "Alice", "email": "alice@example.com"},
             )
             assert response.status_code == 200
 
-            response = await client.get("/UserRouter/users")
+            response = await client.get("/UserModule/UserRouter/users")
             assert len(response.json()) == 1
 
             # Test product module
             response = await client.post(
-                "/ProductRouter/products",
+                "/ProductModule/ProductRouter/products",
                 json={"name": "Laptop", "price": 999.99},
             )
             assert response.status_code == 200
 
-            response = await client.get("/ProductRouter/products")
+            response = await client.get("/ProductModule/ProductRouter/products")
             assert len(response.json()) == 1

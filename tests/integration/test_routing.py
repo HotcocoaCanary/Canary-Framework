@@ -4,8 +4,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from canary_framework import Canary, module, service
-from canary_framework.core.web.router import Router
+from canary_framework import module, service
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import Router
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.integration
@@ -17,7 +19,7 @@ class TestRouting:
         """Test simple GET route."""
 
         @service()
-        class MyRouter:
+        class MyRouter(ServiceBase):
             router = Router()
 
             @router.get("/hello")
@@ -25,10 +27,11 @@ class TestRouting:
                 return {"message": "Hello World"}
 
         @module(services=[MyRouter])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -43,7 +46,7 @@ class TestRouting:
         """Test route with path params."""
 
         @service()
-        class MyRouter:
+        class MyRouter(ServiceBase):
             router = Router()
 
             @router.get("/greet/{name}")
@@ -51,10 +54,11 @@ class TestRouting:
                 return {"message": f"Hello {name}"}
 
         @module(services=[MyRouter])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -69,7 +73,7 @@ class TestRouting:
         """Test route with query params."""
 
         @service()
-        class MyRouter:
+        class MyRouter(ServiceBase):
             router = Router()
 
             @router.get("/add")
@@ -77,10 +81,11 @@ class TestRouting:
                 return {"result": a + b}
 
         @module(services=[MyRouter])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -99,7 +104,7 @@ class TestRouting:
             age: int
 
         @service()
-        class MyRouter:
+        class MyRouter(ServiceBase):
             router = Router()
 
             @router.post("/users", request_model=User)
@@ -107,10 +112,11 @@ class TestRouting:
                 return {"id": 1, "name": user.name, "age": user.age}
 
         @module(services=[MyRouter])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),
@@ -125,7 +131,7 @@ class TestRouting:
         """Test router with prefix."""
 
         @service()
-        class MyRouter:
+        class MyRouter(ServiceBase):
             router = Router(prefix="/api/v1")
 
             @router.get("/test")
@@ -133,10 +139,11 @@ class TestRouting:
                 return {"status": "ok"}
 
         @module(services=[MyRouter])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
 
         async with AsyncClient(
             transport=ASGITransport(app=app),

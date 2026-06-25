@@ -18,12 +18,13 @@ from canary_framework.common import (
     CanaryConfig,
     ServiceMeta,
 )
+from canary_framework.core import ServiceBase
 
 
 def service(
     *,
     config: type[CanaryConfig] | None = None,
-) -> Callable[[type], type]:
+) -> Callable[[type], type[ServiceBase]]:
     """声明一个类为可注入服务。
 
     添加服务标记和元数据，修改类的基类使其继承自ServiceBase。
@@ -51,7 +52,12 @@ def service(
         The decorated class.
     """
 
-    def decorator(cls: type) -> type:
+    def decorator(cls: type) -> type[ServiceBase]:
+        if not issubclass(cls, ServiceBase):
+            raise TypeError(
+                f"@service '{cls.__name__}': must inherit from ServiceBase. "
+                f"Did you forget 'class {cls.__name__}(ServiceBase):'?"
+            )
         if config is not None and not issubclass(config, CanaryConfig):
             raise TypeError(
                 f"@service '{cls.__name__}': config must inherit from CanaryConfig. "

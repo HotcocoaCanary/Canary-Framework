@@ -1,10 +1,9 @@
-"""Framework engine — registry, dependency resolution, and OpenAPI."""
+"""Core base classes — ServiceBase, ModuleBase."""
 
-from canary_framework.core.dependencies import resolve_deps, topological_sort
-from canary_framework.core.registry import Registry
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.service import ServiceBase
 
 __all__ = [
-    "Registry",
-    "resolve_deps",
-    "topological_sort",
+    "ModuleBase",
+    "ServiceBase",
 ]

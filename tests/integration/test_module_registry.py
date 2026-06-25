@@ -2,7 +2,9 @@
 
 import pytest
 
-from canary_framework import Canary, module, service
+from canary_framework import module, service
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.integration
@@ -14,40 +16,42 @@ class TestModuleRegistry:
         """Test that registry contains all services."""
 
         @service()
-        class Service1:
+        class Service1(ServiceBase):
             pass
 
         @service()
-        class Service2:
+        class Service2(ServiceBase):
             pass
 
         @module(services=[Service1, Service2])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
 
         # Check that registry has both services
-        assert app._registry is not None
-        assert app._registry.has(Service1)
-        assert app._registry.has(Service2)
+        assert app._cf_registry is not None
+        assert app._cf_registry.has(Service1)
+        assert app._cf_registry.has(Service2)
 
     @pytest.mark.asyncio
     async def test_service_instances_created(self) -> None:
         """Test that service instances are created."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             pass
 
         @module(services=[MyService])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
 
         # Check that service instance is created
-        entry = app._registry.get_by_class(MyService)
+        entry = app._cf_registry.get_by_class(MyService)  # type: ignore[union-attr]
         assert entry.instance is not None
         assert isinstance(entry.instance, MyService)
 
@@ -56,25 +60,26 @@ class TestModuleRegistry:
         """Test parent and child modules."""
 
         @service()
-        class SharedService:
+        class SharedService(ServiceBase):
             def get_value(self) -> str:
                 return "shared"
 
         @service()
-        class ChildService:
+        class ChildService(ServiceBase):
             shared_service: SharedService
 
         @module(services=[SharedService, ChildService])
-        class ChildModule:
+        class ChildModule(ModuleBase):
             pass
 
         @module(services=[ChildModule])
-        class ParentModule:
+        class ParentModule(ModuleBase):
             pass
 
-        app = Canary(ParentModule())
+        app = ParentModule()
+        app.init()
 
         # Check that shared service is available
         assert app.ChildModule is not None  # type: ignore[attr-defined]
-        assert hasattr(app.ChildService, "shared_service")  # type: ignore[attr-defined]
-        assert app.ChildService.shared_service.get_value() == "shared"  # type: ignore[attr-defined]
+        assert hasattr(app.ChildModule.ChildService, "shared_service")  # type: ignore[attr-defined]
+        assert app.ChildModule.ChildService.shared_service.get_value() == "shared"  # type: ignore[attr-defined]

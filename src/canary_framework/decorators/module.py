@@ -19,13 +19,14 @@ from canary_framework.common import (
     ModuleMeta,
     is_cf_service,
 )
+from canary_framework.core import ModuleBase
 
 
 def module(
     *,
     services: list[type] | None = None,
     config: type[CanaryConfig] | None = None,
-) -> Callable[[type], type]:
+) -> Callable[[type], type[ModuleBase]]:
     """声明一个类为模块。
 
     添加模块标记和元数据，修改类的基类使其继承自ModuleBase。
@@ -60,7 +61,12 @@ def module(
     """
     _services = list(services or ())
 
-    def decorator(cls: type) -> type:
+    def decorator(cls: type) -> type[ModuleBase]:
+        if not issubclass(cls, ModuleBase):
+            raise TypeError(
+                f"@module '{cls.__name__}': must inherit from ModuleBase. "
+                f"Did you forget 'class {cls.__name__}(ModuleBase):'?"
+            )
         name = cls.__name__
         if config is not None and not issubclass(config, CanaryConfig):
             raise TypeError(

@@ -4,7 +4,7 @@ import pytest
 
 from canary_framework.common.errors import ServiceNotFoundError
 from canary_framework.common.types import ServiceMeta
-from canary_framework.core.registry import Registry
+from canary_framework.engine.registry import Registry
 
 
 @pytest.mark.unit

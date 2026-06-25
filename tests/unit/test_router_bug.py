@@ -1,11 +1,13 @@
 """Unit tests for router bugs (parameter ordering and GET body)."""
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
+from starlette.testclient import TestClient
 
-from canary_framework import Canary, module, service
-from canary_framework.core.web.router import Router
+from canary_framework import module, service
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import Router
+from canary_framework.core.service import ServiceBase
 
 
 class Item(BaseModel):
@@ -13,7 +15,7 @@ class Item(BaseModel):
 
 
 @service()
-class Api:
+class Api(ServiceBase):
     router = Router(prefix="/api")
 
     @router.post("/items/{id}")
@@ -28,21 +30,23 @@ class Api:
 
 
 @module(services=[Api])
-class App:
+class App(ModuleBase):
     pass
 
 
 @pytest.mark.asyncio
 async def test_router_param_order_bug() -> None:
     """Test that placing path param before request body param works."""
-    app = Canary(App())
+    app = App()
+    app.init()
     await app.startup()
 
-    # We use httpx AsyncClient instead of TestClient to avoid StarletteDeprecationWarning
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/items/42", json={"name": "test_item"})
-        assert resp.status_code == 200
-        assert resp.json() == {"id": 42, "item": "test_item"}
+    # We must use httpx via TestClient
+    client = TestClient(app.asgi_app)
+
+    resp = client.post("/api/items/42", json={"name": "test_item"})
+    assert resp.status_code == 200
+    assert resp.json() == {"id": 42, "item": "test_item"}
 
     await app.shutdown()
 
@@ -50,15 +54,14 @@ async def test_router_param_order_bug() -> None:
 @pytest.mark.asyncio
 async def test_get_request_no_body_parsing() -> None:
     """Test that a GET request doesn't try to parse a request_model."""
-    app = Canary(App())
+    app = App()
+    app.init()
     await app.startup()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app, raise_app_exceptions=False),
-        base_url="http://test",
-    ) as client:
-        resp = await client.get("/api/items/query")
-        assert resp.status_code == 500
-        assert "Invalid JSON" not in resp.text
+    client = TestClient(app.asgi_app, raise_server_exceptions=False)
+
+    resp = client.get("/api/items/query")
+    assert resp.status_code == 500
+    assert "Invalid JSON" not in resp.text
 
     await app.shutdown()

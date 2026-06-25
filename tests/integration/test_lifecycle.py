@@ -3,10 +3,11 @@
 import pytest
 
 from canary_framework import (
-    Canary,
     module,
     service,
 )
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.integration
@@ -20,28 +21,33 @@ class TestLifecycle:
         events: list[str] = []
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             def on_init(self) -> None:
                 events.append("service-init")
 
             async def startup(self) -> None:
+                await super().startup()
                 events.append("service-startup")
 
             async def shutdown(self) -> None:
+                await super().shutdown()
                 events.append("service-shutdown")
 
         @module(services=[MyService])
-        class MyModule:
+        class MyModule(ModuleBase):
             def on_init(self) -> None:
                 events.append("module-init")
 
             async def startup(self) -> None:
+                await super().startup()
                 events.append("module-startup")
 
             async def shutdown(self) -> None:
+                await super().shutdown()
                 events.append("module-shutdown")
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
         await app.startup()
         await app.shutdown()
 
@@ -60,26 +66,31 @@ class TestLifecycle:
         shutdown_order: list[str] = []
 
         @service()
-        class Service1:
+        class Service1(ServiceBase):
             async def startup(self) -> None:
+                await super().startup()
                 startup_order.append("Service1")
 
             async def shutdown(self) -> None:
+                await super().shutdown()
                 shutdown_order.append("Service1")
 
         @service()
-        class Service2:
+        class Service2(ServiceBase):
             async def startup(self) -> None:
+                await super().startup()
                 startup_order.append("Service2")
 
             async def shutdown(self) -> None:
+                await super().shutdown()
                 shutdown_order.append("Service2")
 
         @module(services=[Service1, Service2])
-        class MyModule:
+        class MyModule(ModuleBase):
             pass
 
-        app = Canary(MyModule())
+        app = MyModule()
+        app.init()
         await app.startup()
         await app.shutdown()
 
