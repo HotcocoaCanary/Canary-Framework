@@ -17,7 +17,7 @@ from canary_framework.common import (
     unwrap_optional,
 )
 from canary_framework.common.logging import get_logger
-from canary_framework.engine.registry import Registry
+from canary_framework.core.registry import Registry
 
 _log = get_logger("di")
 

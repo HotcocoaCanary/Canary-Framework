@@ -4,15 +4,16 @@ from typing import Any, cast
 
 import pytest
 
-from canary_framework.common import RouteInfo
-from canary_framework.engine.openapi import generate_openapi_schema
+from canary_framework.common import RouteDef
+from canary_framework.core.params import EndpointMeta
+from canary_framework.core.web.openapi import generate_openapi_schema
 
 
 @pytest.mark.unit
 class TestGenerateOpenAPISchema:
     """Tests for generate_openapi_schema function."""
 
-    def _make_route_info(self, **kwargs: object) -> RouteInfo:
+    def _make_route_info(self, **kwargs: object) -> tuple[RouteDef, EndpointMeta]:
         async def _dummy() -> None:
             pass
 
@@ -20,13 +21,11 @@ class TestGenerateOpenAPISchema:
             "handler": _dummy,
             "method": "GET",
             "path": "/",
-            "starlette_path": "/",
-            "path_params": [],
-            "query_params": [],
-            "param_meta": {},
         }
         defaults.update(kwargs)
-        return RouteInfo(**defaults)  # type: ignore[arg-type]
+        rdef = RouteDef(**defaults)  # type: ignore[arg-type]
+        dep = EndpointMeta(call=_dummy)
+        return (rdef, dep)
 
     def test_empty_route_infos(self) -> None:
         """Test with empty route infos."""
@@ -51,15 +50,14 @@ class TestGenerateOpenAPISchema:
 
     def test_with_routes(self) -> None:
         """Test with routes."""
-        route_info = self._make_route_info(
+        route_def, dep = self._make_route_info(
             method="GET",
             path="/test",
             summary="Test endpoint",
-            starlette_path="/test",
             router_prefix="/api",
             router_tags=["test"],
         )
-        schema = generate_openapi_schema([route_info])
+        schema = generate_openapi_schema([(route_def, dep)])
         paths = cast(dict[str, Any], schema["paths"])
         assert "/api/test" in paths
         assert "get" in paths["/api/test"]

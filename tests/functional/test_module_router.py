@@ -3,10 +3,8 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import Canary, module, service
+from canary_framework.core.web.router import Router
 
 
 @pytest.mark.functional
@@ -18,15 +16,14 @@ class TestModuleRouter:
         """Scenario 6: Module with Router, no children — own routes work."""
 
         @module(services=[])
-        class AppModule(ModuleBase):
+        class AppModule:
             router = Router()
 
             @router.get("/status")
             async def status(self) -> dict[str, str]:
                 return {"status": "ok"}
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/status")
@@ -41,7 +38,7 @@ class TestModuleRouter:
         """Scenario 7: Module with Router + child Service — combined routes work."""
 
         @service()
-        class ChildService(ServiceBase):
+        class ChildService:
             router = Router()
 
             @router.get("/child")
@@ -49,15 +46,14 @@ class TestModuleRouter:
                 return {"from": "child"}
 
         @module(services=[ChildService])
-        class AppModule(ModuleBase):
+        class AppModule:
             router = Router()
 
             @router.get("/root")
             async def root(self) -> dict[str, str]:
                 return {"from": "root"}
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r1 = await client.get("/root")
@@ -77,7 +73,7 @@ class TestModuleRouter:
         """Scenario 8: Module with Router + nested Module with Service."""
 
         @service()
-        class DeepService(ServiceBase):
+        class DeepService:
             router = Router()
 
             @router.get("/deep")
@@ -85,25 +81,24 @@ class TestModuleRouter:
                 return {"level": "deep"}
 
         @module(services=[DeepService])
-        class SubModule(ModuleBase):
+        class SubModule:
             pass
 
         @module(services=[SubModule])
-        class RootModule(ModuleBase):
+        class RootModule:
             router = Router()
 
             @router.get("/root")
             async def root(self) -> dict[str, str]:
                 return {"from": "root"}
 
-        app = RootModule()
-        app.init()
+        app = Canary(RootModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r1 = await client.get("/root")
             assert r1.status_code == 200
 
-            r2 = await client.get("/SubModule/DeepService/deep")
+            r2 = await client.get("/DeepService/deep")
             assert r2.status_code == 200
 
             schema = (await client.get("/openapi.json")).json()
@@ -115,7 +110,7 @@ class TestModuleRouter:
         """Both root and nested module have routers."""
 
         @service()
-        class LeafService(ServiceBase):
+        class LeafService:
             router = Router()
 
             @router.get("/leaf")
@@ -123,7 +118,7 @@ class TestModuleRouter:
                 return {"from": "leaf"}
 
         @module(services=[LeafService])
-        class SubModule(ModuleBase):
+        class SubModule:
             router = Router()
 
             @router.get("/sub-status")
@@ -131,20 +126,19 @@ class TestModuleRouter:
                 return {"from": "sub-module"}
 
         @module(services=[SubModule])
-        class RootModule(ModuleBase):
+        class RootModule:
             router = Router()
 
             @router.get("/root-status")
             async def root_status(self) -> dict[str, str]:
                 return {"from": "root-module"}
 
-        app = RootModule()
-        app.init()
+        app = Canary(RootModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/root-status")).status_code == 200
             assert (await client.get("/SubModule/sub-status")).status_code == 200
-            assert (await client.get("/SubModule/LeafService/leaf")).status_code == 200
+            assert (await client.get("/LeafService/leaf")).status_code == 200
 
             # All routes in one OpenAPI
             schema = (await client.get("/openapi.json")).json()
@@ -155,12 +149,12 @@ class TestModuleRouter:
         """Module's own router handler can use DI-injected dependencies."""
 
         @service()
-        class ConfigProvider(ServiceBase):
+        class ConfigProvider:
             def get_mode(self) -> str:
                 return "production"
 
         @module(services=[ConfigProvider])
-        class AppModule(ModuleBase):
+        class AppModule:
             router = Router()
             config_provider: ConfigProvider  # DI
 
@@ -168,8 +162,7 @@ class TestModuleRouter:
             async def mode(self) -> dict[str, str]:
                 return {"mode": self.config_provider.get_mode()}
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/mode")

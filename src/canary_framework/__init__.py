@@ -11,6 +11,7 @@ from __future__ import annotations
 
 __version__ = "0.5.0"
 
+from canary_framework.canary import Canary
 from canary_framework.common import (
     CanaryConfig,
     CanaryFrameworkError,
@@ -19,7 +20,7 @@ from canary_framework.common import (
     DependencyInjectionError,
     ServiceNotFoundError,
 )
-from canary_framework.core.router import Router
+from canary_framework.core.web.router import Router
 from canary_framework.decorators import (
     config,
     module,
@@ -27,6 +28,7 @@ from canary_framework.decorators import (
 )
 
 __all__ = [
+    "Canary",
     "CanaryConfig",
     "CanaryFrameworkError",
     "CircularDependencyError",

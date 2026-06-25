@@ -3,7 +3,7 @@
 import pytest
 from starlette.responses import JSONResponse, PlainTextResponse
 
-from canary_framework.core.router import (
+from canary_framework.core.web.router import (
     _auto_response,
     _convert_param,
 )

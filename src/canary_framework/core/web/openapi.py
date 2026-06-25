@@ -14,7 +14,7 @@ from typing import Any, cast
 from pydantic import TypeAdapter
 from pydantic.fields import FieldInfo
 
-from canary_framework.common import RouteInfo
+from canary_framework.common import RouteDef
 
 
 def _get_schema_for_type(
@@ -47,14 +47,16 @@ def _get_schema_for_type(
 
 
 def generate_openapi_schema(
-    route_infos: list[RouteInfo],
+    route_defs_and_deps: list[tuple[RouteDef, Any]],
     title: str = "Canary Framework API",
     version: str = "1.0.0",
     description: str = "",
     servers: list[dict[str, str]] | None = None,
     security_schemes: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, object]:
-    """从 RouteInfo 列表生成 OpenAPI 3.0.3 schema。"""
+    """从 (RouteDef, EndpointMeta) 列表生成 OpenAPI 3.0.3 schema。"""
+    from canary_framework.core.params import EndpointMeta
+
     schema: dict[str, object] = {
         "openapi": "3.0.3",
         "info": {"title": title, "version": version},
@@ -72,63 +74,76 @@ def generate_openapi_schema(
     schemas_dict = cast("dict[str, object]", components["schemas"])
     paths = cast("dict[str, object]", schema["paths"])
 
-    for info in route_infos:
+    for route_def, dep in route_defs_and_deps:
+        meta = cast(EndpointMeta, dep)
+        from starlette.routing import compile_path
+
+        _, starlette_path, _ = compile_path(route_def.path)
         starlette_path = (
-            info.router_prefix + info.starlette_path if info.router_prefix else info.starlette_path
+            route_def.router_prefix + starlette_path if route_def.router_prefix else starlette_path
         )
         while "//" in starlette_path:
             starlette_path = starlette_path.replace("//", "/")
 
         operation: dict[str, object] = {}
-        if info.summary:
-            operation["summary"] = info.summary
-        if info.description:
-            operation["description"] = info.description
-        if info.deprecated:
-            operation["deprecated"] = info.deprecated
-        if info.operation_id:
-            operation["operationId"] = info.operation_id
+        if route_def.summary:
+            operation["summary"] = route_def.summary
+        if route_def.description:
+            operation["description"] = route_def.description
+        if route_def.deprecated:
+            operation["deprecated"] = route_def.deprecated
+        if route_def.operation_id:
+            operation["operationId"] = route_def.operation_id
 
-        merged_tags = list(dict.fromkeys(info.router_tags + info.tags))
+        merged_tags = list(dict.fromkeys(route_def.router_tags + route_def.tags))
         if merged_tags:
             operation["tags"] = merged_tags
 
         parameters: list[dict[str, object]] = []
-        for param_name in info.path_params:
-            entry = info.param_meta.get(param_name, (str, False, None))
-            param_schema = _get_schema_for_type(entry[0], schemas_dict, entry[2])  # type: ignore[index]
-            parameters.append(
-                {
-                    "name": param_name,
-                    "in": "path",
-                    "required": True,
-                    "schema": param_schema,
-                }
-            )
-        for param_name in info.query_params:
-            entry = info.param_meta.get(param_name, (str, False, None))
-            param_schema = _get_schema_for_type(entry[0], schemas_dict, entry[2])  # type: ignore[index]
-            parameters.append(
-                {
-                    "name": param_name,
-                    "in": "query",
-                    "required": not entry[1],  # type: ignore[index]
-                    "schema": param_schema,
-                }
-            )
+
+        def _collect_params(d: EndpointMeta, params_list: list[dict[str, object]]) -> None:
+            for param_name, entry in d.path_params.items():
+                # Avoid duplicates
+                if any(p["name"] == param_name and p["in"] == "path" for p in params_list):
+                    continue
+                param_schema = _get_schema_for_type(entry[0], schemas_dict, entry[2])
+                params_list.append(
+                    {
+                        "name": param_name,
+                        "in": "path",
+                        "required": True,
+                        "schema": param_schema,
+                    }
+                )
+            for param_name, entry in d.query_params.items():
+                if any(p["name"] == param_name and p["in"] == "query" for p in params_list):
+                    continue
+                param_schema = _get_schema_for_type(entry[0], schemas_dict, entry[2])
+                params_list.append(
+                    {
+                        "name": param_name,
+                        "in": "query",
+                        "required": not entry[1],
+                        "schema": param_schema,
+                    }
+                )
+
+        _collect_params(meta, parameters)
+
         if parameters:
             operation["parameters"] = parameters
 
-        if info.request_model is not None:
-            request_schema = _get_schema_for_type(info.request_model, schemas_dict)
+        body_model = meta.body_model or route_def.request_model
+        if body_model is not None:
+            request_schema = _get_schema_for_type(body_model, schemas_dict)
             operation["requestBody"] = {
-                "description": getattr(info.request_model, "__doc__", "") or "",
+                "description": getattr(body_model, "__doc__", "") or "",
                 "content": {"application/json": {"schema": request_schema}},
             }
 
-        responses: dict[str, object] = dict(info.responses)
-        if info.response_model is not None:
-            response_schema = _get_schema_for_type(info.response_model, schemas_dict)
+        responses: dict[str, object] = dict(route_def.responses)
+        if route_def.response_model is not None:
+            response_schema = _get_schema_for_type(route_def.response_model, schemas_dict)
             if "200" not in responses:
                 responses["200"] = {
                     "description": "Successful Response",
@@ -137,7 +152,7 @@ def generate_openapi_schema(
         operation["responses"] = responses
 
         _ = paths.setdefault(starlette_path, {})
-        cast("dict[str, object]", paths[starlette_path])[info.method.lower()] = operation
+        cast("dict[str, object]", paths[starlette_path])[route_def.method.lower()] = operation
 
     return schema
 
