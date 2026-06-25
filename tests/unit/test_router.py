@@ -7,6 +7,42 @@ from canary_framework.core.router import (
     _auto_response,
     _convert_param,
 )
+from canary_framework.core.router._utils import parse_route_path
+
+
+@pytest.mark.unit
+class TestParseRoutePath:
+    """Tests for parse_route_path function."""
+
+    def test_simple_path(self) -> None:
+        """Test simple path with no params."""
+        path, path_params, query_params = parse_route_path("/simple")
+        assert path == "/simple"
+        assert path_params == []
+        assert query_params == []
+
+    def test_path_with_path_params(self) -> None:
+        """Test path with path params."""
+        path, path_params, query_params = parse_route_path("/items/{item_id}")
+        assert path == "/items/{item_id}"
+        assert path_params == ["item_id"]
+        assert query_params == []
+
+    def test_path_with_query_params(self) -> None:
+        """Test path with query params."""
+        path, path_params, query_params = parse_route_path("/items?page={page}&limit={limit}")
+        assert path == "/items"
+        assert path_params == []
+        assert query_params == ["page", "limit"]
+
+    def test_path_with_path_and_query_params(self) -> None:
+        """Test path with both path and query params."""
+        path, path_params, query_params = parse_route_path(
+            "/items/{item_id}?page={page}&limit={limit}"
+        )
+        assert path == "/items/{item_id}"
+        assert path_params == ["item_id"]
+        assert query_params == ["page", "limit"]
 
 
 @pytest.mark.unit

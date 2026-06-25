@@ -21,7 +21,7 @@ from canary_framework import (
     DependencyInjectionError,
     CircularDependencyError,
     ConfigurationError,
-    CanaryFrameworkError,
+    LifecycleHookError,
     ServiceNotFoundError,
 
     # Enums
@@ -216,7 +216,7 @@ class Database(ServiceBase):
         await super().init()
         # connection setup
 
-    async def shutdown(self):\n        await super().shutdown()
+    @before_shutdown
     async def disconnect(self):
         pass
 ```
@@ -374,7 +374,7 @@ Exception
     ├── ServiceNotFoundError     # Service lookup failure
     ├── CircularDependencyError  # Topological sort cycle detected
     ├── DependencyInjectionError # DI wiring failure
-    └── CanaryFrameworkError       # Hook raised unhandled exception
+    └── LifecycleHookError       # Hook raised unhandled exception
 ```
 
 ---
@@ -391,7 +391,7 @@ Circular dependency detected during topological sort.
 
 ---
 
-### CanaryFrameworkError
+### LifecycleHookError
 
 Error in a lifecycle hook. Wraps the original exception.
 
@@ -520,7 +520,7 @@ class LifecycleAware(Protocol):
 ```
 
 **Functions:**
-- `(instance: object) -> HookDict`: Traverse MRO to find lifecycle hook methods
+- `find_hooks(instance: object) -> HookDict`: Traverse MRO to find lifecycle hook methods
 
 ---
 

@@ -3,10 +3,26 @@
 import pytest
 
 from canary_framework.common.types import (
+    LifecycleHook,
     ModuleMeta,
     ServiceEntry,
     ServiceMeta,
 )
+
+
+@pytest.mark.unit
+class TestLifecycleHook:
+    """Tests for LifecycleHook enum."""
+
+    def test_enum_values(self) -> None:
+        """Test that enum has correct values."""
+        assert LifecycleHook.BEFORE_STARTUP.value == "before_startup"
+        assert LifecycleHook.BEFORE_SHUTDOWN.value == "before_shutdown"
+
+    def test_enum_iteration(self) -> None:
+        """Test enum iteration."""
+        values = list(LifecycleHook)
+        assert len(values) == 2
 
 
 @pytest.mark.unit

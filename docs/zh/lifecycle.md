@@ -51,14 +51,14 @@ class MyService(ServiceBase):
         pass
 ```
 
-使用 `async def startup(self):\n        await super().startup()` 钩子在启动前运行代码：
+使用 `@before_startup` 钩子在启动前运行代码：
 
 ```python
 from canary_framework import before_startup
 
 @service()
 class Server(ServiceBase):
-    async def startup(self):\n        await super().startup()
+    @before_startup
     async def verify_connections(self):
         assert self.db.connection is not None
         assert self.cache.connection is not None
@@ -75,14 +75,14 @@ class MyService(ServiceBase):
         pass
 ```
 
-使用 `async def shutdown(self):\n        await super().shutdown()` 钩子在关闭前运行代码：
+使用 `@before_shutdown` 钩子在关闭前运行代码：
 
 ```python
 from canary_framework import before_shutdown
 
 @service()
 class Database(ServiceBase):
-    async def shutdown(self):\n        await super().shutdown()
+    @before_shutdown
     async def disconnect(self):
         await self.connection.close()
 ```
@@ -93,8 +93,8 @@ class Database(ServiceBase):
 
 | 装饰器 | 阶段 | 时机 |
 |-----------|-------|--------|
-| `async def startup(self):\n        await super().startup()` | 启动 | `startup()` 调用前 |
-| `async def shutdown(self):\n        await super().shutdown()` | 关闭 | `shutdown()` 调用前 |
+| `@before_startup` | 启动 | `startup()` 调用前 |
+| `@before_shutdown` | 关闭 | `shutdown()` 调用前 |
 
 ## 钩子方法
 
@@ -103,7 +103,7 @@ class Database(ServiceBase):
 ```python
 @service()
 class MyService(ServiceBase):
-    async def startup(self):\n        await super().startup()
+    @before_startup
     async def async_hook(self):
         await some_async_operation()
 ```
@@ -154,11 +154,11 @@ class A(ServiceBase):
         await super().init()
         calls.append("A: init")
 
-    async def startup(self):\n        await super().startup()
+    @before_startup
     def startup_a(self):
         calls.append("A: before_startup")
 
-    async def shutdown(self):\n        await super().shutdown()
+    @before_shutdown
     def shutdown_a(self):
         calls.append("A: before_shutdown")
 
@@ -170,11 +170,11 @@ class B(ServiceBase):
         await super().init()
         calls.append("B: init")
 
-    async def startup(self):\n        await super().startup()
+    @before_startup
     def startup_b(self):
         calls.append("B: before_startup")
 
-    async def shutdown(self):\n        await super().shutdown()
+    @before_shutdown
     def shutdown_b(self):
         calls.append("B: before_shutdown")
 
@@ -298,21 +298,21 @@ class AppConfig(CanaryConfig):
 
 ## 错误处理
 
-如果钩子引发异常，它会被包装在 `CanaryFrameworkError` 中：
+如果钩子引发异常，它会被包装在 `LifecycleHookError` 中：
 
 ```python
-from canary_framework.common import CanaryFrameworkError
+from canary_framework.common import LifecycleHookError
 
 try:
     await app.init()
-except CanaryFrameworkError as e:
+except LifecycleHookError as e:
     print(f"生命周期错误：{e}")
 ```
 
 ## 最佳实践
 
 1. **重写 `init()` 建立连接和设置数据**：初始化期间建立连接和设置初始数据
-2. **使用 `async def startup(self):\n        await super().startup()` 进行验证**：提供服务前验证一切就绪
-3. **使用 `async def shutdown(self):\n        await super().shutdown()` 进行清理**：优雅关闭连接并保存状态
+2. **使用 `@before_startup` 进行验证**：提供服务前验证一切就绪
+3. **使用 `@before_shutdown` 进行清理**：优雅关闭连接并保存状态
 4. **保持钩子专注**：每个钩子应该只做好一件事
 5. **优雅处理错误**：在钩子中捕获并记录异常

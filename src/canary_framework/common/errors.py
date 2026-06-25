@@ -45,10 +45,18 @@ class DependencyInjectionError(CanaryFrameworkError):
     """
 
 
+class LifecycleHookError(CanaryFrameworkError):
+    """运行时钩子抛出未处理异常时抛出。
+
+    Raised when a runtime hook raises an unhandled exception.
+    """
+
+
 __all__ = [
     "CanaryFrameworkError",
     "CircularDependencyError",
     "ConfigurationError",
     "DependencyInjectionError",
+    "LifecycleHookError",
     "ServiceNotFoundError",
 ]

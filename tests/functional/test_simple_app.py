@@ -5,6 +5,7 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
 from canary_framework import (
+    before_startup,
     module,
     service,
 )
@@ -79,8 +80,9 @@ class TestSimpleApp:
                     TodoItem(title="Build awesome app", completed=False)
                 )
 
-            async def startup(self) -> None:
-                await super().startup()
+            @before_startup
+            async def on_startup(self) -> None:
+                pass
 
         # Create and configure the app
         app = TodoApp()

@@ -54,8 +54,8 @@ Services go through a well-defined lifecycle:
 
 1. **Instantiation**: Service instance is created
 2. **Initialization**: `init()` is called; override for connection setup and data seeding
-3. **Startup**: `startup()` is called; `async def startup(self):\n        await super().startup()` hooks run before
-4. **Shutdown**: `async def shutdown(self):\n        await super().shutdown()` hooks run, then `shutdown()` is called
+3. **Startup**: `startup()` is called; `@before_startup` hooks run before
+4. **Shutdown**: `@before_shutdown` hooks run, then `shutdown()` is called
 
 You can hook into these phases using lifecycle decorators. See the [Lifecycle](./lifecycle.md) documentation for details.
 
@@ -86,12 +86,12 @@ class Cache(ServiceBase):
         self.store["default"] = {"value": "default"}
         print("Cache warmed up")
 
-    async def startup(self):\n        await super().startup()
+    @before_startup
     async def verify(self):
         assert self.connection is not None
         print("Cache verified")
 
-    async def shutdown(self):\n        await super().shutdown()
+    @before_shutdown
     async def cleanup(self):
         self.connection = None
         print("Cache disconnected")
