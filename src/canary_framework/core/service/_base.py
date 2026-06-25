@@ -5,10 +5,13 @@
 
 ServiceBase — lifecycle-aware service with hook invocation.
 
-Provides init / startup / shutdown lifecycle.
+Provides init / startup / shutdown lifecycle with
+declarative hook support via @before_startup, @before_shutdown.
 """
 
 from __future__ import annotations
+
+import inspect
 
 from starlette.routing import Route
 from starlette.routing import Router as StarletteRouter
@@ -16,11 +19,14 @@ from starlette.types import Receive, Scope, Send
 
 from canary_framework.common import (
     CF_NAME_ATTR,
+    LifecycleHook,
+    LifecycleHookError,
     RouteInfo,
 )
 from canary_framework.common.config import CanaryConfig
 from canary_framework.common.logging import get_logger
 from canary_framework.core.router import Router, _build_doc_routes, _collect_routes
+from canary_framework.core.service._hooks import HookDict, find_hooks
 
 _log = get_logger("service")
 
@@ -40,6 +46,7 @@ class ServiceBase:
 
         Initializes the ServiceBase instance.
         """
+        self._cf_hooks: HookDict | None = None
         self._cf_parent_registry: object | None = None
         self._starlette_router: StarletteRouter | None = None
         self._cf_root_routes: list[Route] | None = None
@@ -81,19 +88,31 @@ class ServiceBase:
 
     async def startup(self) -> None:
         """启动服务。
+
+        调用BEFORE_STARTUP钩子。
+        如果是顶层服务/模块（无父Registry），自动生成 OpenAPI 文档端点。
+
         Start the service.
 
+        Invokes the BEFORE_STARTUP hook.
         Generates OpenAPI doc endpoints when running as top-level (no parent registry).
         """
         _log.debug("Starting service: %s", type(self).__name__)
+        await self._invoke_hook(LifecycleHook.BEFORE_STARTUP)
         if self._cf_parent_registry is None:
             await self._cf_generate_openapi()
 
     async def shutdown(self) -> None:
         """关闭服务。
+
+        调用BEFORE_SHUTDOWN钩子。
+
         Shutdown the service.
+
+        Invokes the BEFORE_SHUTDOWN hook.
         """
         _log.debug("Shutting down service: %s", type(self).__name__)
+        await self._invoke_hook(LifecycleHook.BEFORE_SHUTDOWN)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """ASGI 应用入口点。
@@ -110,13 +129,7 @@ class ServiceBase:
             await self._handle_lifespan(receive, send)
         else:
             if self._cf_parent_registry is None and self._cf_root_routes is None:
-                if getattr(self, "_cf_openapi_lock", None) is None:
-                    import asyncio
-
-                    self._cf_openapi_lock = asyncio.Lock()
-                async with self._cf_openapi_lock:
-                    if self._cf_root_routes is None:
-                        await self._cf_generate_openapi()
+                await self._cf_generate_openapi()
             asgi = self.asgi_app
             if asgi is not None:
                 await asgi(scope, receive, send)
@@ -192,6 +205,46 @@ class ServiceBase:
                 return
             else:
                 _log.warning("Unknown lifespan message type: %s", message["type"])
+
+    async def _invoke_hook(self, hook: LifecycleHook) -> None:
+        """调用指定的生命周期钩子。
+
+        如果钩子函数不存在则跳过。
+        如果钩子是协程函数则await执行，否则直接调用。
+        如果钩子抛出异常，将其包装为LifecycleHookError。
+
+        Args:
+            hook: 要调用的生命周期钩子类型。
+
+        Raises:
+            LifecycleHookError: 如果钩子执行时抛出异常。
+
+        Invoke the specified lifecycle hook.
+
+        Skips if the hook function doesn't exist.
+        Awaits if the hook is a coroutine function, otherwise calls directly.
+        Wraps any exceptions raised by the hook in LifecycleHookError.
+
+        Args:
+            hook: The lifecycle hook type to invoke.
+
+        Raises:
+            LifecycleHookError: If the hook raises an exception during execution.
+        """
+        if self._cf_hooks is None:
+            self._cf_hooks = find_hooks(self)
+        fn = self._cf_hooks.get(hook)
+        if fn is None:
+            return
+        try:
+            if inspect.iscoroutinefunction(fn):
+                await fn()
+            else:
+                _ = fn()
+        except Exception as exc:
+            raise LifecycleHookError(
+                f"Service raised an error in {hook.value} hook: {exc}"
+            ) from exc
 
     def _cf_collect_route_infos(self) -> list[RouteInfo]:
         """收集自身及子服务的所有 RouteInfo。"""

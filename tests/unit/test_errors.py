@@ -7,6 +7,7 @@ from canary_framework.common.errors import (
     CircularDependencyError,
     ConfigurationError,
     DependencyInjectionError,
+    LifecycleHookError,
     ServiceNotFoundError,
 )
 
@@ -21,6 +22,7 @@ class TestExceptions:
         assert issubclass(ServiceNotFoundError, CanaryFrameworkError)
         assert issubclass(CircularDependencyError, CanaryFrameworkError)
         assert issubclass(DependencyInjectionError, CanaryFrameworkError)
+        assert issubclass(LifecycleHookError, CanaryFrameworkError)
 
     def test_exception_instantiation(self) -> None:
         """Test that exceptions can be instantiated with messages."""
@@ -38,6 +40,9 @@ class TestExceptions:
 
         di_error = DependencyInjectionError("DI failed")
         assert str(di_error) == "DI failed"
+
+        hook_error = LifecycleHookError("Hook failed")
+        assert str(hook_error) == "Hook failed"
 
     def test_exception_catch(self) -> None:
         """Test that specific exceptions can be caught by base class."""

@@ -64,7 +64,7 @@ async def __call__(self, scope, receive, send):
 
 ### `_invoke_hook`
 
-通过 `()`（engine/hooks.py）进行懒加载钩子发现。首次调用时，`()` 遍历类 MRO 查找标记了钩子标记（`__cf_before_startup__`、`__cf_before_shutdown__`）的方法，并将其绑定到实例。支持同步和异步钩子。钩子引发的任何异常都会被包装在 `CanaryFrameworkError` 中。
+通过 `find_hooks()`（engine/hooks.py）进行懒加载钩子发现。首次调用时，`find_hooks()` 遍历类 MRO 查找标记了钩子标记（`__cf_before_startup__`、`__cf_before_shutdown__`）的方法，并将其绑定到实例。支持同步和异步钩子。钩子引发的任何异常都会被包装在 `LifecycleHookError` 中。
 
 ## ModuleBase 内部机制
 
@@ -259,7 +259,7 @@ Exception
     ├── ServiceNotFoundError          # 服务查找失败
     ├── CircularDependencyError       # 拓扑排序检测到循环
     ├── DependencyInjectionError      # DI 注入失败（None 实例等）
-    └── CanaryFrameworkError            # 钩子引发未处理异常
+    └── LifecycleHookError            # 钩子引发未处理异常
 ```
 
 所有框架错误继承自 `CanaryFrameworkError`，调用者可以捕获单一类型来处理所有框架错误。

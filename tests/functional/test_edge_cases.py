@@ -62,7 +62,7 @@ class TestEdgeCases:
         class MyService(ServiceBase):
             router = Router()
 
-            @router.get("/check")
+            @router.get("/check?flag={flag}")
             async def check(self, flag: bool) -> dict[str, bool]:
                 return {"flag": flag}
 
