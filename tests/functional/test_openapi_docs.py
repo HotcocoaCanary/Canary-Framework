@@ -6,17 +6,27 @@ import pytest
 from pydantic import BaseModel
 
 from canary_framework import service
-from canary_framework.common import RouteInfo
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
-from canary_framework.engine.openapi import generate_openapi_schema
+from canary_framework.common import RouteDef
+from canary_framework.core.params import EndpointMeta, resolve_endpoint_meta
+from canary_framework.core.web.openapi import generate_openapi_schema
+from canary_framework.core.web.router import Router
 
 
-def _collect_route_infos(cls: type[ServiceBase]) -> list[RouteInfo]:
-    """从服务类中收集 RouteInfo 对象。"""
+def _collect_route_defs_and_deps(cls: type) -> list[tuple[RouteDef, EndpointMeta]]:
+    """从服务类中收集 RouteDef 和 EndpointMeta 对象。"""
     router = getattr(cls, "router", None)
     if isinstance(router, Router):
-        return list(router._route_infos)
+        result: list[tuple[RouteDef, EndpointMeta]] = []
+        for rdef in router._route_defs:
+            dep = resolve_endpoint_meta(
+                path=rdef.path,
+                call=rdef.handler,
+                is_endpoint=True,
+                request_model=rdef.request_model,
+                http_method=rdef.method,
+            )
+            result.append((rdef, dep))
+        return result
     return []
 
 
@@ -37,7 +47,7 @@ class TestOpenAPIDocs:
             value: int
 
         @service()
-        class MyRouter(ServiceBase):
+        class MyRouter:
             router = Router()
 
             @router.get("/items", summary="Get all items", tags=["items"])
@@ -54,9 +64,9 @@ class TestOpenAPIDocs:
             async def create_item(self) -> None:
                 pass
 
-        route_infos = _collect_route_infos(MyRouter)
-        assert len(route_infos) == 2
-        schema = generate_openapi_schema(route_infos)
+        route_defs_and_deps = _collect_route_defs_and_deps(MyRouter)
+        assert len(route_defs_and_deps) == 2
+        schema = generate_openapi_schema(route_defs_and_deps)
 
         assert schema["openapi"] == "3.0.3"
         assert "info" in schema
@@ -68,7 +78,7 @@ class TestOpenAPIDocs:
         """Test OpenAPI with multiple routers."""
 
         @service()
-        class UserRouter(ServiceBase):
+        class UserRouter:
             router = Router()
 
             @router.get("/users")
@@ -76,16 +86,18 @@ class TestOpenAPIDocs:
                 pass
 
         @service()
-        class ProductRouter(ServiceBase):
+        class ProductRouter:
             router = Router()
 
             @router.get("/products")
             async def get_products(self) -> None:
                 pass
 
-        route_infos = _collect_route_infos(UserRouter) + _collect_route_infos(ProductRouter)
+        route_defs_and_deps = _collect_route_defs_and_deps(
+            UserRouter
+        ) + _collect_route_defs_and_deps(ProductRouter)
         schema = generate_openapi_schema(
-            route_infos,
+            route_defs_and_deps,
             title="Shop API",
             version="1.0.0",
         )
@@ -102,7 +114,7 @@ class TestOpenAPIDocs:
         """Test OpenAPI with descriptions."""
 
         @service()
-        class MyRouter(ServiceBase):
+        class MyRouter:
             router = Router()
 
             @router.get(
@@ -113,8 +125,8 @@ class TestOpenAPIDocs:
             async def test(self) -> None:
                 pass
 
-        route_infos = _collect_route_infos(MyRouter)
-        schema = generate_openapi_schema(route_infos)
+        route_defs_and_deps = _collect_route_defs_and_deps(MyRouter)
+        schema = generate_openapi_schema(route_defs_and_deps)
 
         paths = cast(dict[str, Any], schema["paths"])
         path_obj = cast(dict[str, Any], next(iter(paths.values())))

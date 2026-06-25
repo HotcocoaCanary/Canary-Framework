@@ -3,10 +3,8 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import Canary, module, service
+from canary_framework.core.web.router import Router
 
 
 @pytest.mark.functional
@@ -18,7 +16,7 @@ class TestModuleNesting:
         """Module → Service — routes propagate to root."""
 
         @service()
-        class ApiService(ServiceBase):
+        class ApiService:
             router = Router()
 
             @router.get("/data")
@@ -26,18 +24,17 @@ class TestModuleNesting:
                 return {"source": "leaf"}
 
         @module(services=[ApiService])
-        class SubModule(ModuleBase):
+        class SubModule:
             pass
 
         @module(services=[SubModule])
-        class RootModule(ModuleBase):
+        class RootModule:
             pass
 
-        app = RootModule()
-        app.init()
+        app = Canary(RootModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/SubModule/ApiService/data")
+            response = await client.get("/ApiService/data")
             assert response.status_code == 200
             assert response.json() == {"source": "leaf"}
 
@@ -49,7 +46,7 @@ class TestModuleNesting:
         """Root → Mid → Service — three-level route propagation."""
 
         @service()
-        class DeepService(ServiceBase):
+        class DeepService:
             router = Router()
 
             @router.get("/deep")
@@ -57,18 +54,17 @@ class TestModuleNesting:
                 return {"level": "deep"}
 
         @module(services=[DeepService])
-        class MidModule(ModuleBase):
+        class MidModule:
             pass
 
         @module(services=[MidModule])
-        class RootModule(ModuleBase):
+        class RootModule:
             pass
 
-        app = RootModule()
-        app.init()
+        app = Canary(RootModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/MidModule/DeepService/deep")
+            response = await client.get("/DeepService/deep")
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -76,7 +72,7 @@ class TestModuleNesting:
         """Module → multiple child Modules each with Services."""
 
         @service()
-        class UserService(ServiceBase):
+        class UserService:
             router = Router()
 
             @router.get("/me")
@@ -84,7 +80,7 @@ class TestModuleNesting:
                 return {"user": "alice"}
 
         @service()
-        class OrderService(ServiceBase):
+        class OrderService:
             router = Router()
 
             @router.get("/mine")
@@ -92,25 +88,24 @@ class TestModuleNesting:
                 return {"orders": []}
 
         @module(services=[UserService])
-        class UserModule(ModuleBase):
+        class UserModule:
             pass
 
         @module(services=[OrderService])
-        class OrderModule(ModuleBase):
+        class OrderModule:
             pass
 
         @module(services=[UserModule, OrderModule])
-        class AppModule(ModuleBase):
+        class AppModule:
             pass
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r1 = await client.get("/UserModule/UserService/me")
+            r1 = await client.get("/UserService/me")
             assert r1.status_code == 200
 
-            r2 = await client.get("/OrderModule/OrderService/mine")
+            r2 = await client.get("/OrderService/mine")
             assert r2.status_code == 200
 
             schema = (await client.get("/openapi.json")).json()
@@ -122,12 +117,12 @@ class TestModuleNesting:
         """DI across module boundaries: child module's service depends on root module's service."""
 
         @service()
-        class SharedDB(ServiceBase):
+        class SharedDB:
             def query(self) -> str:
                 return "shared-data"
 
         @service()
-        class ConsumerService(ServiceBase):
+        class ConsumerService:
             router = Router()
             db: SharedDB
 
@@ -136,18 +131,17 @@ class TestModuleNesting:
                 return {"data": self.db.query()}
 
         @module(services=[ConsumerService])
-        class ChildModule(ModuleBase):
+        class ChildModule:
             pass
 
         @module(services=[SharedDB, ChildModule])
-        class RootModule(ModuleBase):
+        class RootModule:
             pass
 
-        app = RootModule()
-        app.init()
+        app = Canary(RootModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/ChildModule/ConsumerService/data")
+            response = await client.get("/ConsumerService/data")
             assert response.status_code == 200
             assert response.json() == {"data": "shared-data"}
 
@@ -156,7 +150,7 @@ class TestModuleNesting:
         """Root → empty Module → Service."""
 
         @service()
-        class LeafService(ServiceBase):
+        class LeafService:
             router = Router()
 
             @router.get("/leaf")
@@ -164,15 +158,14 @@ class TestModuleNesting:
                 return {"ok": "leaf"}
 
         @module(services=[])
-        class MidModule(ModuleBase):
+        class MidModule:
             pass
 
         @module(services=[MidModule, LeafService])
-        class RootModule(ModuleBase):
+        class RootModule:
             pass
 
-        app = RootModule()
-        app.init()
+        app = Canary(RootModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/LeafService/leaf")
@@ -183,19 +176,18 @@ class TestModuleNesting:
         """Nested modules with no routers anywhere — no docs."""
 
         @service()
-        class DataService(ServiceBase):
+        class DataService:
             pass
 
         @module(services=[DataService])
-        class SubModule(ModuleBase):
+        class SubModule:
             pass
 
         @module(services=[SubModule])
-        class RootModule(ModuleBase):
+        class RootModule:
             pass
 
-        app = RootModule()
-        app.init()
+        app = Canary(RootModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             for path in ("/docs", "/redoc", "/openapi.json"):

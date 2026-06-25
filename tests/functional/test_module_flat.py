@@ -3,10 +3,8 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import Canary, module, service
+from canary_framework.core.web.router import Router
 
 
 @pytest.mark.functional
@@ -18,11 +16,10 @@ class TestModuleFlat:
         """Scenario 3a: Empty module — starts, no routes, docs 404."""
 
         @module(services=[])
-        class EmptyModule(ModuleBase):
+        class EmptyModule:
             pass
 
-        app = EmptyModule()
-        app.init()
+        app = Canary(EmptyModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/docs")
@@ -33,15 +30,14 @@ class TestModuleFlat:
         """Scenario 3b: Module with one service (no router) — starts, no docs."""
 
         @service()
-        class DataService(ServiceBase):
+        class DataService:
             pass
 
         @module(services=[DataService])
-        class AppModule(ModuleBase):
+        class AppModule:
             pass
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/docs")
@@ -52,7 +48,7 @@ class TestModuleFlat:
         """Scenario 4: Module with one Service that has a Router — routes work, docs available."""
 
         @service()
-        class ApiService(ServiceBase):
+        class ApiService:
             router = Router()
 
             @router.get("/ping")
@@ -60,11 +56,10 @@ class TestModuleFlat:
                 return {"status": "ok"}
 
         @module(services=[ApiService])
-        class AppModule(ModuleBase):
+        class AppModule:
             pass
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Route works
@@ -83,7 +78,7 @@ class TestModuleFlat:
         """Module with multiple router services — all routes work, one OpenAPI."""
 
         @service()
-        class UserService(ServiceBase):
+        class UserService:
             router = Router(prefix="/users")
 
             @router.get("/list")
@@ -91,7 +86,7 @@ class TestModuleFlat:
                 return {"users": []}
 
         @service()
-        class OrderService(ServiceBase):
+        class OrderService:
             router = Router(prefix="/orders")
 
             @router.get("/list")
@@ -99,11 +94,10 @@ class TestModuleFlat:
                 return {"orders": []}
 
         @module(services=[UserService, OrderService])
-        class AppModule(ModuleBase):
+        class AppModule:
             pass
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Both routes work
@@ -124,7 +118,7 @@ class TestModuleFlat:
         """Module with DI: one service depends on another."""
 
         @service()
-        class CounterService(ServiceBase):
+        class CounterService:
             def __init__(self) -> None:
                 super().__init__()
                 self.count = 0
@@ -134,7 +128,7 @@ class TestModuleFlat:
                 return self.count
 
         @service()
-        class ApiService(ServiceBase):
+        class ApiService:
             router = Router()
             counter: CounterService  # DI
 
@@ -143,11 +137,10 @@ class TestModuleFlat:
                 return {"count": self.counter.increment()}
 
         @module(services=[ApiService])
-        class AppModule(ModuleBase):
+        class AppModule:
             pass
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/ApiService/count")
@@ -162,11 +155,11 @@ class TestModuleFlat:
         """Module with Optional[Service] DI — resolves correctly."""
 
         @service()
-        class OptionalDepService(ServiceBase):
+        class OptionalDepService:
             pass
 
         @service()
-        class ApiService(ServiceBase):
+        class ApiService:
             router = Router()
             dep: OptionalDepService | None
 
@@ -175,11 +168,10 @@ class TestModuleFlat:
                 return {"has_dep": self.dep is not None}
 
         @module(services=[OptionalDepService, ApiService])
-        class AppModule(ModuleBase):
+        class AppModule:
             pass
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/ApiService/has-dep")
@@ -191,12 +183,12 @@ class TestModuleFlat:
         """Services declared via DI annotation auto-registered."""
 
         @service()
-        class HelperService(ServiceBase):
+        class HelperService:
             def value(self) -> int:
                 return 99
 
         @service()
-        class MainService(ServiceBase):
+        class MainService:
             router = Router()
             helper: HelperService  # auto-registers HelperService
 
@@ -205,11 +197,10 @@ class TestModuleFlat:
                 return {"val": self.helper.value()}
 
         @module(services=[MainService])
-        class AppModule(ModuleBase):
+        class AppModule:
             pass
 
-        app = AppModule()
-        app.init()
+        app = Canary(AppModule())
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/MainService/val")
