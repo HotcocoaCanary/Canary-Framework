@@ -5,12 +5,11 @@ from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
 from canary_framework import (
+    Canary,
     module,
     service,
 )
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework.core.web.router import Router
 
 
 @pytest.mark.functional
@@ -29,7 +28,7 @@ class TestSimpleApp:
 
         # Define a service to manage todos
         @service()
-        class TodoService(ServiceBase):
+        class TodoService:
             def __init__(self) -> None:
                 super().__init__()
                 self.todos: list[TodoItem] = []
@@ -54,7 +53,7 @@ class TestSimpleApp:
 
         # Define a router with API endpoints
         @service()
-        class TodoRouter(ServiceBase):
+        class TodoRouter:
             router = Router()
             todo_service: TodoService
 
@@ -69,7 +68,7 @@ class TestSimpleApp:
 
         # Define the main module
         @module(services=[TodoRouter])
-        class TodoApp(ModuleBase):
+        class TodoApp:
             async def setup_test_data(self) -> None:
                 # Add some test data
                 self.TodoRouter.todo_service.create(  # type: ignore[attr-defined]
@@ -80,11 +79,10 @@ class TestSimpleApp:
                 )
 
             async def startup(self) -> None:
-                await super().startup()
+                await self.setup_test_data()
 
         # Create and configure the app
-        app = TodoApp()
-        app.init()
+        app = Canary(TodoApp())
 
         # Test the API endpoints
         async with AsyncClient(
@@ -116,7 +114,7 @@ class TestSimpleApp:
         """Test OpenAPI docs."""
 
         @service()
-        class MyRouter(ServiceBase):
+        class MyRouter:
             router = Router()
 
             @router.get("/test")
@@ -124,11 +122,10 @@ class TestSimpleApp:
                 return {"status": "ok"}
 
         @module(services=[MyRouter])
-        class MyApp(ModuleBase):
+        class MyApp:
             pass
 
-        app = MyApp()
-        app.init()
+        app = Canary(MyApp())
         await app.startup()
 
         async with AsyncClient(

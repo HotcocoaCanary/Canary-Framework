@@ -114,27 +114,22 @@ CF_NAME_ATTR = "__cf_name__"
 
 
 @dataclass(slots=True)
-class RouteInfo:
-    """单个 HTTP 路由的完整元数据。
+class RouteDef:
+    """单个 HTTP 路由的原始定义元数据。
 
-    在 Router 的 @router.get/@router.post 等方法中创建，替代原来的无类型 dict。
-    预计算 starlette_path、path_params、query_params 和 param_meta，
-    避免运行时和 OpenAPI 生成时的重复解析。
+    在 Router 的 @router.get/@router.post 等方法中创建，采用惰性解析策略，
+    仅保存用户定义的原始信息。路径编译和依赖图构建推迟到挂载阶段执行。
 
-    Complete metadata for a single HTTP route.
+    Raw definition metadata for a single HTTP route.
 
-    Created by Router's @router.get/@router.post etc. methods, replacing the untyped dict.
-    Pre-computes starlette_path, path_params, query_params, and param_meta
-    to avoid duplicate parsing at runtime and OpenAPI generation time.
+    Created by Router's @router.get/@router.post etc. methods using a lazy
+    resolution strategy, preserving only raw user-defined information.
+    Path compilation and dependency graph building are deferred to the mount phase.
     """
 
     handler: Callable[..., object]
     method: str
     path: str
-    starlette_path: str
-    path_params: list[str]
-    query_params: list[str]
-    param_meta: dict[str, object]
     summary: str | None = None
     description: str | None = None
     response_model: type | None = None
@@ -239,7 +234,7 @@ __all__ = [
     "CF_SERVICE_META",
     "LifecycleAware",
     "ModuleMeta",
-    "RouteInfo",
+    "RouteDef",
     "ServiceEntry",
     "ServiceMeta",
     "get_module_meta",
