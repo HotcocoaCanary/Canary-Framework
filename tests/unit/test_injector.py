@@ -3,8 +3,8 @@
 import pytest
 
 from canary_framework.common import CF_SERVICE_MARKER, ServiceMeta
-from canary_framework.core.dependencies import topological_sort
-from canary_framework.core.registry import Registry
+from canary_framework.engine.dependencies import topological_sort
+from canary_framework.engine.registry import Registry
 
 
 @pytest.mark.unit

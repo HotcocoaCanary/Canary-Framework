@@ -4,8 +4,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from canary_framework import Canary, service
-from canary_framework.core.web.router import Router
+from canary_framework import service
+from canary_framework.core.router import Router
+from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.functional
@@ -17,10 +18,11 @@ class TestStandaloneService:
         """Scenario 1: Standalone service, no Router — starts, /docs → 404."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             pass
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # No routes defined, should 404
@@ -32,7 +34,7 @@ class TestStandaloneService:
         """Scenario 2: Standalone service with Router — routes work, docs available."""
 
         @service()
-        class UserService:
+        class UserService(ServiceBase):
             router = Router(prefix="/api")
 
             @router.get("/hello")
@@ -43,7 +45,8 @@ class TestStandaloneService:
             async def get_user(self, user_id: int) -> dict[str, object]:
                 return {"id": user_id, "name": "Alice"}
 
-        app = Canary(UserService())
+        app = UserService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Route works
@@ -72,14 +75,15 @@ class TestStandaloneService:
         """Service with Router — query parameters work."""
 
         @service()
-        class MathService:
+        class MathService(ServiceBase):
             router = Router()
 
             @router.get("/add")
             async def add(self, a: int, b: int) -> dict[str, int]:
                 return {"result": a + b}
 
-        app = Canary(MathService())
+        app = MathService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/add?a=10&b=20")
@@ -95,14 +99,15 @@ class TestStandaloneService:
             price: float
 
         @service()
-        class ShopService:
+        class ShopService(ServiceBase):
             router = Router()
 
             @router.post("/items", response_model=Item)
             async def create(self, item: Item) -> Item:
                 return item
 
-        app = Canary(ShopService())
+        app = ShopService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/items", json={"name": "book", "price": 9.99})
@@ -114,14 +119,15 @@ class TestStandaloneService:
         """Service with Router — invalid query param returns 400."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router()
 
             @router.get("/square")
             async def square(self, num: int) -> dict[str, int]:
                 return {"result": num * num}
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/square?num=abc")
@@ -135,14 +141,15 @@ class TestStandaloneService:
             name: str
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router()
 
             @router.post("/items", request_model=Item)
             async def create(self, item: Item) -> Item:
                 return item
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
@@ -159,14 +166,15 @@ class TestStandaloneService:
             price: float
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router()
 
             @router.post("/items", request_model=Item)
             async def create(self, item: Item) -> Item:
                 return item
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post("/items", json={"name": "book"})
@@ -179,7 +187,7 @@ class TestStandaloneService:
         """
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router1 = Router(prefix="/v1")
             router = Router(prefix="/v2")  # redefines the `router` attribute
 
@@ -187,7 +195,8 @@ class TestStandaloneService:
             async def hello(self) -> dict[str, str]:
                 return {"version": "v2"}
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # v2 route works
@@ -200,10 +209,11 @@ class TestStandaloneService:
         """Standalone service with no routes generates no OpenAPI docs."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             pass
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             for path in ("/docs", "/redoc", "/openapi.json"):

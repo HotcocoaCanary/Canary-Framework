@@ -4,8 +4,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from canary_framework import Canary, module, service
-from canary_framework.core.web.router import Router
+from canary_framework import module, service
+from canary_framework.core.module import ModuleBase
+from canary_framework.core.router import Router
+from canary_framework.core.service import ServiceBase
 
 
 class _NotDecorated:
@@ -27,13 +29,13 @@ class TestEdgeCases:
         """Undecorated class in module services raises TypeError."""
 
         @service()
-        class ValidService:
+        class ValidService(ServiceBase):
             pass
 
         with pytest.raises(TypeError, match="not decorated"):
 
             @module(services=[ValidService, _NotDecorated])
-            class _TestModule:
+            class _TestModule(ModuleBase):
                 pass
 
     # ── DI: missing dependency standalone ──────────────────────────
@@ -43,10 +45,11 @@ class TestEdgeCases:
         """Service with unresolved DI — starts but attribute is None when not in module."""
 
         @service()
-        class ServiceWithDep:
+        class ServiceWithDep(ServiceBase):
             missing_dep: _SomeDep
 
-        app = Canary(ServiceWithDep())
+        app = ServiceWithDep()
+        app.init()
         assert getattr(app, "missing_dep", None) is None
 
     # ── Boolean query param edge cases ─────────────────────────────
@@ -56,14 +59,15 @@ class TestEdgeCases:
         """Boolean query params — only "true" (case-insensitive) is True, everything else False."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router()
 
             @router.get("/check")
             async def check(self, flag: bool) -> dict[str, bool]:
                 return {"flag": flag}
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             for val in ("true", "True", "TRUE", "tRuE"):
@@ -81,14 +85,15 @@ class TestEdgeCases:
         """Service with root path '/'."""
 
         @service()
-        class RootService:
+        class RootService(ServiceBase):
             router = Router()
 
             @router.get("/")
             async def root(self) -> dict[str, str]:
                 return {"home": "yes"}
 
-        app = Canary(RootService())
+        app = RootService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/")
@@ -102,7 +107,7 @@ class TestEdgeCases:
         """GET and POST on same path both work."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router()
 
             @router.get("/item")
@@ -113,7 +118,8 @@ class TestEdgeCases:
             async def post_item(self) -> dict[str, str]:
                 return {"method": "post"}
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/item")
@@ -128,14 +134,15 @@ class TestEdgeCases:
         """Router prefix with trailing slash — OpenAPI normalizes double slashes."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router(prefix="/api/")
 
             @router.get("/hello")
             async def hello(self) -> dict[str, str]:
                 return {"ok": "yes"}
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
         await app.startup()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -151,7 +158,7 @@ class TestEdgeCases:
         """Router prefix controls mount path in module context."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router(prefix="/custom")
 
             @router.get("/test")
@@ -159,10 +166,11 @@ class TestEdgeCases:
                 return {"ok": "yes"}
 
         @module(services=[MyService])
-        class AppModule:
+        class AppModule(ModuleBase):
             pass
 
-        app = Canary(AppModule())
+        app = AppModule()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/custom/test")
@@ -175,14 +183,15 @@ class TestEdgeCases:
         """Both Swagger UI and ReDoc are available after startup."""
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router()
 
             @router.get("/test")
             async def test(self) -> dict[str, str]:
                 return {"ok": "yes"}
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
         await app.startup()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -201,7 +210,7 @@ class TestEdgeCases:
         """Deeply nested module chain — all routes resolve."""
 
         @service()
-        class LeafService:
+        class LeafService(ServiceBase):
             router = Router()
 
             @router.get("/data")
@@ -209,21 +218,22 @@ class TestEdgeCases:
                 return {"depth": "leaf"}
 
         @module(services=[LeafService])
-        class Level3:
+        class Level3(ModuleBase):
             pass
 
         @module(services=[Level3])
-        class Level2:
+        class Level2(ModuleBase):
             pass
 
         @module(services=[Level2])
-        class Level1:
+        class Level1(ModuleBase):
             pass
 
-        app = Canary(Level1())
+        app = Level1()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/LeafService/data")
+            r = await client.get("/Level2/Level3/LeafService/data")
             assert r.status_code == 200
             assert r.json() == {"depth": "leaf"}
 
@@ -237,7 +247,7 @@ class TestEdgeCases:
             name: str
 
         @service()
-        class MyService:
+        class MyService(ServiceBase):
             router = Router()
 
             @router.get("/str")
@@ -256,7 +266,8 @@ class TestEdgeCases:
             async def model_route(self) -> Item:
                 return Item(name="test")
 
-        app = Canary(MyService())
+        app = MyService()
+        app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.get("/str")
