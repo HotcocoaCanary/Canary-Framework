@@ -9,7 +9,7 @@ Core exports:
 
 from __future__ import annotations
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 from canary_framework.canary import Canary
 from canary_framework.common import (
