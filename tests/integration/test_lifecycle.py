@@ -3,13 +3,10 @@
 import pytest
 
 from canary_framework import (
-    before_shutdown,
-    before_startup,
+    Canary,
     module,
     service,
 )
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.integration
@@ -23,33 +20,28 @@ class TestLifecycle:
         events: list[str] = []
 
         @service()
-        class MyService(ServiceBase):
+        class MyService:
             def on_init(self) -> None:
                 events.append("service-init")
 
-            @before_startup
-            def on_startup(self) -> None:
+            async def startup(self) -> None:
                 events.append("service-startup")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
+            async def shutdown(self) -> None:
                 events.append("service-shutdown")
 
         @module(services=[MyService])
-        class MyModule(ModuleBase):
+        class MyModule:
             def on_init(self) -> None:
                 events.append("module-init")
 
-            @before_startup
-            def on_startup(self) -> None:
+            async def startup(self) -> None:
                 events.append("module-startup")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
+            async def shutdown(self) -> None:
                 events.append("module-shutdown")
 
-        app = MyModule()
-        app.init()
+        app = Canary(MyModule())
         await app.startup()
         await app.shutdown()
 
@@ -68,31 +60,26 @@ class TestLifecycle:
         shutdown_order: list[str] = []
 
         @service()
-        class Service1(ServiceBase):
-            @before_startup
-            def on_startup(self) -> None:
+        class Service1:
+            async def startup(self) -> None:
                 startup_order.append("Service1")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
+            async def shutdown(self) -> None:
                 shutdown_order.append("Service1")
 
         @service()
-        class Service2(ServiceBase):
-            @before_startup
-            def on_startup(self) -> None:
+        class Service2:
+            async def startup(self) -> None:
                 startup_order.append("Service2")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
+            async def shutdown(self) -> None:
                 shutdown_order.append("Service2")
 
         @module(services=[Service1, Service2])
-        class MyModule(ModuleBase):
+        class MyModule:
             pass
 
-        app = MyModule()
-        app.init()
+        app = Canary(MyModule())
         await app.startup()
         await app.shutdown()
 

@@ -6,19 +6,15 @@ from canary_framework.common.errors import (
     CircularDependencyError,
     ConfigurationError,
     DependencyInjectionError,
-    LifecycleHookError,
     ServiceNotFoundError,
 )
 from canary_framework.common.types import (
-    CF_HOOK_MARKER_MAP,
     CF_NAME_ATTR,
     CF_SERVICE_MARKER,
     CF_SERVICE_META,
-    HookFunction,
     LifecycleAware,
-    LifecycleHook,
     ModuleMeta,
-    RouteInfo,
+    RouteDef,
     ServiceEntry,
     ServiceMeta,
     get_module_meta,
@@ -29,7 +25,6 @@ from canary_framework.common.types import (
 )
 
 __all__ = [
-    "CF_HOOK_MARKER_MAP",
     "CF_NAME_ATTR",
     "CF_SERVICE_MARKER",
     "CF_SERVICE_META",
@@ -38,12 +33,9 @@ __all__ = [
     "CircularDependencyError",
     "ConfigurationError",
     "DependencyInjectionError",
-    "HookFunction",
     "LifecycleAware",
-    "LifecycleHook",
-    "LifecycleHookError",
     "ModuleMeta",
-    "RouteInfo",
+    "RouteDef",
     "ServiceEntry",
     "ServiceMeta",
     "ServiceNotFoundError",
