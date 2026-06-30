@@ -85,3 +85,29 @@ class TestServiceEntry:
         assert entry.cls == MyClass
         assert entry.name == "test"
         assert entry.instance is instance
+
+
+def test_resolved_route_holds_full_path_and_handler() -> None:
+    from canary_framework.common import ResolvedRoute, RouteInfo
+
+    async def h() -> None: ...
+
+    info = RouteInfo(
+        handler=h, method="GET", path="/x", starlette_path="/x",
+        path_params=[], query_params=[], param_meta={},
+    )
+    r = ResolvedRoute(full_path="/api/x", handler=h, info=info)
+    assert r.full_path == "/api/x"
+    assert r.info.method == "GET"
+
+
+def test_route_info_body_param_defaults_none() -> None:
+    from canary_framework.common import RouteInfo
+
+    async def h() -> None: ...
+
+    info = RouteInfo(
+        handler=h, method="POST", path="/x", starlette_path="/x",
+        path_params=[], query_params=[], param_meta={},
+    )
+    assert info.body_param is None
