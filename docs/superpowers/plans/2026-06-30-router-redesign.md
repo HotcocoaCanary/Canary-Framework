@@ -594,10 +594,11 @@ git commit -m "feat: _build_route 按名绑定参数, 必填 query 缺失返回 
 ## Task 6: `_cf_collect_routes` —— 感知 + 收集契约
 
 **Files:**
-- Modify: `src/canary_framework/core/router/_base.py`（删 `_collect_routes`）
 - Modify: `src/canary_framework/core/service/_base.py`（加 `_cf_collect_routes`）
 - Modify: `src/canary_framework/core/module/_base.py`（override `_cf_collect_routes`）
 - Test: `tests/integration/test_route_collection.py`（新建）
+
+> **本任务纯增量**：只新增 `_cf_collect_routes`，**不**删除 `_collect_routes`、**不**改动旧 `asgi_app`。旧的 serving 路径保持工作、现有测试保持绿；`_collect_routes` 的删除与 `asgi_app` 重写在 Task 8 一并完成。
 
 **Interfaces:**
 - Consumes: `ResolvedRoute`（Task 1）。
@@ -727,25 +728,20 @@ from canary_framework.common import ResolvedRoute
         return out
 ```
 
-- [ ] **Step 5: 删除旧 `_collect_routes`**
-
-在 `src/canary_framework/core/router/_base.py` 删除 `_collect_routes` 函数及其在 `__all__` 的条目（保留 `Router`）。本步骤会让仍引用它的 `service/_base.py`、`module/_base.py` 暂时编译失败 —— 它们在 Task 8 一并重写；为保持本任务可独立验证，**暂时**在 `service/_base.py` 与 `module/_base.py` 中删去对 `_collect_routes` 的 import 与调用处（旧 `asgi_app` 改为 `raise NotImplementedError` 占位，Task 8 重写）：
-
-- `service/_base.py`：把旧 `asgi_app` property 体临时改为 `raise NotImplementedError`（保留签名），删去对 `_collect_routes` 的 import。
-- `module/_base.py`：把旧 `asgi_app` property 体临时改为 `raise NotImplementedError`，删去 `_collect_routes` import。
-
-> 这些占位仅存活到 Task 8。受影响的现有 functional 测试在 Task 8 前会失败属预期 —— 本任务只跑新建的 collection 测试与单元/集成层。
-
-- [ ] **Step 6: 跑测试确认通过**
+- [ ] **Step 5: 跑测试确认通过**
 
 Run: `uv run pytest tests/integration/test_route_collection.py -v`
 Expected: PASS。
 
-- [ ] **Step 7: 类型检查 + 提交**
+并确认未破坏现有套件（本任务纯增量、旧 serving 路径未动）：
+Run: `uv run pytest -q`
+Expected: 全 PASS。
+
+- [ ] **Step 6: 类型检查 + 提交**
 
 ```bash
 uv run ruff check src/ tests/ && uv run mypy src/ tests/
-git add src/canary_framework/core/router/_base.py src/canary_framework/core/service/_base.py src/canary_framework/core/module/_base.py tests/integration/test_route_collection.py
+git add src/canary_framework/core/service/_base.py src/canary_framework/core/module/_base.py tests/integration/test_route_collection.py
 git commit -m "feat: _cf_collect_routes 统一感知与聚合 (service 叶 + module fold)"
 ```
 
@@ -915,6 +911,7 @@ git commit -m "fix: OpenAPI 消费 ResolvedRoute 且 schema registry 局部化 (
 **Files:**
 - Modify: `src/canary_framework/core/service/_base.py`
 - Modify: `src/canary_framework/core/module/_base.py`
+- Modify: `src/canary_framework/core/router/_base.py`（删 `_collect_routes`，Task 6 已不再删）
 - Test: `tests/functional/test_request_binding.py`（接通端到端）、`tests/functional/test_assembly.py`（新建）
 
 **Interfaces:**
@@ -1106,13 +1103,17 @@ class Assembled(NamedTuple):
 
 8. 删除以下方法/属性：`get_mount_path`、`_cf_get_root_routes`、`_cf_collect_route_infos`、`_cf_generate_openapi`。删除不再使用的 import（`RouteInfo` 若仅这些用到、`CF_NAME_ATTR`、`_collect_routes`）。
 
-- [ ] **Step 4: 精简 ModuleBase**
+- [ ] **Step 4: 精简 ModuleBase 并删除旧 `_collect_routes`**
 
 在 `src/canary_framework/core/module/_base.py`：
 
 1. 删除整个 `asgi_app` property（继承 `ServiceBase.asgi_app`）。
 2. 删除 `_cf_get_root_routes` 方法。
 3. 删除随之不再使用的 import：`Mount`、`Route`、`StarletteRouter`（如其它处仍用到 `Route` 则保留）、`_collect_routes`、`ASGIApp`、`cast`（按实际使用情况收敛，以 ruff 为准）。
+
+在 `src/canary_framework/core/router/_base.py`：
+
+4. 删除 `_collect_routes` 函数及其在 `__all__` 的条目（保留 `Router`）。此时已无任何引用（service/module 的旧 `asgi_app` 已在本任务删除）。
 
 - [ ] **Step 5: 跑端到端测试**
 
@@ -1123,7 +1124,7 @@ Expected: 全 PASS（含 Task 5 中先前依赖装配链路的 4 个用例）。
 
 ```bash
 uv run ruff check src/ tests/ && uv run mypy src/ tests/
-git add src/canary_framework/core/service/_base.py src/canary_framework/core/module/_base.py tests/functional/test_assembly.py
+git add src/canary_framework/core/service/_base.py src/canary_framework/core/module/_base.py src/canary_framework/core/router/_base.py tests/functional/test_assembly.py
 git commit -m "refactor: 单点记忆化组装 asgi_app/openapi, 删除分散聚合与 standalone/mounted 分支"
 ```
 
