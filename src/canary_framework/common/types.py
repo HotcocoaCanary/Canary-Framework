@@ -175,6 +175,22 @@ class RouteInfo:
     responses: dict[str, object] = field(default_factory=dict)
     router_prefix: str = ""
     router_tags: list[str] = field(default_factory=list)
+    body_param: str | None = None
+
+
+@dataclass(slots=True)
+class ResolvedRoute:
+    """已解析、可直接组装的单条路由（聚合货币）。
+
+    full_path 已拼好前缀，handler 已绑定到拥有它的实例。
+
+    A fully-resolved route ready for assembly (the aggregation currency).
+    full_path is prefix-composed; handler is bound to its owning instance.
+    """
+
+    full_path: str
+    handler: HookFunction
+    info: RouteInfo
 
 
 # 生命周期钩子标记映射
@@ -280,6 +296,7 @@ __all__ = [
     "LifecycleAware",
     "LifecycleHook",
     "ModuleMeta",
+    "ResolvedRoute",
     "RouteInfo",
     "ServiceEntry",
     "ServiceMeta",
