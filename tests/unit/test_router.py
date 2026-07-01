@@ -141,3 +141,15 @@ def test_auto_response_plain_dict_is_200() -> None:
     """Test that plain dict (non-tuple) returns 200 status code."""
     resp = _auto_response({"ok": True})
     assert resp.status_code == 200
+
+
+@pytest.mark.unit
+def test_auto_response_body_bool_not_treated_as_status_tuple() -> None:
+    """Test that (body, True) is NOT misread as a (body, status_code) tuple.
+
+    bool is a subclass of int, so a naive `isinstance(result[1], int)` guard
+    would treat `True` as a status code (and even coerce to status_code=True).
+    The generic (non-tuple) path must be taken instead, yielding 200.
+    """
+    resp = _auto_response(({"a": 1}, True))
+    assert resp.status_code == 200
