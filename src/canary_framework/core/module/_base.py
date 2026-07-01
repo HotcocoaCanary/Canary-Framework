@@ -1,12 +1,15 @@
 """ModuleBase — 通过生命周期阶段协调子服务的模块基类。
 
 处理实例化、依赖注入、按拓扑顺序执行init/startup/shutdown，
-并暴露Starlette Router用于ASGI挂载。
+并通过单点记忆化组装（见 ServiceBase._cf_assemble）聚合自身与
+所有子服务的路由，暴露为 ASGI 应用。
 
 ModuleBase — orchestrates child services through lifecycle phases.
 
 Handles instantiation, DI wiring, init/startup/shutdown
-in topological order, and exposes a starlette Router for ASGI mounting.
+in topological order, and aggregates its own routes plus every child
+service's routes via single-point memoized assembly
+(see ServiceBase._cf_assemble), exposed as an ASGI application.
 """
 
 from __future__ import annotations
@@ -45,19 +48,28 @@ class ModuleBase(ServiceBase):
     协调子服务生命周期——实例化、依赖注入、按拓扑顺序执行
     init/startup/shutdown。
 
-    支持通过 config 对象配置文档端点：
-    - cf_docs_path: OpenAPI JSON 端点路径（默认 /openapi.json）
-    - cf_swagger_path: Swagger UI 路径（默认 /docs）
-    - cf_redoc_path: ReDoc 路径（默认 /redoc）
-    - cf_swagger_cdn: Swagger UI CDN 基 URL
-    - cf_redoc_cdn: ReDoc CDN 基 URL
-    - cf_servers: OpenAPI servers 列表
-    - cf_security_schemes: OpenAPI security schemes
+    支持通过 config 对象配置文档端点，字段见 CanaryConfig：
+    - docs_openapi_path: OpenAPI JSON 端点路径（默认 /openapi.json）
+    - docs_swagger_path: Swagger UI 路径（默认 /docs）
+    - docs_redoc_path: ReDoc 路径（默认 /redoc）
+    - docs_swagger_css_cdn / docs_swagger_js_cdn: Swagger UI CDN URL
+    - docs_redoc_cdn: ReDoc CDN URL
+    - openapi_servers: OpenAPI servers 列表
+    - openapi_security_schemes: OpenAPI security schemes
 
     Auto-injected base for @module-decorated classes.
 
     Orchestrates child service lifecycle — instantiation, DI wiring,
     init/startup/shutdown in topological order.
+
+    Doc endpoints are configurable via the config object, see CanaryConfig:
+    - docs_openapi_path: OpenAPI JSON endpoint path (default /openapi.json)
+    - docs_swagger_path: Swagger UI path (default /docs)
+    - docs_redoc_path: ReDoc path (default /redoc)
+    - docs_swagger_css_cdn / docs_swagger_js_cdn: Swagger UI CDN URLs
+    - docs_redoc_cdn: ReDoc CDN URL
+    - openapi_servers: OpenAPI servers list
+    - openapi_security_schemes: OpenAPI security schemes
     """
 
     def __init__(self) -> None:
@@ -131,6 +143,13 @@ class ModuleBase(ServiceBase):
         """
         _log.info("Initializing module: %s", type(self).__name__)
 
+        # 丢弃 init() 之前可能已缓存的（空）组装结果，确保后续访问
+        # asgi_app/openapi() 时会用已装配好的 registry 重新组装。
+        #
+        # Discard any assembly memoized before init() ran, so subsequent
+        # asgi_app/openapi() access re-assembles using the wired registry.
+        self._cf_assembled = None
+
         meta = get_module_meta(type(self))
         if meta is None or not meta.services:
             return
@@ -175,7 +194,7 @@ class ModuleBase(ServiceBase):
     async def startup(self) -> None:
         """启动模块及其所有子服务。
 
-        调用BEFORE_STARTUP钩子和OpenAPI设置（通过super），
+        调用BEFORE_STARTUP钩子（通过super），
         然后按拓扑顺序调用每个子服务的startup方法。
 
         Raises:
@@ -183,7 +202,7 @@ class ModuleBase(ServiceBase):
 
         Start the module and all its child services.
 
-        Invokes the BEFORE_STARTUP hook and OpenAPI setup (via super),
+        Invokes the BEFORE_STARTUP hook (via super),
         then calls startup on each child service in topological order.
 
         Raises:

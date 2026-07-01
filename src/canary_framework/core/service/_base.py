@@ -82,9 +82,12 @@ class ServiceBase:
         out: list[ResolvedRoute] = []
         for info in router._route_infos:
             bound = cast(FunctionType, info.handler).__get__(self, cls)
+            full_path = router.prefix + info.starlette_path
+            while "//" in full_path:
+                full_path = full_path.replace("//", "/")
             out.append(
                 ResolvedRoute(
-                    full_path=router.prefix + info.starlette_path,
+                    full_path=full_path,
                     handler=bound,
                     info=info,
                 )
