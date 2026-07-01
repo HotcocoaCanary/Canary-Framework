@@ -80,7 +80,7 @@ class TestAsyncOperations:
             transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
-            requests = [client.get("/CounterRouter/increment") for _ in range(5)]
+            requests = [client.get("/increment") for _ in range(5)]
             responses = await asyncio.gather(*requests)
 
             # All should succeed
@@ -121,7 +121,7 @@ class TestAsyncOperations:
             base_url="http://test",
             timeout=5.0,
         ) as client:
-            response = await client.get("/TaskRouter/task?seconds=0.1")
+            response = await client.get("/task?seconds=0.1")
             assert response.status_code == 200
             result = response.json()
             assert result["status"] == "done"

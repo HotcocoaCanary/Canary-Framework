@@ -116,7 +116,7 @@ class TestStandaloneService:
 
     @pytest.mark.asyncio
     async def test_service_with_router_invalid_query(self) -> None:
-        """Service with Router — invalid query param returns 400."""
+        """Service with Router — invalid query param returns 422."""
 
         @service()
         class MyService(ServiceBase):
@@ -131,7 +131,7 @@ class TestStandaloneService:
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/square?num=abc")
-            assert response.status_code == 400
+            assert response.status_code == 422
 
     @pytest.mark.asyncio
     async def test_service_with_router_invalid_body(self) -> None:

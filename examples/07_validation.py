@@ -2,7 +2,9 @@
 
 Demonstrates: Pydantic models for request/response, Field constraints,
 auto-detection of request_model from type annotations,
-ValidationError → 422 responses.
+ValidationError → 422 responses,
+``(body, status)`` 元组返回可显式设置状态码（如 ``return {...}, 404``）。
+A ``(body, status)`` tuple return sets the HTTP status (e.g. ``return {...}, 404``).
 """
 
 import uvicorn

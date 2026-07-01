@@ -64,7 +64,7 @@ class TestModuleRouter:
             assert r1.status_code == 200
             assert r1.json() == {"from": "root"}
 
-            r2 = await client.get("/ChildService/child")
+            r2 = await client.get("/child")
             assert r2.status_code == 200
             assert r2.json() == {"from": "child"}
 
@@ -103,7 +103,7 @@ class TestModuleRouter:
             r1 = await client.get("/root")
             assert r1.status_code == 200
 
-            r2 = await client.get("/SubModule/DeepService/deep")
+            r2 = await client.get("/deep")
             assert r2.status_code == 200
 
             schema = (await client.get("/openapi.json")).json()
@@ -143,8 +143,8 @@ class TestModuleRouter:
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/root-status")).status_code == 200
-            assert (await client.get("/SubModule/sub-status")).status_code == 200
-            assert (await client.get("/SubModule/LeafService/leaf")).status_code == 200
+            assert (await client.get("/sub-status")).status_code == 200
+            assert (await client.get("/leaf")).status_code == 200
 
             # All routes in one OpenAPI
             schema = (await client.get("/openapi.json")).json()

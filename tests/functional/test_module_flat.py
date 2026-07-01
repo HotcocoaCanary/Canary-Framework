@@ -68,7 +68,7 @@ class TestModuleFlat:
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             # Route works
-            response = await client.get("/ApiService/ping")
+            response = await client.get("/ping")
             assert response.status_code == 200
             assert response.json() == {"status": "ok"}
 
@@ -150,11 +150,11 @@ class TestModuleFlat:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/ApiService/count")
+            response = await client.get("/count")
             assert response.status_code == 200
             assert response.json()["count"] == 1
 
-            response = await client.get("/ApiService/count")
+            response = await client.get("/count")
             assert response.json()["count"] == 2
 
     @pytest.mark.asyncio
@@ -182,7 +182,7 @@ class TestModuleFlat:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/ApiService/has-dep")
+            response = await client.get("/has-dep")
             assert response.status_code == 200
             assert response.json()["has_dep"] is True
 
@@ -212,6 +212,6 @@ class TestModuleFlat:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/MainService/val")
+            response = await client.get("/val")
             assert response.status_code == 200
             assert response.json()["val"] == 99

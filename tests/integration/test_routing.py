@@ -37,7 +37,7 @@ class TestRouting:
             transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
-            response = await client.get("/MyRouter/hello")
+            response = await client.get("/hello")
             assert response.status_code == 200
             assert response.json() == {"message": "Hello World"}
 
@@ -64,7 +64,7 @@ class TestRouting:
             transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
-            response = await client.get("/MyRouter/greet/Alice")
+            response = await client.get("/greet/Alice")
             assert response.status_code == 200
             assert response.json() == {"message": "Hello Alice"}
 
@@ -91,7 +91,7 @@ class TestRouting:
             transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
-            response = await client.get("/MyRouter/add?a=2&b=3")
+            response = await client.get("/add?a=2&b=3")
             assert response.status_code == 200
             assert response.json() == {"result": 5}
 
@@ -122,7 +122,7 @@ class TestRouting:
             transport=ASGITransport(app=app),
             base_url="http://test",
         ) as client:
-            response = await client.post("/MyRouter/users", json={"name": "Alice", "age": 30})
+            response = await client.post("/users", json={"name": "Alice", "age": 30})
             assert response.status_code == 200
             assert response.json() == {"id": 1, "name": "Alice", "age": 30}
 

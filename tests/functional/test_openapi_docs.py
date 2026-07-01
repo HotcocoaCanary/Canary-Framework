@@ -5,38 +5,16 @@ from typing import Any, cast
 import pytest
 from pydantic import BaseModel
 
-from canary_framework import service
-from canary_framework.common import ResolvedRoute, RouteInfo
+from canary_framework import config, module, service
+from canary_framework.common.config import CanaryConfig
+from canary_framework.core.module import ModuleBase
 from canary_framework.core.router import Router
 from canary_framework.core.service import ServiceBase
-from canary_framework.engine.openapi import generate_openapi_schema
-
-
-def _collect_route_infos(cls: type[ServiceBase]) -> list[RouteInfo]:
-    """从服务类中收集 RouteInfo 对象。"""
-    router = getattr(cls, "router", None)
-    if isinstance(router, Router):
-        return list(router._route_infos)
-    return []
-
-
-def _resolve(route_infos: list[RouteInfo]) -> list[ResolvedRoute]:
-    """把 RouteInfo 列表包装为 ResolvedRoute 列表，供 generate_openapi_schema 消费。"""
-    return [
-        ResolvedRoute(
-            full_path=(info.router_prefix + info.starlette_path)
-            if info.router_prefix
-            else info.starlette_path,
-            handler=info.handler,
-            info=info,
-        )
-        for info in route_infos
-    ]
 
 
 @pytest.mark.functional
 class TestOpenAPIDocs:
-    """Functional tests for OpenAPI docs."""
+    """Functional tests for OpenAPI docs (end-to-end via ``app.openapi()``)."""
 
     def test_generate_openapi_schema(self) -> None:
         """Test generate OpenAPI schema."""
@@ -68,9 +46,9 @@ class TestOpenAPIDocs:
             async def create_item(self) -> None:
                 pass
 
-        route_infos = _collect_route_infos(MyRouter)
-        assert len(route_infos) == 2
-        schema = generate_openapi_schema(_resolve(route_infos))
+        app = MyRouter()
+        app.init()
+        schema = app.openapi()
 
         assert schema["openapi"] == "3.0.3"
         assert "info" in schema
@@ -97,12 +75,18 @@ class TestOpenAPIDocs:
             async def get_products(self) -> None:
                 pass
 
-        route_infos = _collect_route_infos(UserRouter) + _collect_route_infos(ProductRouter)
-        schema = generate_openapi_schema(
-            _resolve(route_infos),
-            title="Shop API",
-            version="1.0.0",
-        )
+        @config()
+        class ShopConfig(CanaryConfig):
+            openapi_title: str = "Shop API"
+            openapi_version: str = "1.0.0"
+
+        @module(config=ShopConfig, services=[UserRouter, ProductRouter])
+        class ShopApp(ModuleBase):
+            pass
+
+        app = ShopApp()
+        app.init()
+        schema = app.openapi()
 
         info = cast(dict[str, Any], schema["info"])
         assert info["title"] == "Shop API"
@@ -127,8 +111,9 @@ class TestOpenAPIDocs:
             async def test(self) -> None:
                 pass
 
-        route_infos = _collect_route_infos(MyRouter)
-        schema = generate_openapi_schema(_resolve(route_infos))
+        app = MyRouter()
+        app.init()
+        schema = app.openapi()
 
         paths = cast(dict[str, Any], schema["paths"])
         path_obj = cast(dict[str, Any], next(iter(paths.values())))
