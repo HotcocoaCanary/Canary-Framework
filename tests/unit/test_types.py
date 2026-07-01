@@ -87,6 +87,7 @@ class TestServiceEntry:
         assert entry.instance is instance
 
 
+@pytest.mark.unit
 def test_resolved_route_holds_full_path_and_handler() -> None:
     from canary_framework.common import ResolvedRoute, RouteInfo
 
@@ -99,8 +100,10 @@ def test_resolved_route_holds_full_path_and_handler() -> None:
     r = ResolvedRoute(full_path="/api/x", handler=h, info=info)
     assert r.full_path == "/api/x"
     assert r.info.method == "GET"
+    assert r.handler is h
 
 
+@pytest.mark.unit
 def test_route_info_body_param_defaults_none() -> None:
     from canary_framework.common import RouteInfo
 
