@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from canary_framework.common import RouteInfo
+from canary_framework.common import ResolvedRoute, RouteInfo
 from canary_framework.core.router._utils import parse_route_path
 from canary_framework.engine.openapi import generate_openapi_schema
 
@@ -95,7 +95,52 @@ class TestGenerateOpenAPISchema:
             router_prefix="/api",
             router_tags=["test"],
         )
-        schema = generate_openapi_schema([route_info])
+        resolved_route = ResolvedRoute(
+            full_path=route_info.router_prefix + route_info.starlette_path,
+            handler=route_info.handler,
+            info=route_info,
+        )
+        schema = generate_openapi_schema([resolved_route])
         paths = cast(dict[str, Any], schema["paths"])
         assert "/api/test" in paths
         assert "get" in paths["/api/test"]
+
+
+@pytest.mark.unit
+def test_openapi_two_generations_each_have_components() -> None:
+    """Test that schema registry is call-local: two generations each get full components.
+
+    局部 registry 回归测试：连续两次生成各自拥有完整 components.schemas，
+    不因模块级缓存导致第二次生成出现悬空 $ref。
+    """
+    from pydantic import BaseModel
+
+    class Item(BaseModel):
+        x: int
+
+    async def h(self: object, body: Item) -> dict[str, object]:
+        return {}
+
+    info = RouteInfo(
+        handler=h,
+        method="POST",
+        path="/i",
+        starlette_path="/i",
+        path_params=[],
+        query_params=[],
+        param_meta={},
+        request_model=Item,
+        body_param="body",
+    )
+    routes = [ResolvedRoute(full_path="/api/i", handler=h, info=info)]
+
+    doc1 = generate_openapi_schema(routes)
+    doc2 = generate_openapi_schema(routes)
+
+    for doc in (doc1, doc2):
+        paths = cast(dict[str, Any], doc["paths"])
+        post_op = cast(dict[str, Any], paths["/api/i"]["post"])
+        ref = post_op["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+        name = ref.split("/")[-1]
+        components = cast(dict[str, Any], doc["components"])
+        assert name in components["schemas"]

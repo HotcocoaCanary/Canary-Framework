@@ -295,9 +295,26 @@ class ServiceBase:
         if not route_infos:
             return
 
+        # 临时适配器：generate_openapi_schema 已改为消费 list[ResolvedRoute]（Task 7），
+        # 但本方法仍持有 list[RouteInfo]；此处包一层以保持旧 serving 路径可用。
+        # Task 8 删除 _cf_generate_openapi 时一并移除本适配器。
+        # TEMPORARY adapter: generate_openapi_schema now consumes list[ResolvedRoute]
+        # (Task 7), but this method still holds list[RouteInfo]; wrap it here to keep
+        # the old serving path alive. Removed together with _cf_generate_openapi in Task 8.
+        resolved = [
+            ResolvedRoute(
+                full_path=(ri.router_prefix + ri.starlette_path)
+                if ri.router_prefix
+                else ri.starlette_path,
+                handler=ri.handler,
+                info=ri,
+            )
+            for ri in route_infos
+        ]
+
         cfg = self.config or CanaryConfig()
         schema = generate_openapi_schema(
-            route_infos,
+            resolved,
             title=cfg.openapi_title,
             version=cfg.openapi_version,
             description=cfg.openapi_description,
