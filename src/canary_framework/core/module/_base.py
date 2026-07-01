@@ -14,10 +14,6 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import cast, override
 
-from starlette.routing import Mount, Route
-from starlette.routing import Router as StarletteRouter
-from starlette.types import ASGIApp
-
 from canary_framework.common import (
     CanaryConfig,
     DependencyInjectionError,
@@ -30,8 +26,6 @@ from canary_framework.common import (
     is_cf_service,
 )
 from canary_framework.common.logging import ensure_logging, get_logger
-from canary_framework.core.router import Router as _Router
-from canary_framework.core.router import _collect_routes
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.dependencies import resolve_deps, topological_sort
 from canary_framework.engine.registry import Registry
@@ -80,7 +74,6 @@ class ModuleBase(ServiceBase):
         super().__init__()
         self._cf_registry: Registry | None = None
         self._cf_startup_order: list[str] = []
-        self._cf_asgi_app: StarletteRouter | None = None
         self._cf_config: CanaryConfig | None = None
 
         meta = get_module_meta(type(self))
@@ -177,75 +170,6 @@ class ModuleBase(ServiceBase):
             child.init()  # type: ignore[attr-defined]
 
         super().init()
-
-    @property
-    def asgi_app(self) -> StarletteRouter:
-        """获取ASGI应用。
-
-        懒加载创建Starlette路由器，挂载所有具有asgi_app属性的子服务。
-        同时收集子服务提供的根路径路由。
-
-        Returns:
-            StarletteRouter实例。
-
-        Get the ASGI application.
-
-        Lazily creates the Starlette router with mounts for all child services
-        that have an asgi_app attribute, plus root-level routes from children.
-        """
-        if self._cf_asgi_app is None:
-            routes: list[Mount | Route] = []
-            mount_paths: set[str] = set()
-
-            own_router = getattr(self, "router", None)
-            if isinstance(own_router, _Router):
-                for route in _collect_routes(self, include_router_prefix=False):
-                    routes.append(route)
-                    mount_paths.add(route.path)
-            for name, inst in self._iter_instances(skip_none=True):
-                asgi = getattr(inst, "asgi_app", None)
-                if asgi is not None:
-                    app = cast(ASGIApp, asgi)
-                    mount_path = (
-                        inst.get_mount_path() if hasattr(inst, "get_mount_path") else f"/{name}"
-                    )
-                    if mount_path in mount_paths:
-                        raise ValueError(f"Mount path collision: '{mount_path}' is already in use.")
-                    routes.append(Mount(mount_path, app=app))
-                    mount_paths.add(mount_path)
-            for route in self._cf_get_root_routes():
-                if route.path in mount_paths:
-                    raise ValueError(
-                        f"Root route path collision: '{route.path}' is already in use."
-                    )
-                routes.append(route)
-                mount_paths.add(route.path)
-            if self._cf_root_routes:
-                for route in self._cf_root_routes:
-                    if route.path not in mount_paths:
-                        routes.append(route)
-                        mount_paths.add(route.path)
-            self._cf_asgi_app = StarletteRouter(routes)
-        return self._cf_asgi_app
-
-    def _cf_get_root_routes(self) -> list[Route]:
-        """合并所有子服务（包括子模块）的根路径路由，去重后返回。
-
-        解决嵌套 Module 场景下，带有 Router 属性的 Service 生成的文档路由
-        （如 /docs, /redoc, /openapi.json）无法传播到根 ASGI 应用的问题。
-
-        Aggregate root-level routes from all child services including
-        sub-modules, deduplicated by path.
-        """
-        routes: list[Route] = []
-        seen: set[str] = set()
-        for _, inst in self._iter_instances(skip_none=True):
-            if hasattr(inst, "_cf_get_root_routes"):
-                for route in inst._cf_get_root_routes():
-                    if route.path not in seen:
-                        routes.append(route)
-                        seen.add(route.path)
-        return routes
 
     @override
     async def startup(self) -> None:

@@ -13,25 +13,32 @@ from __future__ import annotations
 
 import inspect
 from types import FunctionType
-from typing import cast
+from typing import NamedTuple, cast
 
 from starlette.routing import Route
 from starlette.routing import Router as StarletteRouter
 from starlette.types import Receive, Scope, Send
 
 from canary_framework.common import (
-    CF_NAME_ATTR,
     LifecycleHook,
     LifecycleHookError,
     ResolvedRoute,
-    RouteInfo,
 )
 from canary_framework.common.config import CanaryConfig
 from canary_framework.common.logging import get_logger
-from canary_framework.core.router import Router, _build_doc_routes, _collect_routes
+from canary_framework.core.router import Router, _build_doc_routes
+from canary_framework.core.router._utils import _build_route, _check_route_collisions
 from canary_framework.core.service._hooks import HookDict, find_hooks
+from canary_framework.engine.openapi import generate_openapi_schema
 
 _log = get_logger("service")
+
+
+class Assembled(NamedTuple):
+    """组装产物：路由表 + OpenAPI。Assembly product: router + openapi."""
+
+    router: StarletteRouter
+    openapi: dict[str, object]
 
 
 class ServiceBase:
@@ -51,8 +58,7 @@ class ServiceBase:
         """
         self._cf_hooks: HookDict | None = None
         self._cf_parent_registry: object | None = None
-        self._starlette_router: StarletteRouter | None = None
-        self._cf_root_routes: list[Route] | None = None
+        self._cf_assembled: Assembled | None = None
         super().__init__()
 
     def _get_router(self) -> Router | None:
@@ -115,17 +121,13 @@ class ServiceBase:
         """启动服务。
 
         调用BEFORE_STARTUP钩子。
-        如果是顶层服务/模块（无父Registry），自动生成 OpenAPI 文档端点。
 
         Start the service.
 
         Invokes the BEFORE_STARTUP hook.
-        Generates OpenAPI doc endpoints when running as top-level (no parent registry).
         """
         _log.debug("Starting service: %s", type(self).__name__)
         await self._invoke_hook(LifecycleHook.BEFORE_STARTUP)
-        if self._cf_parent_registry is None:
-            await self._cf_generate_openapi()
 
     async def shutdown(self) -> None:
         """关闭服务。
@@ -153,63 +155,67 @@ class ServiceBase:
         if scope["type"] == "lifespan":
             await self._handle_lifespan(receive, send)
         else:
-            if self._cf_parent_registry is None and self._cf_root_routes is None:
-                await self._cf_generate_openapi()
-            asgi = self.asgi_app
-            if asgi is not None:
-                await asgi(scope, receive, send)
-            else:
-                from starlette.responses import PlainTextResponse
-
-                response = PlainTextResponse("Not Found", status_code=404)
-                await response(scope, receive, send)
-
-    def get_mount_path(self) -> str:
-        """返回服务在模块 ASGI 应用中的挂载路径。"""
-        router = self._get_router()
-        if router is not None and router.prefix:
-            return router.prefix
-        return f"/{getattr(type(self), CF_NAME_ATTR, type(self).__name__)}"
-
-    def _cf_get_root_routes(self) -> list[Route]:
-        """返回需要在模块根路径注册的路由（如文档端点）。
-
-        仅在 Module 中运行时有效，独立运行时返回空列表。
-
-        Return root-level routes (e.g., doc endpoints) for the parent module.
-        """
-        if self._cf_parent_registry is not None and self._cf_root_routes:
-            return self._cf_root_routes
-        return []
+            await self.asgi_app(scope, receive, send)
 
     @property
     def asgi_app(self) -> StarletteRouter:
-        """获取ASGI应用。
+        """获取 ASGI 应用（记忆化）。
 
-        懒加载创建Starlette路由器，收集所有路由。
-        独立运行时（无父Registry）自动包含文档端点。
+        懒加载单点组装的 Starlette 路由器。
 
         Returns:
             StarletteRouter实例。
 
-        Get the ASGI application.
+        Get the ASGI application (memoized).
 
-        Lazily creates the Starlette router and collects all routes.
-        When running standalone (no parent registry), doc endpoints are included.
+        Lazily returns the single-point assembled Starlette router.
 
         Returns:
             StarletteRouter instance.
         """
-        if self._starlette_router is None:
-            include_prefix = self._cf_parent_registry is None
-            routes = _collect_routes(self, include_router_prefix=include_prefix)
-            if self._cf_root_routes and self._cf_parent_registry is None:
-                routes.extend(self._cf_root_routes)
-            _log.debug("Collected %d route(s) for service: %s", len(routes), type(self).__name__)
-            for route in routes:
-                _log.debug("  Route: %s %s", route.methods, route.path)
-            self._starlette_router = StarletteRouter(routes)
-        return self._starlette_router
+        if self._cf_assembled is None:
+            self._cf_assembled = self._cf_assemble()
+        return self._cf_assembled.router
+
+    def openapi(self) -> dict[str, object]:
+        """返回本（子）树的 OpenAPI 文档（记忆化）。
+
+        Return the OpenAPI document for this (sub)tree (memoized).
+        """
+        if self._cf_assembled is None:
+            self._cf_assembled = self._cf_assemble()
+        return self._cf_assembled.openapi
+
+    def _cf_assemble(self) -> Assembled:
+        """单点记忆化组装：收集 → 校验冲突 → 建路由表 + OpenAPI + 文档端点。
+
+        Single-point assembly: collect → check collisions → build the routing
+        table, OpenAPI document, and doc endpoints.
+        """
+        resolved = self._cf_collect_routes()
+        if not resolved:
+            return Assembled(StarletteRouter([]), {})
+        _check_route_collisions(resolved)
+        cfg = self.config or CanaryConfig()
+        routes: list[Route] = [_build_route(r) for r in resolved]
+        openapi = generate_openapi_schema(
+            resolved,
+            title=cfg.openapi_title,
+            version=cfg.openapi_version,
+            description=cfg.openapi_description,
+            servers=cfg.openapi_servers or None,
+            security_schemes=cfg.openapi_security_schemes or None,
+        )
+        routes += _build_doc_routes(
+            openapi,
+            openapi_path=cfg.docs_openapi_path,
+            swagger_path=cfg.docs_swagger_path,
+            redoc_path=cfg.docs_redoc_path,
+            swagger_css=cfg.docs_swagger_css_cdn,
+            swagger_js=cfg.docs_swagger_js_cdn,
+            redoc_js=cfg.docs_redoc_cdn,
+        )
+        return Assembled(StarletteRouter(routes), openapi)
 
     async def _handle_lifespan(self, receive: Receive, send: Send) -> None:
         """处理 ASGI lifespan 协议。
@@ -271,66 +277,5 @@ class ServiceBase:
                 f"Service raised an error in {hook.value} hook: {exc}"
             ) from exc
 
-    def _cf_collect_route_infos(self) -> list[RouteInfo]:
-        """收集自身及子服务的所有 RouteInfo。"""
-        route_infos: list[RouteInfo] = []
-        router = self._get_router()
-        if router is not None:
-            route_infos.extend(router._route_infos)
 
-        registry = getattr(self, "_cf_registry", None)
-        if registry is not None:
-            for name in getattr(self, "_cf_startup_order", []):
-                entry = registry.get_by_name(name)
-                inst = entry.instance
-                if inst is not None and hasattr(inst, "_cf_collect_route_infos"):
-                    route_infos.extend(inst._cf_collect_route_infos())
-        return route_infos
-
-    async def _cf_generate_openapi(self) -> None:
-        """收集全部路由，生成 OpenAPI schema 和文档端点。"""
-        from canary_framework.engine.openapi import generate_openapi_schema
-
-        route_infos = self._cf_collect_route_infos()
-        if not route_infos:
-            return
-
-        # 临时适配器：generate_openapi_schema 已改为消费 list[ResolvedRoute]（Task 7），
-        # 但本方法仍持有 list[RouteInfo]；此处包一层以保持旧 serving 路径可用。
-        # Task 8 删除 _cf_generate_openapi 时一并移除本适配器。
-        # TEMPORARY adapter: generate_openapi_schema now consumes list[ResolvedRoute]
-        # (Task 7), but this method still holds list[RouteInfo]; wrap it here to keep
-        # the old serving path alive. Removed together with _cf_generate_openapi in Task 8.
-        resolved = [
-            ResolvedRoute(
-                full_path=(ri.router_prefix + ri.starlette_path)
-                if ri.router_prefix
-                else ri.starlette_path,
-                handler=ri.handler,
-                info=ri,
-            )
-            for ri in route_infos
-        ]
-
-        cfg = self.config or CanaryConfig()
-        schema = generate_openapi_schema(
-            resolved,
-            title=cfg.openapi_title,
-            version=cfg.openapi_version,
-            description=cfg.openapi_description,
-            servers=cfg.openapi_servers or None,
-            security_schemes=cfg.openapi_security_schemes or None,
-        )
-
-        self._cf_root_routes = _build_doc_routes(
-            schema,
-            openapi_path=cfg.docs_openapi_path,
-            swagger_path=cfg.docs_swagger_path,
-            redoc_path=cfg.docs_redoc_path,
-            swagger_css=cfg.docs_swagger_css_cdn,
-            swagger_js=cfg.docs_swagger_js_cdn,
-            redoc_js=cfg.docs_redoc_cdn,
-        )
-
-
-__all__ = ["ServiceBase"]
+__all__ = ["Assembled", "ServiceBase"]
