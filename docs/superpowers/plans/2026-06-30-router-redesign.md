@@ -793,6 +793,7 @@ git commit -m "feat: _cf_collect_routes 统一感知与聚合 (service 叶 + mod
 
 **Files:**
 - Modify: `src/canary_framework/engine/openapi.py`
+- Modify: `src/canary_framework/core/service/_base.py`（旧 `_cf_generate_openapi` 加临时适配器，保持旧路径可用；Task 8 删）
 - Test: `tests/unit/test_openapi.py`
 
 **Interfaces:**
@@ -931,18 +932,43 @@ def generate_openapi_schema(
     return schema
 ```
 
-- [ ] **Step 4: 修现有 openapi 测试的输入类型**
+- [ ] **Step 4: 旧调用点加临时适配器（保持旧路径绿）**
+
+签名改为 `list[ResolvedRoute]` 后，仍存活到 Task 8 的旧调用点 `ServiceBase._cf_generate_openapi`（`src/canary_framework/core/service/_base.py`）原本传 `list[RouteInfo]`，会失配。在它调用 `generate_openapi_schema(...)` 之前，把 `route_infos` 包一层（`ResolvedRoute` 已在 Task 6 于该文件 import）：
+
+```python
+        resolved = [
+            ResolvedRoute(
+                full_path=(ri.router_prefix + ri.starlette_path)
+                if ri.router_prefix
+                else ri.starlette_path,
+                handler=ri.handler,
+                info=ri,
+            )
+            for ri in route_infos
+        ]
+```
+
+并把随后的 `generate_openapi_schema(route_infos, ...)` 改为 `generate_openapi_schema(resolved, ...)`。
+
+> 这是**临时适配器**，仅为保持旧 serving 路径在 Task 7→8 间可用；Task 8 删除 `_cf_generate_openapi` 时一并移除。
+
+- [ ] **Step 5: 修现有 openapi 测试的输入类型**
 
 `tests/unit/test_openapi.py` 中现有用例若直接给 `generate_openapi_schema` 传 `RouteInfo` 列表，需包成 `ResolvedRoute(full_path=<router_prefix+starlette_path>, handler=<info.handler>, info=<info>)`。逐个改造调用点（保持各用例断言不变）。
 
 Run: `uv run pytest tests/unit/test_openapi.py -v`
 Expected: PASS（含新用例）。
 
-- [ ] **Step 5: 类型检查 + 提交**
+并确认全套件绿（适配器保住旧路径）：
+Run: `uv run pytest -q`
+Expected: 全 PASS。
+
+- [ ] **Step 6: 类型检查 + 提交**
 
 ```bash
-uv run ruff check src/ tests/ && uv run mypy src/ tests/
-git add src/canary_framework/engine/openapi.py tests/unit/test_openapi.py
+uv run ruff check src/ tests/ && uv run ruff format --check src/ tests/ && uv run mypy src/ tests/
+git add src/canary_framework/engine/openapi.py src/canary_framework/core/service/_base.py tests/unit/test_openapi.py
 git commit -m "fix: OpenAPI 消费 ResolvedRoute 且 schema registry 局部化 (修全局缓存泄漏)"
 ```
 
