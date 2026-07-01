@@ -15,7 +15,7 @@ class TestModuleBase:
         assert module._cf_parent_registry is None
         assert module._cf_registry is None
         assert module._cf_startup_order == []
-        assert module._cf_asgi_app is None
+        assert module._cf_assembled is None
 
     @pytest.mark.asyncio
     async def test_init_empty_module(self) -> None:
@@ -26,10 +26,10 @@ class TestModuleBase:
     def test_asgi_app_lazy_loaded(self) -> None:
         """Test asgi_app is lazily loaded."""
         module = ModuleBase()
-        assert module._cf_asgi_app is None
+        assert module._cf_assembled is None
         app = module.asgi_app
-        assert module._cf_asgi_app is not None
-        assert app is module._cf_asgi_app
+        assert module._cf_assembled is not None
+        assert app is module._cf_assembled.router
 
     def test_asgi_app_empty_module_has_no_docs(self) -> None:
         """Test asgi_app on empty module has no docs (docs come from routers)."""

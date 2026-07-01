@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
-from types import FunctionType, UnionType
+from types import UnionType
 from typing import cast
 
 from pydantic import BaseModel, ValidationError
@@ -12,7 +12,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
-from canary_framework.common import ResolvedRoute, RouteInfo
+from canary_framework.common import ResolvedRoute
 
 _PARAM_PATTERN = r"\{(\w+)\}"
 
@@ -174,109 +174,6 @@ def _auto_response(result: object) -> Response:
     return PlainTextResponse(str(result))
 
 
-def _route_handler(
-    instance: object,
-    route_info: RouteInfo,
-    cls: type,
-    *,
-    starlette_path_override: str | None = None,
-) -> Route:
-    """创建路由处理函数。
-
-    从 RouteInfo 创建一个 Starlette Route 对象，自动处理响应转换和参数解析。
-
-    支持自动参数绑定：
-    - 路径参数：从URL路径提取
-    - 查询参数：从URL路径提取
-    - 请求体：通过request_model指定，自动解析为Pydantic模型
-
-    Args:
-        instance: 路由器实例。
-        route_info: 路由元数据。
-        cls: 路由器类。
-
-    Returns:
-        Starlette Route对象。
-
-    Create a route handler.
-
-    Creates a Starlette Route object from RouteInfo with automatic
-    response conversion and parameter parsing.
-
-    Args:
-        instance: The router instance.
-        route_info: Route metadata.
-        cls: The router class.
-
-    Returns:
-        Starlette Route object.
-    """
-    method = route_info.method
-    starlette_path = (
-        starlette_path_override
-        if starlette_path_override is not None
-        else route_info.starlette_path
-    )
-    request_model = route_info.request_model
-    path_param_names = route_info.path_params
-    query_param_names = route_info.query_params
-    param_meta = route_info.param_meta
-    handler = cast(
-        "Callable[..., Awaitable[object]]",
-        cast(FunctionType, route_info.handler).__get__(instance, cls),
-    )
-
-    param_types: dict[str, object] = {}
-    for name in param_meta:
-        param_types[name] = param_meta[name][0]  # type: ignore[index]
-
-    async def endpoint(request: Request) -> Response:
-        kwargs: dict[str, object] = {}
-
-        for param_name in path_param_names:
-            if param_name in request.path_params:
-                param_type = cast("type | None", param_types.get(param_name))
-                try:
-                    kwargs[param_name] = _convert_param(request.path_params[param_name], param_type)
-                except (ValueError, TypeError):
-                    return JSONResponse(
-                        {"detail": f"Invalid value for path parameter '{param_name}'"},
-                        status_code=400,
-                    )
-
-        for param_name in query_param_names:
-            if param_name in request.query_params:
-                param_type = cast("type | None", param_types.get(param_name))
-                try:
-                    kwargs[param_name] = _convert_param(
-                        request.query_params[param_name], param_type
-                    )
-                except (ValueError, TypeError):
-                    return JSONResponse(
-                        {"detail": f"Invalid value for query parameter '{param_name}'"},
-                        status_code=400,
-                    )
-
-        if request_model is not None:
-            try:
-                body = cast("dict[str, object]", await request.json())
-            except Exception:
-                return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
-
-            model_cls = cast("type[BaseModel]", request_model)
-            try:
-                parsed = model_cls(**body)
-            except ValidationError as e:
-                return JSONResponse({"detail": e.errors()}, status_code=422)
-            result = await handler(parsed, **kwargs)
-        else:
-            result = await handler(**kwargs)
-
-        return _auto_response(result)
-
-    return Route(starlette_path, endpoint=endpoint, methods=[method])
-
-
 def _check_route_collisions(routes: list[ResolvedRoute]) -> None:
     """检测 (method, full_path) 冲突，重复则抛错。
 
@@ -434,6 +331,5 @@ __all__ = [
     "_check_route_collisions",
     "_convert_nested_models",
     "_convert_param",
-    "_route_handler",
     "parse_route_path",
 ]

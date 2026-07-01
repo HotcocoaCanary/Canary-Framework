@@ -5,10 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from pydantic import BaseModel
-from starlette.routing import Route
 
 from canary_framework.common import HookFunction, RouteInfo
-from canary_framework.core.router._utils import _route_handler, parse_route_path
+from canary_framework.core.router._utils import parse_route_path
 from canary_framework.engine.params import resolve_params
 
 
@@ -289,46 +288,4 @@ class Router:
         )
 
 
-def _collect_routes(instance: object, *, include_router_prefix: bool = False) -> list[Route]:
-    """收集路由器实例中的所有路由。
-
-    从 Router._route_infos 创建 Starlette Route 对象。
-
-    当 include_router_prefix 为 True 时，将 Router.prefix 添加到路径前面。
-    这在独立运行（无父模块）时使用，此时没有外部挂载点来处理前缀。
-
-    Args:
-        instance: 路由器实例。
-        include_router_prefix: 是否在路径中包含路由器前缀。
-
-    Returns:
-        Route对象列表。
-
-    Collect all routes from a router instance.
-
-    Creates Starlette Route objects from Router._route_infos.
-
-    When include_router_prefix is True, the Router.prefix is prepended
-    to each route path. This is used when running standalone (no parent module)
-    where there is no external mount point to handle the prefix.
-
-    Args:
-        instance: The router instance.
-        include_router_prefix: Whether to include the router prefix in paths.
-
-    Returns:
-        List of Route objects.
-    """
-    routes: list[Route] = []
-    cls = type(instance)
-    router = getattr(instance, "router", None)
-    if isinstance(router, Router):
-        for route_info in router._route_infos:
-            path = route_info.starlette_path
-            if include_router_prefix and router.prefix:
-                path = router.prefix + path
-            routes.append(_route_handler(instance, route_info, cls, starlette_path_override=path))
-    return routes
-
-
-__all__ = ["Router", "_collect_routes"]
+__all__ = ["Router"]
