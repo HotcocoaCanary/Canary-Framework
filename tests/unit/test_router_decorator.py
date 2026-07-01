@@ -169,3 +169,23 @@ class TestHTTPMethodDecorators:
         assert route_info.tags == ["test"]
         assert route_info.deprecated is True
         assert route_info.operation_id == "testOperation"
+
+    @pytest.mark.unit
+    def test_router_captures_body_param_name(self) -> None:
+        """Test router captures body parameter name."""
+        from pydantic import BaseModel
+
+        from canary_framework.core.router import Router
+
+        class Payload(BaseModel):
+            name: str
+
+        router = Router(prefix="/api")
+
+        @router.put("/users/{user_id}")
+        async def update(self: object, user_id: int, body: Payload) -> dict[str, object]:
+            return {}
+
+        (info,) = router._route_infos
+        assert info.body_param == "body"
+        assert info.request_model is Payload

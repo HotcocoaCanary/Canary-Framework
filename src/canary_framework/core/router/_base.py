@@ -98,15 +98,21 @@ class Router:
             for name, (ann, has_default, field_info) in params.items():
                 param_meta[name] = (ann, has_default, field_info)
 
-            # Auto-detect request_model from handler type annotations
+            # Auto-detect request_model and capture the body parameter name.
+            # 自动探测 request_model 并记录请求体参数名。
             effective_request_model = request_model
-            if effective_request_model is None:
-                for pname, (pann, _, _) in params.items():
-                    if pname in path_params or pname in query_params:
-                        continue
+            body_param_name: str | None = None
+            for pname, (pann, _, _) in params.items():
+                if pname in path_params or pname in query_params:
+                    continue
+                if effective_request_model is None:
                     if isinstance(pann, type) and issubclass(pann, BaseModel):
                         effective_request_model = pann
+                        body_param_name = pname
                         break
+                else:
+                    body_param_name = pname
+                    break
             info = RouteInfo(
                 handler=fn,
                 method=method,
@@ -119,6 +125,7 @@ class Router:
                 description=description,
                 response_model=response_model,
                 request_model=effective_request_model,
+                body_param=body_param_name,
                 tags=tags or [],
                 deprecated=deprecated,
                 operation_id=operation_id,
