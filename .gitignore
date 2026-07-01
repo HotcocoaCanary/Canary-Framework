@@ -221,3 +221,10 @@ site/
 # vibecoding
 .kilo
 .trae
+
+# Agent / tooling artifacts (Claude Code, superpowers, project instructions)
+.claude/
+CLAUDE.md
+AGENTS.md
+.superpowers/
+docs/superpowers/
