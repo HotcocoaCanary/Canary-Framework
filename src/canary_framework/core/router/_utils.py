@@ -152,11 +152,7 @@ def _auto_response(result: object) -> Response:
     """
     if isinstance(result, Response):
         return result
-    if (
-        isinstance(result, tuple)
-        and len(result) == 2
-        and isinstance(result[1], int)
-    ):
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], int):
         body, status_code = result
         if isinstance(body, Response):
             body.status_code = status_code
