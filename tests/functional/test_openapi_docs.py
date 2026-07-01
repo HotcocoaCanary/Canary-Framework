@@ -55,6 +55,10 @@ class TestOpenAPIDocs:
         assert "paths" in schema
         components = cast(dict[str, Any], schema.get("components", {}))
         assert "schemas" in components
+        # 两条路由（GET + POST /items）都应被收集 / both routes collected
+        paths = cast(dict[str, Any], schema["paths"])
+        assert "/items" in paths
+        assert set(paths["/items"].keys()) == {"get", "post"}
 
     def test_openapi_with_multiple_routers(self) -> None:
         """Test OpenAPI with multiple routers."""
