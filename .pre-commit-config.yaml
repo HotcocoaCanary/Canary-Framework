@@ -1,5 +1,8 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
+#
+# 提示 / Tip: 运行 `uv run pre-commit autoupdate` 可将下面各 hook 的 rev
+# 更新到最新版本；这里的 rev 与 pyproject.toml 的工具版本保持一致。
 
 default_language_version:
   python: python3.12
@@ -17,7 +20,7 @@ repos:
       - id: check-merge-conflict
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.0
+    rev: v0.15.15
     hooks:
       - id: ruff
         args: [--fix]
@@ -28,9 +31,12 @@ repos:
     hooks:
       - id: mypy
         args: [--strict]
+        # 仅列出 src/ 里实际 import 的第三方库，供 mypy 解析类型。
+        # Canary 基于 Starlette + Pydantic；uvicorn 是可选 [web] 依赖、
+        # 不在 src/ 内 import，因此不列入。
         additional_dependencies:
-          - pydantic-settings>=2.3
-          - fastapi>=0.115
-          - uvicorn>=0.34
+          - pydantic>=2.13
+          - pydantic-settings>=2.12
+          - starlette>=1.3
           - pytest>=8.3
         files: ^src/

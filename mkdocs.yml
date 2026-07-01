@@ -28,12 +28,22 @@ theme:
     - navigation.sections
     - navigation.expand
     - navigation.top
+    - navigation.tracking
+    - navigation.footer
+    - toc.follow
     - search.suggest
     - search.highlight
     - content.code.copy
     - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
   icon:
     repo: fontawesome/brands/github
+
+# 内部设计文档（docs/superpowers/**）不纳入站点构建。
+# Internal design docs under docs/superpowers/** are excluded from the built site.
+exclude_docs: |
+  superpowers/
 
 plugins:
   - search
@@ -59,11 +69,14 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - tables
+  - attr_list
+  - md_in_html
   - toc:
       permalink: true
 
 nav:
   - Home: index.md
+  - What's New: whats-new.md
   - Quick Start: quickstart.md
   - Core:
       - Services: services.md

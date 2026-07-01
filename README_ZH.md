@@ -14,6 +14,10 @@
 
 Canary Framework 是一个**装饰器驱动**的 Python 异步服务框架。核心理念：**服务是最小单元，模块组合服务，模块本身也是服务。**
 
+> **0.5.x 是当前积极维护的版本线。** 只要核心设计理念不变，新特性与修复就会持续以 `0.5.x` 发布——
+> 详见变更日志中的[版本策略](./CHANGELOG.md#版本策略--versioning-policy)，以及
+> [What's New in 0.5.x](./docs/zh/whats-new.md) 了解最新的 router 重设计。
+
 ## 核心特性
 
 - **装饰器驱动** — 使用 `@service` 和 `@module` 装饰器，需显式基类继承
@@ -33,10 +37,15 @@ pip install canary-framework
 ## 快速开始
 
 ```python
+from pydantic import BaseModel
+
 from canary_framework import service, module
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
 from canary_framework.core.router import Router
+
+class NewUser(BaseModel):
+    name: str
 
 @service()
 class Database(ServiceBase):
@@ -61,8 +70,9 @@ class Api(ServiceBase):
         return self.user_service.get_user(user_id)
 
     @router.post("/users")
-    async def create_user(self, body: dict) -> dict:
-        return {"id": 1, **body}
+    async def create_user(self, user: NewUser) -> dict:
+        # `user` 是 BaseModel 参数，会被自动识别为请求体
+        return {"id": 1, "name": user.name}
 
 @module(services=[Database, UserService, Api])
 class App(ModuleBase):
