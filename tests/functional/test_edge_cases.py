@@ -237,7 +237,7 @@ class TestEdgeCases:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/Level2/Level3/LeafService/data")
+            r = await client.get("/data")
             assert r.status_code == 200
             assert r.json() == {"depth": "leaf"}
 

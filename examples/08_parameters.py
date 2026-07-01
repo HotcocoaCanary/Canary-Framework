@@ -2,7 +2,10 @@
 
 Demonstrates: path parameters, query parameters,
 type conversion (int, float, bool, str),
-invalid parameter → 400 responses.
+invalid/missing parameter → 422 responses.
+
+布尔查询参数 / Boolean query params: ``true/True/1/yes/on`` → True,
+``false/False/0/no/off`` → False（因此 ``?enabled=1`` 为 True）。
 """
 
 import uvicorn
@@ -52,7 +55,7 @@ class App(ModuleBase):
 #   curl http://127.0.0.1:8000/calc/divide/10/3
 #   curl "http://127.0.0.1:8000/calc/search?q=hello&page=2"
 #   curl http://127.0.0.1:8000/calc/feature?enabled=true
-#   curl http://127.0.0.1:8000/calc/feature?enabled=1
+#   curl http://127.0.0.1:8000/calc/feature?enabled=1   # → {"enabled": true}
 #   curl http://127.0.0.1:8000/calc/users/42/posts?tag=python
 
 if __name__ == "__main__":

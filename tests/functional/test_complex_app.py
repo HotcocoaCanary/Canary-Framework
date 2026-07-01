@@ -108,20 +108,20 @@ class TestComplexApp:
         ) as client:
             # Test user module
             response = await client.post(
-                "/UserModule/UserRouter/users",
+                "/users",
                 json={"name": "Alice", "email": "alice@example.com"},
             )
             assert response.status_code == 200
 
-            response = await client.get("/UserModule/UserRouter/users")
+            response = await client.get("/users")
             assert len(response.json()) == 1
 
             # Test product module
             response = await client.post(
-                "/ProductModule/ProductRouter/products",
+                "/products",
                 json={"name": "Laptop", "price": 999.99},
             )
             assert response.status_code == 200
 
-            response = await client.get("/ProductModule/ProductRouter/products")
+            response = await client.get("/products")
             assert len(response.json()) == 1

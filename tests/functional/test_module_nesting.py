@@ -37,7 +37,7 @@ class TestModuleNesting:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/SubModule/ApiService/data")
+            response = await client.get("/data")
             assert response.status_code == 200
             assert response.json() == {"source": "leaf"}
 
@@ -68,7 +68,7 @@ class TestModuleNesting:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/MidModule/DeepService/deep")
+            response = await client.get("/deep")
             assert response.status_code == 200
 
     @pytest.mark.asyncio
@@ -107,10 +107,10 @@ class TestModuleNesting:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r1 = await client.get("/UserModule/UserService/me")
+            r1 = await client.get("/me")
             assert r1.status_code == 200
 
-            r2 = await client.get("/OrderModule/OrderService/mine")
+            r2 = await client.get("/mine")
             assert r2.status_code == 200
 
             schema = (await client.get("/openapi.json")).json()
@@ -147,7 +147,7 @@ class TestModuleNesting:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/ChildModule/ConsumerService/data")
+            response = await client.get("/data")
             assert response.status_code == 200
             assert response.json() == {"data": "shared-data"}
 
@@ -175,7 +175,7 @@ class TestModuleNesting:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/LeafService/leaf")
+            response = await client.get("/leaf")
             assert response.status_code == 200
 
     @pytest.mark.asyncio

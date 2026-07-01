@@ -94,23 +94,21 @@ class TestSimpleApp:
             base_url="http://test",
         ) as client:
             # Test list todos
-            response = await client.get("/TodoRouter/todos")
+            response = await client.get("/todos")
             assert response.status_code == 200
             todos = response.json()
             assert len(todos) == 2
             assert todos[0]["title"] == "Learn Canary"
             assert todos[0]["completed"] is True
 
-            response = await client.post(
-                "/TodoRouter/todos", json={"title": "New todo", "completed": False}
-            )
+            response = await client.post("/todos", json={"title": "New todo", "completed": False})
             assert response.status_code == 200
             new_todo = response.json()
             assert new_todo["id"] == 3
             assert new_todo["title"] == "New todo"
 
             # Verify list now has 3 todos
-            response = await client.get("/TodoRouter/todos")
+            response = await client.get("/todos")
             assert len(response.json()) == 3
 
     @pytest.mark.asyncio
