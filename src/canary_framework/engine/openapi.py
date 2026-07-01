@@ -1,8 +1,8 @@
 """OpenAPI 3.0.3 schema generator 和文档端点配置。
 
-从RouterMeta列表生成符合OpenAPI 3.0.3规范的schema，并提供 Swagger UI / ReDoc 文档端点。
+从 ResolvedRoute 列表生成符合OpenAPI 3.0.3规范的schema，并提供 Swagger UI / ReDoc 文档端点。
 
-Generates OpenAPI 3.0.3-compliant schemas from RouterMeta lists
+Generates OpenAPI 3.0.3-compliant schemas from ResolvedRoute lists
 and configures Swagger UI / ReDoc documentation endpoints.
 """
 

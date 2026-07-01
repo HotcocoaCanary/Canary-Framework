@@ -24,14 +24,15 @@ class Api(ServiceBase):
 
 The `Router` class accepts the following constructor arguments:
 
-- **`prefix`** (str, default `""`) — URL prefix applied to all routes in this router
-- **`tags`** (list[str], keyword-only) — OpenAPI tags for documentation grouping
-- Name is auto-derived from the service class name
-- Dependencies are declared via type annotations on the class body
+- **`prefix`** (str, default `""`) — URL prefix applied to all routes registered on this router. Combined with each route's path to form the served path (see [Mounting Routers](#mounting-routers)).
+- **`tags`** (`list[str]`, keyword-only) — OpenAPI tags automatically applied to every endpoint declared on this router.
+
+!!! tip
+    `Router` itself does not know about services or modules — it just accumulates `RouteInfo` entries. A service's `router` attribute is discovered and bound to `self` when routes are assembled (see [Mounting Routers](#mounting-routers)).
 
 ## HTTP Method Decorators
 
-Six HTTP method decorators are available on the `Router` instance: `.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`.
+Five HTTP method decorators are available on the `Router` instance: `.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`.
 
 ```python
 from canary_framework import service
@@ -51,27 +52,27 @@ class Items(ServiceBase):
         return {"item_id": item_id}
 
     @router.post("/")
-    async def create_item(self, body: dict):
-        return body, 201
+    async def create_item(self, item: dict):
+        return item, 201
 
     @router.put("/{item_id}")
-    async def update_item(self, item_id: int, body: dict):
-        return {"id": item_id, **body}
+    async def update_item(self, item_id: int, item: dict):
+        return {"id": item_id, **item}
 
     @router.patch("/{item_id}")
-    async def patch_item(self, item_id: int, body: dict):
-        return {"id": item_id, **body}
+    async def patch_item(self, item_id: int, item: dict):
+        return {"id": item_id, **item}
 
     @router.delete("/{item_id}")
     async def delete_item(self, item_id: int):
         return {"message": f"Item {item_id} deleted"}
 ```
 
-Route handlers do **not** receive a `request` parameter. Parameters are auto-bound from the URL and request body.
+Route handlers do **not** receive a `request` parameter. Parameters are bound by **name**: path parameters, query parameters, and the request body.
 
 ## Path Parameters
 
-Path parameters in the route pattern are automatically bound to function parameters:
+Path parameters in the route pattern are automatically bound to function parameters of the same name:
 
 ```python
 @service()
@@ -80,7 +81,7 @@ class Users(ServiceBase):
 
     @router.get("/{user_id}")
     async def get_user(self, user_id: int):
-        # user_id auto-bound from URL path
+        # user_id auto-bound from the URL path
         return {"user_id": user_id}
 
     @router.get("/{user_id}/posts/{post_id}")
@@ -89,40 +90,45 @@ class Users(ServiceBase):
         return {"user_id": user_id, "post_id": post_id}
 ```
 
-The framework automatically converts string path segments to the declared type (int, float, str, bool).
+The framework converts the string path segment to the parameter's declared type (`int`, `float`, `str`, `bool`, and `Optional[T]` of those). An unconvertible value returns **400**.
 
 ## Query Parameters
 
-Non-path function parameters with defaults are automatically bound from the query string:
+!!! warning "Query params must be declared in the path string"
+    Unlike path parameters, a function parameter is **not** treated as a query parameter just because it has a default value. It must also appear in the route's path string using `?key={key}` syntax. A defaulted parameter that is *not* declared there simply keeps its default — it is never read from the query string.
 
 ```python
 @service()
 class Search(ServiceBase):
     router = Router(prefix="/search")
 
-    @router.get("/")
+    # q, page, and limit are declared in the path string, so they bind
+    # from the query string. Anything else stays at its default.
+    @router.get("/?q={q}&page={page}&limit={limit}")
     async def search(self, q: str = "", page: int = 1, limit: int = 10):
-        # q, page, limit auto-bound from query string
         return {"query": q, "page": page, "limit": limit}
 ```
 
-A request to `/search?q=canary&page=2&limit=5` binds `q="canary"`, `page=2`, `limit=5`. Parameters use their default values when not provided.
-
-Query parameters in route paths use the `?param={param}&param2={param2}` syntax:
+A request to `/search?q=canary&page=2&limit=5` binds `q="canary"`, `page=2`, `limit=5`. Parameters keep their default values when omitted from the request.
 
 ```python
-@service()
-class Search(ServiceBase):
-    router = Router(prefix="/search")
+# WRONG — `active` has a default but is not declared in the path string,
+# so it is NEVER bound from the query string; it is always True.
+@router.get("/users")
+async def list_users(self, active: bool = True):
+    ...
 
-    @router.get("/search?q={query}&page={page}")
-    async def search(self, query: str = "", page: int = 1):
-        ...
+# RIGHT — declare it in the path so it binds from ?active=...
+@router.get("/users?active={active}")
+async def list_users(self, active: bool = True):
+    ...
 ```
+
+A query parameter **without** a default is required: a missing or invalid value returns **422**.
 
 ## Request Body
 
-Use `request_model` on the HTTP method decorator to auto-parse and validate the request body:
+The handler's **body parameter** is the first parameter that is neither a path parameter nor a query parameter (as declared in the path string). It does not have to be named `body`.
 
 ```python
 from pydantic import BaseModel, Field
@@ -135,18 +141,26 @@ class CreateItem(BaseModel):
 class Items(ServiceBase):
     router = Router(prefix="/items")
 
-    @router.post("/", request_model=CreateItem)
-    async def create(self, body: CreateItem):
-        # body is a validated CreateItem instance
-        return {"name": body.name, "price": body.price}, 201
+    @router.post("/")
+    async def create(self, item: CreateItem):
+        # `item` is auto-detected as the request_model (it's a BaseModel
+        # subclass, and it's neither a path nor a query param).
+        return {"name": item.name, "price": item.price}, 201
 ```
 
-When `request_model` is specified:
-1. Request body is parsed into the specified Pydantic model
-2. The validated model instance is passed as the `body` parameter
-3. Pydantic validation errors return 422 responses automatically
+`request_model` is auto-detected from the first `BaseModel`-typed parameter that isn't a path/query param; you can also pass it explicitly:
 
-The `body` parameter name is fixed — when `request_model` is set, the parsed model is always passed as `body`.
+```python
+    @router.post("/", request_model=CreateItem)
+    async def create(self, item: CreateItem):
+        ...
+```
+
+When a body is expected:
+
+1. The request body is parsed as JSON — invalid JSON returns **400**.
+2. It is validated against the resolved `request_model` — a `ValidationError` returns **422**.
+3. The validated model instance is passed to the body parameter (by its actual name, whatever that is).
 
 ## Service Dependencies
 
@@ -169,49 +183,166 @@ class Users(ServiceBase):
         return user
 ```
 
+See [Dependency Injection](./dependency-injection.md) for the full DI mechanism.
+
 ## Mounting Routers
 
-When you include a service that has a `router` attribute in a module's `services` list, it is automatically mounted at its prefix:
+!!! warning "Behavior change: explicit prefixes only (D4)"
+    Canary uses an **explicit-prefix** model. There is no `/{ServiceName}` auto-namespacing — a router with no `prefix` serves its routes at the bare path. If you were relying on implicit per-service mounting, give each router an explicit `prefix=` to reproduce the old namespacing, e.g. `Router(prefix="/users")`.
+
+A module composes services; it does not "mount" them at a derived path. Each route is served at `router.prefix + route_path` (with repeated `/` collapsed), regardless of whether the owning service runs standalone or nested inside a module tree:
 
 ```python
-@module(services=[Users, Items, Auth])
+@service()
+class Users(ServiceBase):
+    router = Router(prefix="/users")
+
+    @router.get("/{user_id}")
+    async def get_user(self, user_id: int):
+        return {"user_id": user_id}
+
+@service()
+class Items(ServiceBase):
+    router = Router(prefix="/items")
+
+    @router.get("/")
+    async def list_items(self):
+        return {"items": []}
+
+@module(services=[Users, Items])
 class App(ModuleBase):
     pass
 
-# Mounted:
-# Users  → prefix="/users"
-# Items  → prefix="/items"
-# Auth   → prefix="/auth"
+# Served paths:
+#   GET /users/{user_id}   (Users' own prefix)
+#   GET /items/            (Items' own prefix)
 ```
+
+A module also collects routes recursively from nested modules — the composed tree is flattened into one routing table, with each node contributing its own already-prefixed paths (no additional prefix cascading is applied by the parent).
+
+If two routes resolve to the same `(method, full_path)` anywhere in the tree, assembly raises `ValueError` — this is a real collision check, not a silent override.
+
+```python
+@service()
+class A(ServiceBase):
+    router = Router()  # no prefix
+
+    @router.get("/ping")
+    async def ping(self): ...
+
+@service()
+class B(ServiceBase):
+    router = Router()  # no prefix — collides with A's "/ping"
+
+    @router.get("/ping")
+    async def ping(self): ...
+
+@module(services=[A, B])
+class App(ModuleBase):
+    pass
+
+# app.init() → asgi_app access raises:
+#   ValueError: Route collision: GET /ping
+```
+
+!!! note "Standalone and module-composed services behave the same way"
+    A lone `@service` run directly (`app = MyService(); app.init(); uvicorn.run(app, ...)`) and the same service composed into a module serve identical paths — the only difference is the scope of the subtree being assembled. See `examples/01_standalone.py` vs. `examples/04_module_router.py`.
 
 ## Root Routes
 
-Routers contribute documentation endpoints at the module's root level. The first router in a module registers:
+Doc endpoints — Swagger UI, ReDoc, and the OpenAPI JSON schema — are generated **once**, at the node you actually run (the "run node"): whichever `ServiceBase`/`ModuleBase` instance you call `.init()` and serve as the ASGI app. Assembly walks the whole subtree under that node, collects every route, checks for collisions, and builds one Starlette routing table plus one OpenAPI document, exposing:
 
 - **`GET /docs`** — Swagger UI
 - **`GET /redoc`** — ReDoc
 - **`GET /openapi.json`** — OpenAPI 3.0.3 schema
 
-These paths are configurable via `CanaryConfig` (see [Configuration](./configuration.md)). Documentation is auto-enabled by default — no `docs=True` parameter needed.
+These paths (and the Swagger/ReDoc CDN URLs) are configurable via `CanaryConfig` — see [Documentation Endpoints](./configuration.md#documentation-endpoints). Documentation is on by default; there is no `docs=True` flag to set.
 
-On startup, the first router collects `RouterMeta` from all sibling routers in the parent registry and generates a unified OpenAPI schema covering all routes. If multiple routers are in the same module, only the first one registers docs (first-wins behavior tracked via `_cf_docs_registered`).
+Assembly is lazy and memoized: the first access to `asgi_app` or `openapi()` triggers it, and the result is cached. `ModuleBase.init()` resets that cache, so an access before `init()` can't poison the memoized result with an incomplete tree.
 
 ## OpenAPI Documentation Parameters
 
-HTTP method decorators support the following OpenAPI documentation parameters:
+HTTP method decorators support the following keyword arguments (see `Router` in `core/router/_base.py`):
 
 | Parameter | Type | Description |
 |---|---|---|
-| `summary` | `str` | Short summary of the operation |
-| `description` | `str` | Detailed description |
-| `request_model` | `BaseModel` | Pydantic model for request body (auto-parsed) |
-| `response_model` | `BaseModel` | Pydantic model for response schema |
-| `responses` | `dict` | Custom response definitions |
-| `tags` | `list[str]` | Tags for API grouping |
+| `summary` | `str \| None` | Short summary of the operation |
+| `description` | `str \| None` | Detailed description |
+| `request_model` | `type \| None` | Pydantic model for the request body (auto-parsed and validated) |
+| `response_model` | `type \| None` | Pydantic model used for the OpenAPI response schema only |
+| `responses` | `dict \| None` | Custom response definitions |
+| `tags` | `list[str] \| None` | Tags for API grouping (merged with the router's own tags) |
 | `deprecated` | `bool` | Whether this operation is deprecated |
-| `operation_id` | `str` | Unique operation identifier |
-| `path_params` | `dict` | Path parameter definitions (schema enrichment) |
-| `query_params` | `dict` | Query parameter definitions (schema enrichment) |
+| `operation_id` | `str \| None` | Unique operation identifier |
+
+!!! note
+    There are no `path_params` / `query_params` kwargs — path and query parameter schemas are derived automatically from the route's path string and the handler's type annotations.
+
+`response_model` affects OpenAPI documentation only — it does **not** validate or filter the actual response your handler returns.
+
+## Status Codes & Type Coercion
+
+| Situation | Status |
+|---|---|
+| Invalid path parameter (fails type conversion) | **400** |
+| Missing required query parameter, or invalid query value | **422** |
+| Invalid/non-JSON request body | **400** |
+| Request body fails `request_model` validation | **422** |
+
+Type coercion for path/query values (`_convert_param`): `int`, `float`, `str` convert directly; `Optional[T]` is unwrapped first. For `bool`, the string is lower-cased and matched against:
+
+- `1`, `true`, `yes`, `on` → `True`
+- `0`, `false`, `no`, `off` → `False`
+- anything else → conversion error → **422** (query) / **400** (path)
+
+## Return Values
+
+Handlers can return several shapes; `_auto_response` converts them:
+
+=== "dict / list"
+    ```python
+    @router.get("/items")
+    async def list_items(self):
+        return {"items": [1, 2, 3]}  # → JSONResponse
+    ```
+
+=== "Pydantic model"
+    ```python
+    @router.get("/items/{item_id}")
+    async def get_item(self, item_id: int):
+        return ItemModel(id=item_id, name="widget")  # → JSONResponse(model_dump())
+    ```
+
+=== "(body, status_code) tuple"
+    ```python
+    @router.post("/items")
+    async def create_item(self, item: dict):
+        return item, 201  # → JSONResponse(item, status_code=201)
+    ```
+
+=== "str"
+    ```python
+    @router.get("/ping")
+    async def ping(self):
+        return "pong"  # → PlainTextResponse
+    ```
+
+=== "Response"
+    ```python
+    from starlette.responses import RedirectResponse
+
+    @router.get("/old")
+    async def old(self):
+        return RedirectResponse("/new")  # → returned as-is
+    ```
+
+- A `Response` instance is returned as-is.
+- A 2-tuple `(body, status_code)` where `status_code` is an `int` (and not a `bool`) sets the HTTP status; `body` is converted the same way as a top-level return (`Response`, `BaseModel`, `dict`/`list`, `str`, or else stringified).
+- A `bool` in the second tuple position is **not** treated as a status code — `(x, True)` is not a status tuple, it falls through to the default (str) conversion path.
+- `dict`/`list` (including nested `BaseModel`s inside them) → `JSONResponse`.
+- `BaseModel` → `JSONResponse(model_dump())`.
+- `str` → `PlainTextResponse`.
+- Anything else → `PlainTextResponse(str(result))`.
 
 ## Tags Grouping
 
@@ -287,14 +418,14 @@ class Todos(ServiceBase):
         return todo if todo else ({"error": "Not found"}, 404)
 
     @router.post("/", summary="Create todo", request_model=TodoCreate, response_model=TodoResponse)
-    async def create_todo(self, body: TodoCreate):
-        todo = await self.store.create(body.model_dump())
-        return todo, 201
+    async def create_todo(self, todo: TodoCreate):
+        created = await self.store.create(todo.model_dump())
+        return created, 201
 
     @router.put("/{todo_id}", summary="Update todo", request_model=TodoCreate, response_model=TodoResponse)
-    async def update_todo(self, todo_id: int, body: TodoCreate):
-        todo = await self.store.update(todo_id, body.model_dump())
-        return todo if todo else ({"error": "Not found"}, 404)
+    async def update_todo(self, todo_id: int, todo: TodoCreate):
+        updated = await self.store.update(todo_id, todo.model_dump())
+        return updated if updated else ({"error": "Not found"}, 404)
 
     @router.delete("/{todo_id}", summary="Delete todo")
     async def delete_todo(self, todo_id: int):
@@ -304,14 +435,23 @@ class Todos(ServiceBase):
 @module(services=[DataStore, Todos])
 class App(ModuleBase):
     pass
+
+if __name__ == "__main__":
+    import uvicorn
+
+    app = App()
+    app.init()
+    uvicorn.run(app, lifespan="on")
 ```
+
+`Todos` declares an explicit `prefix="/todos"`, so its routes are served at `/todos`, `/todos/{todo_id}`, etc. `DataStore` has no `Router`, so it contributes no routes — it's a plain injected dependency. See [Services](./services.md) and [Modules](./modules.md) for the broader composition model.
 
 ## Best Practices
 
-1. **Route Organization**: Organize routes by feature (users, posts, todos) using separate service classes, each with its own `Router` attribute
-2. **Parameter Validation**: Use Pydantic models with `request_model` for request body validation
-3. **Type Hints**: Use type annotations for path and query parameters for automatic binding
-4. **Error Handling**: Return consistent `(data, status_code)` tuples and use `response_model` for schema documentation
-5. **Documentation**: Add `summary` and `description` to each route for auto-generated OpenAPI docs
-6. **Tag Grouping**: Use tags at both router and method level for clear API grouping
-7. **Response Models**: Explicitly specify `response_model` for accurate OpenAPI schema documentation
+1. **Route Organization** — organize routes by feature (users, posts, todos) using separate service classes, each with its own `Router` attribute and an explicit `prefix`.
+2. **Explicit Prefixes** — always set `Router(prefix=...)` on services composed into a module; relying on a no-prefix router across multiple services risks path collisions (`ValueError` at assembly).
+3. **Query Params in the Path** — remember that a defaulted parameter only binds from the query string if it's declared in the route's path string (`?key={key}`).
+4. **Parameter Validation** — use Pydantic models for request bodies; let auto-detection or explicit `request_model` handle parsing and validation.
+5. **Error Handling** — return `(data, status_code)` tuples for non-2xx responses, and use `response_model` for accurate OpenAPI schema documentation (it does not affect runtime behavior).
+6. **Documentation** — add `summary` and `description` to each route for clearer auto-generated OpenAPI docs.
+7. **Tag Grouping** — use tags at both router and method level for clear API grouping.

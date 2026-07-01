@@ -99,7 +99,7 @@ class AppConfig(CanaryConfig):
     openapi_servers: list = [{"url": "http://localhost:8080"}]
 ```
 
-### 文档端点
+### 文档端点 {#docs-endpoints}
 
 - **`docs_openapi_path`** — OpenAPI JSON 端点的路径。默认 `"/openapi.json"`。
 - **`docs_swagger_path`** — Swagger UI 的路径。默认 `"/docs"`。

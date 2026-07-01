@@ -14,6 +14,10 @@
 
 Canary Framework is a **decorator-driven** async service framework for Python. Core philosophy: **Services are the smallest unit, modules compose services, and modules themselves are services.**
 
+> **0.5.x is the actively-maintained line.** As long as the core design philosophy holds, new
+> features and fixes ship as `0.5.x` — see the [Versioning Policy](./CHANGELOG.md#版本策略--versioning-policy)
+> in the changelog, and [What's New in 0.5.x](./docs/en/whats-new.md) for the latest router redesign.
+
 ## Core Features
 
 - **Decorator-Driven** — Use `@service` and `@module` decorators with explicit base class inheritance
@@ -33,10 +37,15 @@ pip install canary-framework
 ## Quick Start
 
 ```python
+from pydantic import BaseModel
+
 from canary_framework import service, module
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
 from canary_framework.core.router import Router
+
+class NewUser(BaseModel):
+    name: str
 
 @service()
 class Database(ServiceBase):
@@ -61,8 +70,9 @@ class Api(ServiceBase):
         return self.user_service.get_user(user_id)
 
     @router.post("/users")
-    async def create_user(self, body: dict) -> dict:
-        return {"id": 1, **body}
+    async def create_user(self, user: NewUser) -> dict:
+        # `user` is a BaseModel param, so it's auto-detected as the request body.
+        return {"id": 1, "name": user.name}
 
 @module(services=[Database, UserService, Api])
 class App(ModuleBase):
@@ -111,7 +121,7 @@ async def setup():
 ## Web Example with OpenAPI
 
 ```python
-from canary_framework import module
+from canary_framework import service, module
 from canary_framework.core.service import ServiceBase
 from canary_framework.core.module import ModuleBase
 from canary_framework.core.router import Router
