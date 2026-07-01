@@ -380,11 +380,13 @@ git commit -m "feat: Router 声明期捕获请求体参数名 body_param"
 
 ---
 
-## Task 5: 重写 endpoint —— `_build_route(resolved)`（按名传参 + 必填 query 422）
+## Task 5: 新增 endpoint 构造器 —— `_build_route(resolved)`（按名传参 + 必填 query 422）
 
 **Files:**
-- Modify: `src/canary_framework/core/router/_utils.py`（替换 `_route_handler` 为 `_build_route`）
-- Test: `tests/functional/test_request_binding.py`（新建）
+- Modify: `src/canary_framework/core/router/_utils.py`（**新增** `_build_route` + `_check_route_collisions`；**保留** `_route_handler`，Task 8 才删）
+- Test: `tests/functional/test_request_binding.py`（新建，直连测试）
+
+> **本任务纯增量**：`_build_route` 与旧 `_route_handler` 并存；旧 serving 路径（`_collect_routes`→`_route_handler`）保持工作、现有套件保持绿。用**直连构造 `ResolvedRoute`** 的方式测 `_build_route`（handler 用普通 async 函数即可，`_build_route` 直接 `handler(**kwargs)`），不依赖尚未接通的装配链路。Task 8 接通装配、删旧路径、并补 App 级端到端断言。
 
 **Interfaces:**
 - Consumes: `ResolvedRoute`（Task 1）、`_convert_param`（Task 2）、`_auto_response`（Task 3）、`RouteInfo.body_param`（Task 4）。
@@ -398,16 +400,22 @@ git commit -m "feat: Router 声明期捕获请求体参数名 body_param"
 新建 `tests/functional/test_request_binding.py`：
 
 ```python
-"""Request binding regression tests (path+body, required query, etc.)."""
+"""_build_route endpoint 行为 —— 直连构造 ResolvedRoute 测试（不经装配链路）。
+
+Direct _build_route tests: construct ResolvedRoute values and drive the
+endpoint via Starlette, independent of the (not-yet-wired) assembly path.
+"""
+
+from typing import Any
 
 import pytest
 from pydantic import BaseModel
+from starlette.applications import Starlette
+from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework.common import ResolvedRoute, RouteInfo
+from canary_framework.core.router._utils import _build_route, _check_route_collisions
 
 pytestmark = pytest.mark.functional
 
@@ -416,64 +424,121 @@ class Patch(BaseModel):
     name: str
 
 
-@service()
-class Api(ServiceBase):
-    router = Router(prefix="/api")
-
-    @router.put("/users/{user_id}")
-    async def update(self, user_id: int, body: Patch) -> dict:
-        return {"user_id": user_id, "name": body.name}
-
-    @router.get("/feature?enabled={flag}")
-    async def feature(self, flag: bool) -> dict:
-        return {"enabled": flag}
-
-    @router.get("/search?q={query}")
-    async def search(self, query: str = "none") -> dict:
-        return {"query": query}
+async def update_handler(user_id: int, body: Patch) -> dict[str, Any]:
+    return {"user_id": user_id, "name": body.name}
 
 
-@module(services=[Api])
-class App(ModuleBase):
-    pass
+async def feature_handler(flag: bool) -> dict[str, Any]:
+    return {"enabled": flag}
 
 
-def _client() -> TestClient:
-    app = App()
-    app.init()
-    return TestClient(app)
+async def search_handler(query: str = "none") -> dict[str, Any]:
+    return {"query": query}
 
 
-def test_path_param_plus_body_binds_by_name():
-    with _client() as c:
+def _resolved(
+    handler: Any,
+    *,
+    method: str,
+    full_path: str,
+    path_params: list[str] | None = None,
+    query_params: list[str] | None = None,
+    param_meta: dict[str, object] | None = None,
+    request_model: type | None = None,
+    body_param: str | None = None,
+) -> ResolvedRoute:
+    info = RouteInfo(
+        handler=handler,
+        method=method,
+        path=full_path,
+        starlette_path=full_path,
+        path_params=path_params or [],
+        query_params=query_params or [],
+        param_meta=param_meta or {},
+        request_model=request_model,
+        body_param=body_param,
+    )
+    return ResolvedRoute(full_path=full_path, handler=handler, info=info)
+
+
+def _client(*routes: Route) -> TestClient:
+    return TestClient(Starlette(routes=list(routes)))
+
+
+def test_path_param_plus_body_binds_by_name() -> None:
+    route = _build_route(
+        _resolved(
+            update_handler,
+            method="PUT",
+            full_path="/api/users/{user_id}",
+            path_params=["user_id"],
+            param_meta={"user_id": (int, False, None), "body": (Patch, False, None)},
+            request_model=Patch,
+            body_param="body",
+        )
+    )
+    with _client(route) as c:
         r = c.put("/api/users/7", json={"name": "neo"})
         assert r.status_code == 200
         assert r.json() == {"user_id": 7, "name": "neo"}
 
 
-def test_missing_required_query_returns_422():
-    with _client() as c:
+def test_missing_required_query_returns_422() -> None:
+    route = _build_route(
+        _resolved(
+            feature_handler,
+            method="GET",
+            full_path="/api/feature",
+            query_params=["flag"],
+            param_meta={"flag": (bool, False, None)},
+        )
+    )
+    with _client(route) as c:
         assert c.get("/api/feature").status_code == 422
 
 
-def test_bool_query_one_is_true():
-    with _client() as c:
-        assert c.get("/api/feature?enabled=1").json() == {"enabled": True}
+def test_bool_query_one_is_true() -> None:
+    route = _build_route(
+        _resolved(
+            feature_handler,
+            method="GET",
+            full_path="/api/feature",
+            query_params=["flag"],
+            param_meta={"flag": (bool, False, None)},
+        )
+    )
+    with _client(route) as c:
+        assert c.get("/api/feature?flag=1").json() == {"enabled": True}
 
 
-def test_optional_query_uses_default():
-    with _client() as c:
+def test_optional_query_uses_default() -> None:
+    route = _build_route(
+        _resolved(
+            search_handler,
+            method="GET",
+            full_path="/api/search",
+            query_params=["query"],
+            param_meta={"query": (str, True, None)},
+        )
+    )
+    with _client(route) as c:
         assert c.get("/api/search").json() == {"query": "none"}
+
+
+def test_check_route_collisions_raises_on_duplicate() -> None:
+    r = _resolved(feature_handler, method="GET", full_path="/api/x")
+    with pytest.raises(ValueError, match="collision"):
+        _check_route_collisions([r, r])
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `uv run pytest tests/functional/test_request_binding.py -v`
-Expected: FAIL —— 此刻 `_build_route` 尚不存在，且现有装配链路仍走旧逻辑（path+body 会 500）。
+Expected: FAIL（`ImportError: cannot import name '_build_route'`）。
 
-- [ ] **Step 3: 用 `_build_route` 替换 `_route_handler`**
+- [ ] **Step 3: 新增 `_build_route` 与 `_check_route_collisions`（保留 `_route_handler`）**
 
-在 `src/canary_framework/core/router/_utils.py`，删除 `_route_handler` 整个函数，新增：
+在 `src/canary_framework/core/router/_utils.py`，**保留** `_route_handler`（旧路径仍用），在其旁新增：
 
 ```python
 def _check_route_collisions(routes: list[ResolvedRoute]) -> None:
@@ -547,39 +612,16 @@ def _build_route(resolved: ResolvedRoute) -> Route:
     return Route(resolved.full_path, endpoint=endpoint, methods=[info.method])
 ```
 
-在文件顶部 import 区加入 `from canary_framework.common import ResolvedRoute, RouteInfo`（若 `RouteInfo` 已 import 则合并），并更新 `__all__`：移除 `"_route_handler"`，加入 `"_build_route"`、`"_check_route_collisions"`。
+在文件顶部 import 区加入 `from canary_framework.common import ResolvedRoute`（`RouteInfo` 已 import，合并即可），并在 `__all__` 中**加入** `"_build_route"`、`"_check_route_collisions"`（**保留** `"_route_handler"`）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `uv run pytest tests/functional/test_request_binding.py -v`
-Expected: 仍可能 FAIL —— 旧装配链路（`_collect_routes`/`ModuleBase.asgi_app`）还在用 `_route_handler`。**先确认编译/导入层面**：
+Expected: PASS（5 条直连测试全绿）。
 
-Run: `uv run python -c "from canary_framework.core.router._utils import _build_route, _check_route_collisions"`
-Expected: 无报错。
-
-> 说明：本任务交付 `_build_route` 函数本身；端到端绿灯依赖 Task 8 接上装配链路。Task 8 会回到此测试文件验证全绿。此处先用单元方式验证 `_build_route`：
-
-在 `tests/functional/test_request_binding.py` 末尾追加一个直连测试：
-
-```python
-def test_build_route_direct_path_and_body():
-    from starlette.applications import Starlette
-    from canary_framework.common import ResolvedRoute
-    from canary_framework.core.router._utils import _build_route
-
-    api = Api()
-    (info,) = [i for i in Api.router._route_infos if i.method == "PUT"]
-    bound = info.handler.__get__(api, Api)
-    route = _build_route(ResolvedRoute(full_path="/api/users/{user_id}", handler=bound, info=info))
-    app = Starlette(routes=[route])
-    with TestClient(app) as c:
-        assert c.put("/api/users/9", json={"name": "trinity"}).json() == {
-            "user_id": 9, "name": "trinity",
-        }
-```
-
-Run: `uv run pytest tests/functional/test_request_binding.py::test_build_route_direct_path_and_body -v`
-Expected: PASS。
+并确认未破坏现有套件（纯增量、旧路径未动）：
+Run: `uv run pytest -q`
+Expected: 全 PASS。
 
 - [ ] **Step 5: 类型检查 + 提交**
 
@@ -1114,6 +1156,10 @@ class Assembled(NamedTuple):
 在 `src/canary_framework/core/router/_base.py`：
 
 4. 删除 `_collect_routes` 函数及其在 `__all__` 的条目（保留 `Router`）。此时已无任何引用（service/module 的旧 `asgi_app` 已在本任务删除）。
+
+在 `src/canary_framework/core/router/_utils.py`：
+
+5. 删除 `_route_handler` 函数及其在 `__all__` 的条目（Task 5 起改用 `_build_route`；`_collect_routes` 删除后 `_route_handler` 已无引用）。
 
 - [ ] **Step 5: 跑端到端测试**
 
