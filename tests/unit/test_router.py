@@ -126,3 +126,18 @@ def test_convert_param_bool_unrecognized_raises() -> None:
 def test_convert_param_unwraps_optional_int() -> None:
     """Test Optional[T] is unwrapped before conversion."""
     assert _convert_param("42", int | None) == 42
+
+
+@pytest.mark.unit
+def test_auto_response_tuple_sets_status_code() -> None:
+    """Test that (body, status_code) tuple returns response with custom status code."""
+    resp = _auto_response(({"error": "Not found"}, 404))
+    assert resp.status_code == 404
+    assert b"Not found" in resp.body
+
+
+@pytest.mark.unit
+def test_auto_response_plain_dict_is_200() -> None:
+    """Test that plain dict (non-tuple) returns 200 status code."""
+    resp = _auto_response({"ok": True})
+    assert resp.status_code == 200

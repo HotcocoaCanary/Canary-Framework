@@ -122,6 +122,7 @@ def _auto_response(result: object) -> Response:
 
     根据返回值类型自动选择合适的响应类型：
     - Response对象：直接返回
+    - (body, status_code) 二元组：根据body类型选择响应，并设置状态码
     - dict或list：返回JSONResponse
     - Pydantic BaseModel：返回JSONResponse（调用model_dump）
     - str：返回PlainTextResponse
@@ -137,6 +138,7 @@ def _auto_response(result: object) -> Response:
 
     Automatically selects the appropriate response type based on the return value:
     - Response object: returned directly
+    - (body, status_code) tuple: selects response type based on body and sets status code
     - dict or list: JSONResponse
     - Pydantic BaseModel: JSONResponse (via model_dump)
     - str: PlainTextResponse
@@ -150,6 +152,22 @@ def _auto_response(result: object) -> Response:
     """
     if isinstance(result, Response):
         return result
+    if (
+        isinstance(result, tuple)
+        and len(result) == 2
+        and isinstance(result[1], int)
+    ):
+        body, status_code = result
+        if isinstance(body, Response):
+            body.status_code = status_code
+            return body
+        if isinstance(body, BaseModel):
+            return JSONResponse(body.model_dump(), status_code=status_code)
+        if isinstance(body, (dict, list)):
+            return JSONResponse(_convert_nested_models(body), status_code=status_code)
+        if isinstance(body, str):
+            return PlainTextResponse(body, status_code=status_code)
+        return PlainTextResponse(str(body), status_code=status_code)
     if isinstance(result, str):
         return PlainTextResponse(result)
     if isinstance(result, BaseModel):
