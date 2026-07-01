@@ -99,3 +99,30 @@ class TestAutoResponse:
         """Test other types become PlainTextResponse."""
         result = _auto_response(123)
         assert isinstance(result, PlainTextResponse)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("raw", ["1", "true", "True", "YES", "on"])
+def test_convert_param_bool_truthy(raw: str) -> None:
+    """Test bool conversion accepts truthy spellings."""
+    assert _convert_param(raw, bool) is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("raw", ["0", "false", "no", "off"])
+def test_convert_param_bool_falsy(raw: str) -> None:
+    """Test bool conversion accepts falsy spellings."""
+    assert _convert_param(raw, bool) is False
+
+
+@pytest.mark.unit
+def test_convert_param_bool_unrecognized_raises() -> None:
+    """Test bool conversion raises ValueError for unrecognized input."""
+    with pytest.raises(ValueError):
+        _convert_param("maybe", bool)
+
+
+@pytest.mark.unit
+def test_convert_param_unwraps_optional_int() -> None:
+    """Test Optional[T] is unwrapped before conversion."""
+    assert _convert_param("42", int | None) == 42

@@ -56,7 +56,7 @@ class TestEdgeCases:
 
     @pytest.mark.asyncio
     async def test_bool_query_param_true_values(self) -> None:
-        """Boolean query params — only "true" (case-insensitive) is True, everything else False."""
+        """Boolean query params accept common truthy/falsy spellings; unrecognized → error."""
 
         @service()
         class MyService(ServiceBase):
@@ -70,13 +70,17 @@ class TestEdgeCases:
         app.init()
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            for val in ("true", "True", "TRUE", "tRuE"):
+            for val in ("true", "True", "TRUE", "tRuE", "1", "yes", "YES", "on"):
                 r = await client.get(f"/check?flag={val}")
                 assert r.json()["flag"] is True, f"'{val}' should be True"
 
-            for val in ("false", "False", "0", "1", "yes", "no", "on", "off", "", "anything"):
+            for val in ("false", "False", "0", "no", "off"):
                 r = await client.get(f"/check?flag={val}")
                 assert r.json()["flag"] is False, f"'{val}' should be False"
+
+            for val in ("", "anything"):
+                r = await client.get(f"/check?flag={val}")
+                assert r.status_code >= 400, f"'{val}' should be rejected"
 
     # ── Empty path handling ────────────────────────────────────────
 

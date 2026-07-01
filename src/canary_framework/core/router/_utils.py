@@ -59,24 +59,43 @@ _REDOC_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def _convert_param(value: str, param_type: type | None) -> object:
+_BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
+_BOOL_FALSE = frozenset({"0", "false", "no", "off"})
+
+
+def _convert_param(value: str, param_type: object) -> object:
     """将字符串参数转换为目标类型。
 
+    解包 Optional[T] 后按内层类型转换；bool 接受常见真假拼写，
+    无法识别时抛 ValueError（由调用方转 422）。
+
+    Convert a string param to its target type. Unwraps Optional[T];
+    bool accepts common spellings and raises ValueError on unrecognized
+    input.
+
     Args:
-        value: 原始字符串值
-        param_type: 目标类型
+        value: 原始字符串值 / original string value
+        param_type: 目标类型 / target type
 
     Returns:
-        转换后的值
+        转换后的值 / converted value
     """
+    from canary_framework.common import unwrap_optional
+
+    param_type, _ = unwrap_optional(param_type)
     if param_type is None or param_type is str:
         return value
+    if param_type is bool:
+        low = value.lower()
+        if low in _BOOL_TRUE:
+            return True
+        if low in _BOOL_FALSE:
+            return False
+        raise ValueError(f"Invalid boolean value: {value!r}")
     if param_type is int:
         return int(value)
     if param_type is float:
         return float(value)
-    if param_type is bool:
-        return value.lower() == "true"
     return value
 
 
