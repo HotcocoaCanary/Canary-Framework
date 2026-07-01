@@ -12,7 +12,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
-from canary_framework.common import RouteInfo
+from canary_framework.common import ResolvedRoute, RouteInfo
 
 _PARAM_PATTERN = r"\{(\w+)\}"
 
@@ -277,6 +277,77 @@ def _route_handler(
     return Route(starlette_path, endpoint=endpoint, methods=[method])
 
 
+def _check_route_collisions(routes: list[ResolvedRoute]) -> None:
+    """检测 (method, full_path) 冲突，重复则抛错。
+
+    Detect duplicate (method, full_path) routes and raise on collision.
+    """
+    seen: set[tuple[str, str]] = set()
+    for r in routes:
+        key = (r.info.method, r.full_path)
+        if key in seen:
+            raise ValueError(f"Route collision: {r.info.method} {r.full_path}")
+        seen.add(key)
+
+
+def _build_route(resolved: ResolvedRoute) -> Route:
+    """从 ResolvedRoute 构建 Starlette Route，全程按参数名绑定。
+
+    Build a Starlette Route from a ResolvedRoute, binding everything by name.
+    """
+    info = resolved.info
+    handler = cast("Callable[..., Awaitable[object]]", resolved.handler)
+    param_types: dict[str, type | None] = {
+        name: cast("type | None", meta[0])  # type: ignore[index]
+        for name, meta in info.param_meta.items()
+    }
+
+    def _required(name: str) -> bool:
+        meta = info.param_meta.get(name)
+        return not (meta and meta[1])  # type: ignore[index]
+
+    async def endpoint(request: Request) -> Response:
+        kwargs: dict[str, object] = {}
+        errors: list[dict[str, str]] = []
+
+        for name in info.path_params:
+            if name in request.path_params:
+                try:
+                    kwargs[name] = _convert_param(request.path_params[name], param_types.get(name))
+                except (ValueError, TypeError):
+                    return JSONResponse(
+                        {"detail": f"Invalid value for path parameter '{name}'"},
+                        status_code=400,
+                    )
+
+        for name in info.query_params:
+            if name in request.query_params:
+                try:
+                    kwargs[name] = _convert_param(request.query_params[name], param_types.get(name))
+                except (ValueError, TypeError):
+                    errors.append({"param": name, "msg": "invalid value"})
+            elif _required(name):
+                errors.append({"param": name, "msg": "missing required query parameter"})
+
+        if errors:
+            return JSONResponse({"detail": errors}, status_code=422)
+
+        if info.request_model is not None and info.body_param is not None:
+            try:
+                body = cast("dict[str, object]", await request.json())
+            except Exception:
+                return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+            model_cls = cast("type[BaseModel]", info.request_model)
+            try:
+                kwargs[info.body_param] = model_cls(**body)
+            except ValidationError as e:
+                return JSONResponse({"detail": e.errors()}, status_code=422)
+
+        return _auto_response(await handler(**kwargs))
+
+    return Route(resolved.full_path, endpoint=endpoint, methods=[info.method])
+
+
 def _build_doc_routes(
     schema: dict[str, object],
     *,
@@ -359,6 +430,8 @@ def _build_doc_routes(
 __all__ = [
     "_auto_response",
     "_build_doc_routes",
+    "_build_route",
+    "_check_route_collisions",
     "_convert_nested_models",
     "_convert_param",
     "_route_handler",
