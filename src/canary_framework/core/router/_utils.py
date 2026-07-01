@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
-from types import FunctionType
+from types import FunctionType, UnionType
 from typing import cast
 
 from pydantic import BaseModel, ValidationError
@@ -63,7 +63,7 @@ _BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
 _BOOL_FALSE = frozenset({"0", "false", "no", "off"})
 
 
-def _convert_param(value: str, param_type: object) -> object:
+def _convert_param(value: str, param_type: type | UnionType | None) -> object:
     """将字符串参数转换为目标类型。
 
     解包 Optional[T] 后按内层类型转换；bool 接受常见真假拼写，
