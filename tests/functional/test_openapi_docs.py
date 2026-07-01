@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from canary_framework import service
-from canary_framework.common import RouteInfo
+from canary_framework.common import ResolvedRoute, RouteInfo
 from canary_framework.core.router import Router
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.openapi import generate_openapi_schema
@@ -18,6 +18,20 @@ def _collect_route_infos(cls: type[ServiceBase]) -> list[RouteInfo]:
     if isinstance(router, Router):
         return list(router._route_infos)
     return []
+
+
+def _resolve(route_infos: list[RouteInfo]) -> list[ResolvedRoute]:
+    """把 RouteInfo 列表包装为 ResolvedRoute 列表，供 generate_openapi_schema 消费。"""
+    return [
+        ResolvedRoute(
+            full_path=(info.router_prefix + info.starlette_path)
+            if info.router_prefix
+            else info.starlette_path,
+            handler=info.handler,
+            info=info,
+        )
+        for info in route_infos
+    ]
 
 
 @pytest.mark.functional
@@ -56,7 +70,7 @@ class TestOpenAPIDocs:
 
         route_infos = _collect_route_infos(MyRouter)
         assert len(route_infos) == 2
-        schema = generate_openapi_schema(route_infos)
+        schema = generate_openapi_schema(_resolve(route_infos))
 
         assert schema["openapi"] == "3.0.3"
         assert "info" in schema
@@ -85,7 +99,7 @@ class TestOpenAPIDocs:
 
         route_infos = _collect_route_infos(UserRouter) + _collect_route_infos(ProductRouter)
         schema = generate_openapi_schema(
-            route_infos,
+            _resolve(route_infos),
             title="Shop API",
             version="1.0.0",
         )
@@ -114,7 +128,7 @@ class TestOpenAPIDocs:
                 pass
 
         route_infos = _collect_route_infos(MyRouter)
-        schema = generate_openapi_schema(route_infos)
+        schema = generate_openapi_schema(_resolve(route_infos))
 
         paths = cast(dict[str, Any], schema["paths"])
         path_obj = cast(dict[str, Any], next(iter(paths.values())))
