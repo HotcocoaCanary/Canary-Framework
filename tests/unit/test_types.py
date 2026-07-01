@@ -94,8 +94,13 @@ def test_resolved_route_holds_full_path_and_handler() -> None:
     async def h() -> None: ...
 
     info = RouteInfo(
-        handler=h, method="GET", path="/x", starlette_path="/x",
-        path_params=[], query_params=[], param_meta={},
+        handler=h,
+        method="GET",
+        path="/x",
+        starlette_path="/x",
+        path_params=[],
+        query_params=[],
+        param_meta={},
     )
     r = ResolvedRoute(full_path="/api/x", handler=h, info=info)
     assert r.full_path == "/api/x"
@@ -110,7 +115,12 @@ def test_route_info_body_param_defaults_none() -> None:
     async def h() -> None: ...
 
     info = RouteInfo(
-        handler=h, method="POST", path="/x", starlette_path="/x",
-        path_params=[], query_params=[], param_meta={},
+        handler=h,
+        method="POST",
+        path="/x",
+        starlette_path="/x",
+        path_params=[],
+        query_params=[],
+        param_meta={},
     )
     assert info.body_param is None
