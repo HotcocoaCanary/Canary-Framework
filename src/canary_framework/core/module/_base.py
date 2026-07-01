@@ -22,6 +22,7 @@ from canary_framework.common import (
     CanaryConfig,
     DependencyInjectionError,
     LifecycleAware,
+    ResolvedRoute,
     ServiceMeta,
     get_module_meta,
     get_service_meta,
@@ -106,6 +107,19 @@ class ModuleBase(ServiceBase):
                     continue
                 raise DependencyInjectionError(f"Service '{name}' instance is None.")
             yield name, inst
+
+    @override
+    def _cf_collect_routes(self) -> list[ResolvedRoute]:
+        """模块路由贡献 = 自身路由 + 原样拼接每个子服务的贡献。
+
+        Module contribution = own routes + children's routes concatenated.
+        """
+        out: list[ResolvedRoute] = list(super()._cf_collect_routes())
+        for _, child in self._iter_instances(skip_none=True):
+            collect = getattr(child, "_cf_collect_routes", None)
+            if collect is not None:
+                out.extend(collect())
+        return out
 
     @override
     def init(self) -> None:
