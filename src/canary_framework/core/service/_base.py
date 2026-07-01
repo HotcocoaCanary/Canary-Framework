@@ -12,6 +12,8 @@ declarative hook support via @before_startup, @before_shutdown.
 from __future__ import annotations
 
 import inspect
+from types import FunctionType
+from typing import cast
 
 from starlette.routing import Route
 from starlette.routing import Router as StarletteRouter
@@ -21,6 +23,7 @@ from canary_framework.common import (
     CF_NAME_ATTR,
     LifecycleHook,
     LifecycleHookError,
+    ResolvedRoute,
     RouteInfo,
 )
 from canary_framework.common.config import CanaryConfig
@@ -59,6 +62,28 @@ class ServiceBase:
         """
         router = getattr(self, "router", None)
         return router if isinstance(router, Router) else None
+
+    def _cf_collect_routes(self) -> list[ResolvedRoute]:
+        """收集本服务的路由贡献：绑 self、拼 router.prefix。
+
+        Collect this service's route contribution: bound to self,
+        prefixed with router.prefix. Returns [] when no router.
+        """
+        router = self._get_router()
+        if router is None:
+            return []
+        cls = type(self)
+        out: list[ResolvedRoute] = []
+        for info in router._route_infos:
+            bound = cast(FunctionType, info.handler).__get__(self, cls)
+            out.append(
+                ResolvedRoute(
+                    full_path=router.prefix + info.starlette_path,
+                    handler=bound,
+                    info=info,
+                )
+            )
+        return out
 
     @property
     def config(self) -> CanaryConfig | None:
