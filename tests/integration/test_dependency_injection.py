@@ -2,8 +2,10 @@
 
 import pytest
 
+from canary_framework import router, service
 from canary_framework.common.config import CanaryConfig
 from canary_framework.common.types import CF_SERVICE_MARKER, CF_SERVICE_META, ServiceMeta
+from canary_framework.core import RouterBase
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.container import DependencyEngine
 from canary_framework.engine.registry import Registry
@@ -90,3 +92,21 @@ async def test_direct_children_follow_declaration_order_not_startup_order() -> N
         Consumer,
         Dependency,
     )
+
+
+@pytest.mark.integration
+async def test_engine_mounts_router_without_standalone_engine() -> None:
+    @service()
+    class Dependency(ServiceBase):
+        pass
+
+    @router()
+    class MountedRouter(RouterBase):
+        dependency: Dependency
+
+    engine = DependencyEngine(children=(MountedRouter,), parent_registry=None, config=None)
+    await engine.init()
+
+    router_instance = engine.registry.get(MountedRouter)
+    assert router_instance._cf_parent_registry is engine.registry
+    assert router_instance._cf_dependency_engine is None

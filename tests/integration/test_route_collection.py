@@ -1,56 +1,50 @@
-"""Route collection (perception + fold) tests."""
+"""Route resolution integration tests."""
 
-from types import MethodType
-from typing import cast
+from __future__ import annotations
 
 import pytest
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import get, router, service
+from canary_framework.common import RouteContext
+from canary_framework.core import RouterBase, ServiceBase
 
 pytestmark = pytest.mark.integration
 
 
 @service()
 class Users(ServiceBase):
-    router = Router(prefix="/users")
-
-    @router.get("/{uid}")
-    async def get(self, uid: int) -> dict[str, int]:
+    async def fetch(self, uid: int) -> dict[str, int]:
         return {"uid": uid}
 
 
-@service()
-class Orders(ServiceBase):
-    router = Router(prefix="/orders")
+@router(prefix="/users", tags=("Users",))
+class UserRouter(RouterBase):
+    users: Users
 
-    @router.get("/")
-    async def list(self) -> list[object]:
-        return []
+    @get("/{uid}", tags=("Read",))
+    async def read(self, uid: int) -> dict[str, int]:
+        return await self.users.fetch(uid)
 
-
-@module(services=[Users, Orders])
-class App(ModuleBase):
-    pass
-
-
-def test_leaf_service_collects_with_prefix() -> None:
-    u = Users()
-    routes = u._cf_collect_routes()
-    assert [r.full_path for r in routes] == ["/users/{uid}"]
+    @get("/search?q={query}")
+    async def search(self, query: str) -> dict[str, str]:
+        return {"query": query}
 
 
-def test_module_folds_children() -> None:
-    app = App()
-    app.init()
-    paths = sorted(r.full_path for r in app._cf_collect_routes())
-    assert paths == ["/orders/", "/users/{uid}"]
+async def test_router_collects_resolved_routes_in_declaration_order() -> None:
+    subject = UserRouter()
+    await subject.init()
+
+    routes = subject._collect_routes(RouteContext(prefix="/api", tags=("v1",)))
+    assert [route.full_path for route in routes] == [
+        "/api/users/{uid}",
+        "/api/users/search?q={query}",
+    ]
+    assert [route.method for route in routes] == ["GET", "GET"]
+    assert routes[0].tags == ("v1", "Users", "Read")
+    assert routes[1].tags == ("v1", "Users")
+    assert routes[0].handler.__self__ is subject
 
 
-def test_collected_handler_is_bound() -> None:
-    u = Users()
-    (r,) = u._cf_collect_routes()
-    # 绑定后无需再传 self / 可访问实例
-    assert cast(MethodType, r.handler).__self__ is u
+def test_route_specs_are_immutable_and_class_owned() -> None:
+    assert isinstance(UserRouter.__cf_route_specs__, tuple)
+    assert UserRouter().route_specs is UserRouter.__cf_route_specs__

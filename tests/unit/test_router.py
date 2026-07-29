@@ -1,155 +1,93 @@
-"""Unit tests for core.router module."""
+"""Standalone RouterBase and route-context contract tests."""
+
+from __future__ import annotations
 
 import pytest
-from starlette.responses import JSONResponse, PlainTextResponse
 
-from canary_framework.core.router import (
-    _auto_response,
-    _convert_param,
-)
-from canary_framework.core.router._utils import parse_route_path
+from canary_framework import get, module, router, service
+from canary_framework.common import DependencyDirectionError, RouteContext
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
+from canary_framework.engine.routing import join_paths, ordered_unique
 
 
-@pytest.mark.unit
-class TestParseRoutePath:
-    """Tests for parse_route_path function."""
+@service()
+class Repository(ServiceBase):
+    async def fetch(self, item_id: int) -> dict[str, int]:
+        return {"item_id": item_id}
 
-    def test_simple_path(self) -> None:
-        """Test simple path with no params."""
-        path, path_params, query_params = parse_route_path("/simple")
-        assert path == "/simple"
-        assert path_params == []
-        assert query_params == []
 
-    def test_path_with_path_params(self) -> None:
-        """Test path with path params."""
-        path, path_params, query_params = parse_route_path("/items/{item_id}")
-        assert path == "/items/{item_id}"
-        assert path_params == ["item_id"]
-        assert query_params == []
+@router(prefix="/items", tags=("Items",), security=("bearerAuth",))
+class ItemRouter(RouterBase):
+    repository: Repository
 
-    def test_path_with_query_params(self) -> None:
-        """Test path with query params."""
-        path, path_params, query_params = parse_route_path("/items?page={page}&limit={limit}")
-        assert path == "/items"
-        assert path_params == []
-        assert query_params == ["page", "limit"]
-
-    def test_path_with_path_and_query_params(self) -> None:
-        """Test path with both path and query params."""
-        path, path_params, query_params = parse_route_path(
-            "/items/{item_id}?page={page}&limit={limit}"
-        )
-        assert path == "/items/{item_id}"
-        assert path_params == ["item_id"]
-        assert query_params == ["page", "limit"]
+    @get("/{item_id}")
+    async def read(self, item_id: int) -> dict[str, int]:
+        return await self.repository.fetch(item_id)
 
 
 @pytest.mark.unit
-class TestConvertParam:
-    """Tests for _convert_param function."""
+async def test_standalone_router_recursively_injects_services() -> None:
+    subject = ItemRouter()
+    await subject.init()
 
-    def test_convert_to_int(self) -> None:
-        """Test convert to int."""
-        assert _convert_param("123", int) == 123
-
-    def test_convert_to_float(self) -> None:
-        """Test convert to float."""
-        assert _convert_param("123.45", float) == 123.45
-
-    def test_convert_to_bool(self) -> None:
-        """Test convert to bool."""
-        assert _convert_param("true", bool) is True
-        assert _convert_param("false", bool) is False
-
-    def test_no_conversion(self) -> None:
-        """Test no conversion."""
-        assert _convert_param("test", str) == "test"
-        assert _convert_param("test", None) == "test"
+    assert isinstance(subject.repository, Repository)
+    routes = subject._collect_routes(RouteContext(prefix="/api", tags=("v1",)))
+    assert len(routes) == 1
+    assert routes[0].full_path == "/api/items/{item_id}"
+    assert routes[0].tags == ("v1", "Items")
+    assert routes[0].security == ("bearerAuth",)
+    assert routes[0].handler.__self__ is subject
 
 
 @pytest.mark.unit
-class TestAutoResponse:
-    """Tests for _auto_response function."""
-
-    def test_response_passthrough(self) -> None:
-        """Test Response is passed through."""
-        response = PlainTextResponse("test")
-        result = _auto_response(response)
-        assert result is response
-
-    def test_dict_to_json(self) -> None:
-        """Test dict becomes JSONResponse."""
-        data = {"key": "value"}
-        result = _auto_response(data)
-        assert isinstance(result, JSONResponse)
-
-    def test_list_to_json(self) -> None:
-        """Test list becomes JSONResponse."""
-        data = [1, 2, 3]
-        result = _auto_response(data)
-        assert isinstance(result, JSONResponse)
-
-    def test_string_to_plaintext(self) -> None:
-        """Test string becomes PlainTextResponse."""
-        result = _auto_response("test")
-        assert isinstance(result, PlainTextResponse)
-
-    def test_other_to_plaintext(self) -> None:
-        """Test other types become PlainTextResponse."""
-        result = _auto_response(123)
-        assert isinstance(result, PlainTextResponse)
+def test_path_helpers_normalize_without_destroying_root() -> None:
+    assert join_paths("/api/", "/items//{item_id}") == "/api/items/{item_id}"
+    assert join_paths("", "/") == "/"
+    assert join_paths("/api", "/search?q={query}") == "/api/search?q={query}"
+    assert ordered_unique(("v1", "Items"), ("Items", "read")) == (
+        "v1",
+        "Items",
+        "read",
+    )
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("raw", ["1", "true", "True", "YES", "on"])
-def test_convert_param_bool_truthy(raw: str) -> None:
-    """Test bool conversion accepts truthy spellings."""
-    assert _convert_param(raw, bool) is True
+async def test_router_without_dependencies_initializes() -> None:
+    @router()
+    class EmptyRouter(RouterBase):
+        pass
+
+    subject = EmptyRouter()
+    await subject.init()
+    assert subject.lifecycle_state.value == "initialized"
+    assert subject.route_specs == ()
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("raw", ["0", "false", "no", "off"])
-def test_convert_param_bool_falsy(raw: str) -> None:
-    """Test bool conversion accepts falsy spellings."""
-    assert _convert_param(raw, bool) is False
+async def test_router_dependency_direction_rejects_router_targets() -> None:
+    @router()
+    class OtherRouter(RouterBase):
+        pass
+
+    @router()
+    class InvalidRouter(RouterBase):
+        other: OtherRouter
+
+    InvalidRouter.__annotations__["other"] = OtherRouter
+    with pytest.raises(DependencyDirectionError, match="may depend only on Service"):
+        await InvalidRouter().init()
 
 
 @pytest.mark.unit
-def test_convert_param_bool_unrecognized_raises() -> None:
-    """Test bool conversion raises ValueError for unrecognized input."""
-    with pytest.raises(ValueError):
-        _convert_param("maybe", bool)
+async def test_router_dependency_direction_rejects_module_targets() -> None:
+    @module()
+    class OtherModule(ModuleBase):
+        pass
 
+    @router()
+    class InvalidRouter(RouterBase):
+        other: OtherModule
 
-@pytest.mark.unit
-def test_convert_param_unwraps_optional_int() -> None:
-    """Test Optional[T] is unwrapped before conversion."""
-    assert _convert_param("42", int | None) == 42
-
-
-@pytest.mark.unit
-def test_auto_response_tuple_sets_status_code() -> None:
-    """Test that (body, status_code) tuple returns response with custom status code."""
-    resp = _auto_response(({"error": "Not found"}, 404))
-    assert resp.status_code == 404
-    assert b"Not found" in resp.body
-
-
-@pytest.mark.unit
-def test_auto_response_plain_dict_is_200() -> None:
-    """Test that plain dict (non-tuple) returns 200 status code."""
-    resp = _auto_response({"ok": True})
-    assert resp.status_code == 200
-
-
-@pytest.mark.unit
-def test_auto_response_body_bool_not_treated_as_status_tuple() -> None:
-    """Test that (body, True) is NOT misread as a (body, status_code) tuple.
-
-    bool is a subclass of int, so a naive `isinstance(result[1], int)` guard
-    would treat `True` as a status code (and even coerce to status_code=True).
-    The generic (non-tuple) path must be taken instead, yielding 200.
-    """
-    resp = _auto_response(({"a": 1}, True))
-    assert resp.status_code == 200
+    InvalidRouter.__annotations__["other"] = OtherModule
+    with pytest.raises(DependencyDirectionError, match="may depend only on Service"):
+        await InvalidRouter().init()
