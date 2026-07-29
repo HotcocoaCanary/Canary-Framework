@@ -16,6 +16,8 @@ from canary_framework.engine.openapi import OpenAPICompiler
 from canary_framework.engine.params import analyze_route
 from canary_framework.engine.validation import ValidatedRoute
 
+pytestmark = pytest.mark.unit
+
 
 class OpenAPIConfig(CanaryConfig):
     """Root OpenAPI settings used by compiler tests."""
