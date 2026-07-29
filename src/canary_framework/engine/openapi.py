@@ -1,32 +1,36 @@
-"""OpenAPI 3.0.3 schema generator 和文档端点配置。
+"""OpenAPI 3.0.3 compilation from validated routes.
 
-从 ResolvedRoute 列表生成符合OpenAPI 3.0.3规范的schema，并提供 Swagger UI / ReDoc 文档端点。
-
-Generates OpenAPI 3.0.3-compliant schemas from ResolvedRoute lists
-and configures Swagger UI / ReDoc documentation endpoints.
+每次编译都创建独立的 schema 注册表，并在生成引用前扫描所有可达模型。
+Each compilation owns an isolated schema registry and pre-scans every reachable
+model before emitting references.
 """
 
 from __future__ import annotations
 
+import re
+import warnings
+from collections import Counter
+from collections.abc import Iterable
+from copy import deepcopy
 from datetime import date, datetime
 from datetime import time as _time
 from enum import Enum
-from types import UnionType
 from typing import Any, Literal, cast, get_args, get_origin
 from uuid import UUID
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
+from pydantic.json_schema import models_json_schema
 
-from canary_framework.common import ResolvedRoute, unwrap_optional
+from canary_framework.common import CanaryConfig, RouteCompilationError, unwrap_optional
+from canary_framework.engine.validation import ValidatedRoute
 
-_TYPE_MAP: dict[str, str] = {
-    "int": "integer",
-    "str": "string",
-    "bool": "boolean",
-    "float": "number",
+_TYPE_MAP: dict[type, str] = {
+    int: "integer",
+    str: "string",
+    bool: "boolean",
+    float: "number",
 }
-
 _TYPE_FORMAT_MAP: dict[type, str] = {
     datetime: "date-time",
     date: "date",
@@ -34,111 +38,279 @@ _TYPE_FORMAT_MAP: dict[type, str] = {
     UUID: "uuid",
     bytes: "byte",
 }
+_INVALID_COMPONENT_CHARS = re.compile(r"[^a-zA-Z0-9._-]+")
 
 
-def _flatten_defs(schema: dict[str, object], schemas_dict: dict[str, object]) -> None:
-    """递归提取并展平 schema 中的 $defs 到 schemas_dict。"""
-    if "$defs" not in schema:
-        return
-    defs = cast("dict[str, object]", schema.pop("$defs"))
-    for def_name, def_schema in defs.items():
-        def_schema_dict = cast("dict[str, object]", def_schema)
-        _flatten_defs(def_schema_dict, schemas_dict)
-        if def_name not in schemas_dict:
-            schemas_dict[def_name] = def_schema_dict
+def _is_model(value: Any) -> bool:
+    """Return whether a value is an exact Pydantic model class."""
+    return isinstance(value, type) and issubclass(value, BaseModel)
 
 
-def _generate_schema_name(model_cls: type[BaseModel]) -> str:
-    """生成稳定可读的 schema 名称，格式: Origin_Arg（如 R_KbResponse、R_str）。
-
-    泛型模型 R[str] 和 R[int] 的 __name__ 都是 "R"，仅用 __name__ 无法区分。
-    通过检测 __origin__ 和 __args__ 生成 "R_str" / "R_int" 等唯一名称。
-    """
-    origin: Any = getattr(model_cls, "__origin__", None)
-    if origin is None:
-        return model_cls.__name__
-
-    args = getattr(model_cls, "__args__", ())
-    arg_names: list[str] = []
-    for arg in args:
-        if arg is type(None):
-            continue
-        if hasattr(arg, "__name__"):
-            arg_names.append(cast(str, arg.__name__))
-        elif hasattr(arg, "__origin__"):
-            name = _generate_schema_name(cast("type[BaseModel]", arg))
-            if name in arg_names:
-                continue
-            arg_names.append(name)
-        else:
-            arg_names.append(str(arg))
-    return cast(str, origin.__name__) + "_" + "_".join(arg_names)
+def _sanitize_schema_name(value: str) -> str:
+    """Convert a model name to an OpenAPI-safe, deterministic component key."""
+    sanitized = _INVALID_COMPONENT_CHARS.sub("_", value).strip("_")
+    return sanitized or "Schema"
 
 
-def _build_model_schema(
-    model_cls: Any,
-    schemas_dict: dict[str, object],
-    registered: dict[int, str],
-) -> dict[str, object]:
-    """将模型类型转换为 OpenAPI schema dict。
+def _rewrite_references(value: object, references: dict[str, str]) -> None:
+    """Rewrite Pydantic definition references to registry-selected names."""
+    if isinstance(value, dict):
+        reference = value.get("$ref")
+        if isinstance(reference, str) and reference in references:
+            value["$ref"] = references[reference]
+        for nested in value.values():
+            _rewrite_references(nested, references)
+    elif isinstance(value, list):
+        for nested in value:
+            _rewrite_references(nested, references)
 
-    支持 Pydantic BaseModel 子类（注册到 components/schemas 并返回 $ref）
-    以及 list[T] / dict 等泛型容器（生成 inline array / object schema）。
 
-    `registered` 为调用方（`generate_openapi_schema`）持有的调用内局部 registry，
-    而非模块级全局状态 —— 确保每次生成互不干扰（修复全局缓存泄漏 bug）。
-    Note: `registered` is a call-local registry owned by the caller
-    (`generate_openapi_schema`), not module-global state — this ensures
-    each generation is independent (fixes the global-cache-leak bug).
-    """
-    origin: Any = getattr(model_cls, "__origin__", None)
+class SchemaRegistry:
+    """Compilation-local model identity, component name, and schema registry."""
 
-    # list[T] → {"type": "array", "items": ...}
-    if origin is list:
-        args = getattr(model_cls, "__args__", ())
-        item_schema: dict[str, object] = (
-            _build_model_schema(args[0], schemas_dict, registered) if args else {}
+    def __init__(self, models: Iterable[type]) -> None:
+        ordered = tuple(dict.fromkeys(models))
+        short_names = {model: _sanitize_schema_name(model.__name__) for model in ordered}
+        short_counts = Counter(short_names.values())
+        names = {
+            model: (
+                short_names[model]
+                if short_counts[short_names[model]] == 1
+                else _sanitize_schema_name(f"{model.__module__}.{model.__qualname__}")
+            )
+            for model in ordered
+        }
+        reverse: dict[str, type] = {}
+        for model, name in names.items():
+            previous = reverse.get(name)
+            if previous is not None and previous is not model:
+                raise RouteCompilationError(f"duplicate OpenAPI schema name {name}")
+            reverse[name] = model
+
+        self._models = ordered
+        self._names = names
+        self.schemas = self._build_schemas()
+
+    def _build_schemas(self) -> dict[str, object]:
+        """Generate all components together, then rewrite every flattened ref."""
+        if not self._models:
+            return {}
+        roots, document = models_json_schema(
+            [(cast("type[BaseModel]", model), "validation") for model in self._models],
+            ref_template="#/components/schemas/{model}",
         )
-        return {"type": "array", "items": item_schema}
+        definitions = cast("dict[str, object]", document.get("$defs", {}))
+        references: dict[str, str] = {}
+        definition_names: dict[type, str] = {}
+        for model in self._models:
+            root = cast("dict[str, object]", roots[(cast("type[BaseModel]", model), "validation")])
+            old_reference = cast(str, root["$ref"])
+            definition_names[model] = old_reference.rsplit("/", 1)[-1]
+            references[old_reference] = f"#/components/schemas/{self._names[model]}"
 
-    # dict[K, V] → {"type": "object"}
-    if origin is dict:
-        return {"type": "object"}
+        schemas: dict[str, object] = {}
+        for model in self._models:
+            definition_name = definition_names[model]
+            schema = deepcopy(definitions[definition_name])
+            _rewrite_references(schema, references)
+            schemas[self._names[model]] = schema
+        return schemas
 
-    # 确定实际 Pydantic 基类（泛型别名取其 __origin__）
-    if isinstance(model_cls, type) and issubclass(model_cls, BaseModel):
-        pydantic_cls: type[BaseModel] = model_cls
-    elif (
-        origin is not None
-        and origin is not UnionType
-        and isinstance(origin, type)
-        and issubclass(origin, BaseModel)
-    ):
-        pydantic_cls = origin
-    else:
+    def reference(self, model: type) -> dict[str, object]:
+        """Return a component reference for an exact registered model type."""
+        return {"$ref": f"#/components/schemas/{self._names[model]}"}
+
+
+class OpenAPICompiler:
+    """Compile one OpenAPI document exclusively from validated routes."""
+
+    def compile(
+        self,
+        routes: tuple[ValidatedRoute, ...],
+        *,
+        config: CanaryConfig,
+    ) -> dict[str, object]:
+        """Compile routes in declaration order with an isolated schema registry."""
+        if not routes:
+            return {}
+
+        registry = SchemaRegistry(self._collect_models(routes))
+        paths: dict[str, object] = {}
+        for validated in routes:
+            path_item = cast(
+                "dict[str, object]",
+                paths.setdefault(validated.analysis.starlette_path, {}),
+            )
+            path_item[validated.route.method.lower()] = self._operation(validated, registry)
+
+        components: dict[str, object] = {"schemas": registry.schemas}
+        if config.openapi_security_schemes:
+            components["securitySchemes"] = deepcopy(config.openapi_security_schemes)
+        document: dict[str, object] = {
+            "openapi": "3.0.3",
+            "info": self._info(config),
+            "paths": paths,
+            "components": components,
+        }
+        if config.openapi_servers:
+            document["servers"] = deepcopy(config.openapi_servers)
+        return document
+
+    def _collect_models(self, routes: tuple[ValidatedRoute, ...]) -> tuple[type, ...]:
+        """Pre-scan direct and nested Pydantic models in declaration order."""
+        models: list[type] = []
+        seen: set[type] = set()
+
+        def visit(annotation: Any) -> None:
+            if _is_model(annotation):
+                model = cast(type, annotation)
+                if model in seen:
+                    return
+                seen.add(model)
+                models.append(model)
+                for field in cast("type[BaseModel]", model).model_fields.values():
+                    visit(field.annotation)
+                return
+            for argument in get_args(annotation):
+                if argument is not type(None):
+                    visit(argument)
+
+        for validated in routes:
+            spec = validated.route.spec
+            visit(validated.analysis.request_model)
+            visit(spec.response_model)
+            for response in spec.responses.values():
+                visit(response.model)
+        return tuple(models)
+
+    def _info(self, config: CanaryConfig) -> dict[str, object]:
+        """Build document metadata from the runtime root configuration only."""
+        info: dict[str, object] = {
+            "title": config.openapi_title,
+            "version": config.openapi_version,
+        }
+        if config.openapi_description:
+            info["description"] = config.openapi_description
+        return info
+
+    def _operation(
+        self,
+        validated: ValidatedRoute,
+        registry: SchemaRegistry,
+    ) -> dict[str, object]:
+        """Compile one validated route operation without re-analyzing it."""
+        route = validated.route
+        spec = route.spec
+        operation: dict[str, object] = {"operationId": validated.operation_id}
+        if route.tags:
+            operation["tags"] = list(route.tags)
+        if spec.summary:
+            operation["summary"] = spec.summary
+        if spec.description:
+            operation["description"] = spec.description
+        if spec.deprecated:
+            operation["deprecated"] = True
+        if route.security:
+            operation["security"] = [{name: [] for name in route.security}]
+
+        parameters = self._parameters(validated)
+        if parameters:
+            operation["parameters"] = parameters
+
+        if validated.analysis.request_model is not None:
+            model = validated.analysis.request_model
+            operation["requestBody"] = {
+                "description": getattr(model, "__doc__", "") or "",
+                "content": {"application/json": {"schema": self._model_schema(model, registry)}},
+            }
+
+        operation["responses"] = self._responses(validated, registry)
+        return operation
+
+    def _parameters(self, validated: ValidatedRoute) -> list[dict[str, object]]:
+        """Build path and query parameters from the retained route analysis."""
+        analysis = validated.analysis
+        parameters: list[dict[str, object]] = []
+        for name in analysis.path_params:
+            parameter = analysis.parameters[name]
+            parameters.append(
+                {
+                    "name": name,
+                    "in": "path",
+                    "required": True,
+                    "schema": _build_parameter_schema(
+                        parameter.annotation,
+                        parameter.field_info,
+                    ),
+                }
+            )
+        for name in analysis.query_params:
+            parameter = analysis.parameters[name]
+            parameters.append(
+                {
+                    "name": name,
+                    "in": "query",
+                    "required": not parameter.has_default,
+                    "schema": _build_parameter_schema(
+                        parameter.annotation,
+                        parameter.field_info,
+                    ),
+                }
+            )
+        return parameters
+
+    def _responses(
+        self,
+        validated: ValidatedRoute,
+        registry: SchemaRegistry,
+    ) -> dict[str, object]:
+        """Build the effective response and overlay explicit response declarations."""
+        spec = validated.route.spec
+        status = str(spec.status_code)
+        successful: dict[str, object] = {"description": "Successful Response"}
+        if spec.response_model is not None:
+            successful["content"] = {
+                "application/json": {"schema": self._model_schema(spec.response_model, registry)}
+            }
+        responses: dict[str, object] = {status: successful}
+
+        for response_status, response_spec in spec.responses.items():
+            key = str(response_status)
+            existing = responses.get(key)
+            response = (
+                dict(cast("dict[str, object]", existing)) if isinstance(existing, dict) else {}
+            )
+            response["description"] = response_spec.description
+            if response_spec.model is not None:
+                response["content"] = {
+                    "application/json": {
+                        "schema": self._model_schema(response_spec.model, registry)
+                    }
+                }
+            responses[key] = response
+        return responses
+
+    def _model_schema(self, annotation: Any, registry: SchemaRegistry) -> dict[str, object]:
+        """Build component refs or retained inline container schemas."""
+        origin = get_origin(annotation)
+        if origin is list:
+            arguments = get_args(annotation)
+            items = self._model_schema(arguments[0], registry) if arguments else {}
+            return {"type": "array", "items": items}
+        if origin is dict:
+            return {"type": "object"}
+        if _is_model(annotation):
+            return registry.reference(cast(type, annotation))
         return {}
 
-    # 用 model_cls（可能含泛型参数）生成唯一名称，但用基类生成 schema
-    model_name = _generate_schema_name(model_cls)
-    model_id = id(pydantic_cls)
-    if model_id not in registered:
-        raw = cast(
-            "dict[str, object]",
-            pydantic_cls.model_json_schema(ref_template="#/components/schemas/{model}"),
-        )
-        _flatten_defs(raw, schemas_dict)
-        schemas_dict[model_name] = raw
-        registered[model_id] = model_name
-    return {"$ref": f"#/components/schemas/{model_name}"}
 
-
-def _get_enum_values(annotation: Any) -> list[object] | None:
-    """尝试从枚举或 Literal 类型中提取值列表。"""
+def _enum_values(annotation: Any) -> list[object] | None:
+    """Extract declaration-order values from Literal or Enum annotations."""
     origin = get_origin(annotation)
-    if origin is not None and origin is not UnionType and origin is Literal:
+    if origin is Literal:
         return list(get_args(annotation))
     if isinstance(annotation, type) and issubclass(annotation, Enum):
-        return [e.value for e in annotation]
+        return [member.value for member in annotation]
     return None
 
 
@@ -146,42 +318,29 @@ def _build_parameter_schema(
     annotation: Any,
     field_info: FieldInfo | None = None,
 ) -> dict[str, object]:
-    """从类型注解构建 OpenAPI 参数 schema。
-
-    支持 Optional、Literal/Enum、Field 约束、datetime/date/uuid 格式。
-    """
+    """Build a scalar OpenAPI schema while retaining Pydantic field metadata."""
     schema: dict[str, object] = {}
-
     annotation, nullable = unwrap_optional(annotation)
     if nullable:
         schema["nullable"] = True
 
-    enum_values = _get_enum_values(annotation)
-
+    enum_values = _enum_values(annotation)
     if enum_values is not None:
-        if all(isinstance(v, bool) for v in enum_values):
-            openapi_type = "boolean"
-        elif all(isinstance(v, int) for v in enum_values):
-            openapi_type = "integer"
-        elif all(isinstance(v, float) for v in enum_values):
-            openapi_type = "number"
+        if all(isinstance(value, bool) for value in enum_values):
+            schema["type"] = "boolean"
+        elif all(isinstance(value, int) for value in enum_values):
+            schema["type"] = "integer"
+        elif all(isinstance(value, float) for value in enum_values):
+            schema["type"] = "number"
         else:
-            openapi_type = "string"
-        schema["type"] = openapi_type
+            schema["type"] = "string"
         schema["enum"] = enum_values
-    elif hasattr(annotation, "__name__"):
-        type_name = annotation.__name__
-        openapi_type = _TYPE_MAP.get(type_name, "string")
-        schema["type"] = openapi_type
-
-        if annotation in _TYPE_FORMAT_MAP:
-            schema["format"] = _TYPE_FORMAT_MAP[annotation]
-    elif annotation is bytes:
+    elif annotation in _TYPE_MAP:
+        schema["type"] = _TYPE_MAP[annotation]
+    elif annotation in _TYPE_FORMAT_MAP:
         schema["type"] = "string"
-        schema["format"] = "byte"
+        schema["format"] = _TYPE_FORMAT_MAP[annotation]
     else:
-        import warnings
-
         warnings.warn(
             f"Unknown parameter type '{annotation}' — defaulting to 'string' in OpenAPI schema.",
             stacklevel=3,
@@ -191,136 +350,38 @@ def _build_parameter_schema(
     if field_info is not None:
         _apply_field_metadata(schema, field_info)
         _apply_field_constraints(schema, field_info)
-
     return schema
 
 
 def _apply_field_metadata(schema: dict[str, object], field_info: FieldInfo) -> None:
-    """从 FieldInfo 提取文档元数据：description, title, deprecated, examples。"""
+    """Copy supported Pydantic field documentation metadata."""
     if field_info.description:
         schema["description"] = field_info.description
     if field_info.title:
         schema["title"] = field_info.title
     if field_info.deprecated:
         schema["deprecated"] = True
-    examples = getattr(field_info, "examples", None)
-    if examples and isinstance(examples, list) and examples:
+    examples = field_info.examples
+    if isinstance(examples, list) and examples:
         schema["example"] = examples[0]
 
 
 def _apply_field_constraints(schema: dict[str, object], field_info: FieldInfo) -> None:
-    """从 FieldInfo.metadata 中提取 Pydantic v2 约束对象。
-
-    Pydantic v2 将 ge/le/gt/lt/min_length/max_length/pattern 等约束
-    存储在 field_info.metadata 列表中的约束对象上，而非 FieldInfo 的直接属性。
-    遍历 metadata 检查每个对象的 hasattr 是正确方式。
-    """
-    for meta in field_info.metadata:
-        for attr, key in [
-            ("min_length", "minLength"),
-            ("max_length", "maxLength"),
-            ("pattern", "pattern"),
-            ("ge", "minimum"),
-            ("gt", "exclusiveMinimum"),
-            ("le", "maximum"),
-            ("lt", "exclusiveMaximum"),
-            ("multiple_of", "multipleOf"),
-        ]:
-            if hasattr(meta, attr):
-                schema[key] = getattr(meta, attr)
+    """Copy Pydantic v2 constraints stored on FieldInfo metadata values."""
+    mappings = (
+        ("min_length", "minLength"),
+        ("max_length", "maxLength"),
+        ("pattern", "pattern"),
+        ("ge", "minimum"),
+        ("gt", "exclusiveMinimum"),
+        ("le", "maximum"),
+        ("lt", "exclusiveMaximum"),
+        ("multiple_of", "multipleOf"),
+    )
+    for metadata in field_info.metadata:
+        for attribute, key in mappings:
+            if hasattr(metadata, attribute):
+                schema[key] = getattr(metadata, attribute)
 
 
-def generate_openapi_schema(
-    routes: list[ResolvedRoute],
-    title: str = "Canary Framework API",
-    version: str = "1.0.0",
-    description: str = "",
-    servers: list[dict[str, str]] | None = None,
-    security_schemes: dict[str, dict[str, object]] | None = None,
-) -> dict[str, object]:
-    """从 ResolvedRoute 列表生成 OpenAPI 3.0.3 schema。"""
-    registered: dict[int, str] = {}
-    schema: dict[str, object] = {
-        "openapi": "3.0.3",
-        "info": {"title": title, "version": version},
-        "paths": {},
-        "components": {"schemas": {}},
-    }
-    if description:
-        cast("dict[str, object]", schema["info"])["description"] = description
-    if servers:
-        schema["servers"] = servers
-    components = cast("dict[str, object]", schema["components"])
-    if security_schemes:
-        components["securitySchemes"] = security_schemes
-    schemas_dict = cast("dict[str, object]", components["schemas"])
-    paths = cast("dict[str, object]", schema["paths"])
-
-    for resolved in routes:
-        info = resolved.info
-        starlette_path = resolved.full_path
-        while "//" in starlette_path:
-            starlette_path = starlette_path.replace("//", "/")
-
-        operation: dict[str, object] = {}
-        if info.summary:
-            operation["summary"] = info.summary
-        if info.description:
-            operation["description"] = info.description
-        if info.deprecated:
-            operation["deprecated"] = info.deprecated
-        if info.operation_id:
-            operation["operationId"] = info.operation_id
-
-        merged_tags = list(dict.fromkeys(info.router_tags + info.tags))
-        if merged_tags:
-            operation["tags"] = merged_tags
-
-        parameters: list[dict[str, object]] = []
-        for param_name in info.path_params:
-            entry = info.param_meta.get(param_name, (str, False, None))
-            parameters.append(
-                {
-                    "name": param_name,
-                    "in": "path",
-                    "required": True,
-                    "schema": _build_parameter_schema(entry[0], entry[2]),  # type: ignore[index]
-                }
-            )
-        for param_name in info.query_params:
-            entry = info.param_meta.get(param_name, (str, False, None))
-            parameters.append(
-                {
-                    "name": param_name,
-                    "in": "query",
-                    "required": not entry[1],  # type: ignore[index]
-                    "schema": _build_parameter_schema(entry[0], entry[2]),  # type: ignore[index]
-                }
-            )
-        if parameters:
-            operation["parameters"] = parameters
-
-        if info.request_model is not None:
-            request_schema = _build_model_schema(info.request_model, schemas_dict, registered)
-            operation["requestBody"] = {
-                "description": getattr(info.request_model, "__doc__", "") or "",
-                "content": {"application/json": {"schema": request_schema}},
-            }
-
-        responses: dict[str, object] = dict(info.responses)
-        if info.response_model is not None:
-            response_schema = _build_model_schema(info.response_model, schemas_dict, registered)
-            if "200" not in responses:
-                responses["200"] = {
-                    "description": "Successful Response",
-                    "content": {"application/json": {"schema": response_schema}},
-                }
-        operation["responses"] = responses
-
-        _ = paths.setdefault(starlette_path, {})
-        cast("dict[str, object]", paths[starlette_path])[info.method.lower()] = operation
-
-    return schema
-
-
-__all__ = ["generate_openapi_schema"]
+__all__ = ["OpenAPICompiler"]

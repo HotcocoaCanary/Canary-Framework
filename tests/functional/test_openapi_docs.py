@@ -1,127 +1,150 @@
-"""Functional tests for OpenAPI docs."""
+"""Functional coverage for compiling collected routes into OpenAPI."""
 
 from typing import Any, cast
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from canary_framework import config, module, service
-from canary_framework.common.config import CanaryConfig
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework.common import CanaryConfig, RouteContext
+from canary_framework.core import ModuleBase, RouterBase
+from canary_framework.decorators import get, module, post, router
+from canary_framework.engine.openapi import OpenAPICompiler
+from canary_framework.engine.validation import validate_routes
+
+
+class RequestItem(BaseModel):
+    """Create-item request body."""
+
+    name: str
+    value: int
+
+
+class ResponseItem(BaseModel):
+    """Create-item response body."""
+
+    id: int
+    name: str
+    value: int
 
 
 @pytest.mark.functional
-class TestOpenAPIDocs:
-    """Functional tests for OpenAPI docs (end-to-end via ``app.openapi()``)."""
+def test_compile_collected_router_routes() -> None:
+    """Compile GET and POST declarations collected from one real router."""
 
-    def test_generate_openapi_schema(self) -> None:
-        """Test generate OpenAPI schema."""
+    @router(prefix="/api")
+    class ItemRouter(RouterBase):
+        @get("/items", summary="Get all items", tags=("items",))
+        async def get_items(self) -> None:
+            return None
 
-        class RequestItem(BaseModel):
-            name: str
-            value: int
+        @post(
+            "/items",
+            summary="Create item",
+            request_model=RequestItem,
+            response_model=ResponseItem,
+            status_code=201,
+            tags=("items",),
+        )
+        async def create_item(self, body: RequestItem) -> None:
+            del body
 
-        class ResponseItem(BaseModel):
-            id: int
-            name: str
-            value: int
+    config = CanaryConfig()
+    routes = ItemRouter()._collect_routes(RouteContext())
+    document = OpenAPICompiler().compile(validate_routes(routes, config), config=config)
 
-        @service()
-        class MyRouter(ServiceBase):
-            router = Router()
+    paths = cast("dict[str, Any]", document["paths"])
+    assert tuple(paths) == ("/api/items",)
+    assert tuple(paths["/api/items"]) == ("get", "post")
+    assert paths["/api/items"]["post"]["responses"]["201"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ResponseItem"}
 
-            @router.get("/items", summary="Get all items", tags=["items"])
-            async def get_items(self) -> None:
-                pass
 
-            @router.post(
-                "/items",
-                summary="Create item",
-                request_model=RequestItem,
-                response_model=ResponseItem,
-                tags=["items"],
-            )
-            async def create_item(self) -> None:
-                pass
+@pytest.mark.functional
+async def test_root_config_exclusively_supplies_document_metadata_and_schemes() -> None:
+    """Nested config does not leak OpenAPI metadata or scheme definitions."""
 
-        app = MyRouter()
-        app.init()
-        schema = app.openapi()
+    class RootConfig(CanaryConfig):
+        openapi_title: str = "Shop API"
+        openapi_version: str = "3.0.0"
+        openapi_security_schemes: dict[str, dict[str, object]] = Field(
+            default_factory=lambda: {"rootAuth": {"type": "http", "scheme": "bearer"}}
+        )
 
-        assert schema["openapi"] == "3.0.3"
-        assert "info" in schema
-        assert "paths" in schema
-        components = cast(dict[str, Any], schema.get("components", {}))
-        assert "schemas" in components
-        # 两条路由（GET + POST /items）都应被收集 / both routes collected
-        paths = cast(dict[str, Any], schema["paths"])
-        assert "/items" in paths
-        assert set(paths["/items"].keys()) == {"get", "post"}
+    class FeatureConfig(CanaryConfig):
+        openapi_title: str = "Feature API"
+        openapi_security_schemes: dict[str, dict[str, object]] = Field(
+            default_factory=lambda: {
+                "featureAuth": {"type": "apiKey", "in": "header", "name": "X-Feature"}
+            }
+        )
 
-    def test_openapi_with_multiple_routers(self) -> None:
-        """Test OpenAPI with multiple routers."""
+    @router(prefix="/users")
+    class UserRouter(RouterBase):
+        @get("")
+        async def users(self) -> None:
+            return None
 
-        @service()
-        class UserRouter(ServiceBase):
-            router = Router()
+    @router(prefix="/products")
+    class ProductRouter(RouterBase):
+        @get("")
+        async def products(self) -> None:
+            return None
 
-            @router.get("/users")
-            async def get_users(self) -> None:
-                pass
+    @module(children=(UserRouter,), config=FeatureConfig, prefix="/feature")
+    class FeatureModule(ModuleBase):
+        pass
 
-        @service()
-        class ProductRouter(ServiceBase):
-            router = Router()
+    @module(
+        children=(FeatureModule, ProductRouter),
+        config=RootConfig,
+        security=("rootAuth",),
+    )
+    class ShopApp(ModuleBase):
+        pass
 
-            @router.get("/products")
-            async def get_products(self) -> None:
-                pass
+    app = ShopApp()
+    await app.init()
+    assert app.config is not None
+    routes = app._collect_routes(RouteContext())
+    validated = validate_routes(routes, app.config)
+    document = OpenAPICompiler().compile(validated, config=app.config)
 
-        @config()
-        class ShopConfig(CanaryConfig):
-            openapi_title: str = "Shop API"
-            openapi_version: str = "1.0.0"
+    assert document["info"] == {"title": "Shop API", "version": "3.0.0"}
+    components = cast("dict[str, Any]", document["components"])
+    assert tuple(components["securitySchemes"]) == ("rootAuth",)
+    paths = cast("dict[str, Any]", document["paths"])
+    assert tuple(paths) == ("/feature/users", "/products")
+    for path_item in paths.values():
+        route_operation = next(iter(path_item.values()))
+        assert route_operation["security"] == [{"rootAuth": []}]
 
-        @module(config=ShopConfig, services=[UserRouter, ProductRouter])
-        class ShopApp(ModuleBase):
-            pass
 
-        app = ShopApp()
-        app.init()
-        schema = app.openapi()
+@pytest.mark.functional
+def test_collected_route_descriptions_compile_without_reanalysis() -> None:
+    """Compiler consumes metadata and the canonical validated analysis."""
 
-        info = cast(dict[str, Any], schema["info"])
-        assert info["title"] == "Shop API"
-        assert info["version"] == "1.0.0"
-        paths = cast(dict[str, Any], schema["paths"])
-        path_keys = list(paths.keys())
-        assert any("users" in path for path in path_keys)
-        assert any("products" in path for path in path_keys)
+    @router(prefix="/api", tags=("Diagnostics",))
+    class DiagnosticRouter(RouterBase):
+        @get(
+            "/test",
+            summary="Test endpoint",
+            description="This is a test endpoint that does nothing useful",
+            deprecated=True,
+        )
+        async def test(self) -> None:
+            return None
 
-    def test_openapi_with_descriptions(self) -> None:
-        """Test OpenAPI with descriptions."""
+    config = CanaryConfig()
+    validated = validate_routes(
+        DiagnosticRouter()._collect_routes(RouteContext()),
+        config,
+    )
+    document = OpenAPICompiler().compile(validated, config=config)
+    paths = cast("dict[str, Any]", document["paths"])
+    operation = cast("dict[str, Any]", paths["/api/test"]["get"])
 
-        @service()
-        class MyRouter(ServiceBase):
-            router = Router()
-
-            @router.get(
-                "/test",
-                summary="Test endpoint",
-                description="This is a test endpoint that does nothing useful",
-            )
-            async def test(self) -> None:
-                pass
-
-        app = MyRouter()
-        app.init()
-        schema = app.openapi()
-
-        paths = cast(dict[str, Any], schema["paths"])
-        path_obj = cast(dict[str, Any], next(iter(paths.values())))
-        assert "get" in path_obj
-        get_obj = cast(dict[str, Any], path_obj["get"])
-        assert get_obj["summary"] == "Test endpoint"
-        assert "description" in get_obj
+    assert operation["summary"] == "Test endpoint"
+    assert operation["description"] == "This is a test endpoint that does nothing useful"
+    assert operation["deprecated"] is True
+    assert operation["tags"] == ["Diagnostics"]
