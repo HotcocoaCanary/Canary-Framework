@@ -1,6 +1,7 @@
 """Route analysis and pre-compilation validation tests."""
 
 from collections.abc import Awaitable, Callable
+from dataclasses import FrozenInstanceError
 from typing import Any
 
 import pytest
@@ -96,10 +97,22 @@ def test_query_template_and_path_parameters_share_one_analysis() -> None:
             ),
             "duplicate operationId ItemRouter.read",
         ),
-        ((resolved("GET", "/docs"),), "business route GET /docs conflicts with documentation endpoint"),
-        ((resolved("GET", "/items/{item_id}", handler=read),), "path parameter item_id has no handler parameter"),
-        ((resolved("POST", "/items", handler=two_bodies, request_model=Patch),), "multiple request body declarations"),
-        ((resolved("GET", "/private", security=("bearerAuth", "missingAuth")),), "unknown security scheme missingAuth"),
+        (
+            (resolved("GET", "/docs"),),
+            "business route GET /docs conflicts with documentation endpoint",
+        ),
+        (
+            (resolved("GET", "/items/{item_id}", handler=read),),
+            "path parameter item_id has no handler parameter",
+        ),
+        (
+            (resolved("POST", "/items", handler=two_bodies, request_model=Patch),),
+            "multiple request body declarations",
+        ),
+        (
+            (resolved("GET", "/private", security=("bearerAuth", "missingAuth")),),
+            "unknown security scheme missingAuth",
+        ),
     ],
 )
 def test_route_conflicts_fail_before_compilation(
@@ -125,6 +138,10 @@ def test_same_path_different_methods_and_root_path_are_valid() -> None:
     validated = validate_routes(routes, config=RouteTestConfig())
 
     assert tuple(route.analysis.starlette_path for route in validated) == ("/", "/")
+    assert tuple(route.operation_id for route in validated) == (
+        "ItemRouter.read",
+        "ItemRouter.post_root",
+    )
 
 
 def test_slash_normalization_and_valid_single_body_parameter() -> None:
@@ -133,6 +150,28 @@ def test_slash_normalization_and_valid_single_body_parameter() -> None:
 
     assert validated[0].analysis.starlette_path == "/items"
     assert validated[0].analysis.body_param == "body"
+
+
+def test_custom_docs_paths_normalize_duplicate_slashes_and_query_suffixes() -> None:
+    class CustomDocsConfig(RouteTestConfig):
+        docs_openapi_path: str = "/docs///?format={format}"
+        docs_swagger_path: str = "/docs/"
+        docs_redoc_path: str = "//docs?theme={theme}"
+
+    with pytest.raises(
+        RouteCompilationError,
+        match="business route GET /docs conflicts with documentation endpoint",
+    ):
+        validate_routes((resolved("GET", "/docs"),), config=CustomDocsConfig())
+
+
+def test_route_analysis_and_parameter_mapping_are_immutable() -> None:
+    analysis = analyze_route(resolved("GET", "/items"))
+
+    with pytest.raises(FrozenInstanceError):
+        analysis.starlette_path = "/changed"  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        analysis.parameters["new"] = object()  # type: ignore[index, assignment]
 
 
 def test_field_default_and_metadata_are_preserved() -> None:
@@ -155,5 +194,10 @@ def test_untemplated_scalar_is_not_silently_treated_as_body() -> None:
 
 
 def test_request_model_requires_one_body_parameter() -> None:
-    with pytest.raises(RouteCompilationError, match="request model requires exactly one body parameter"):
-        validate_routes((resolved("POST", "/items", handler=no_body, request_model=Patch),), config=RouteTestConfig())
+    with pytest.raises(
+        RouteCompilationError, match="request model requires exactly one body parameter"
+    ):
+        validate_routes(
+            (resolved("POST", "/items", handler=no_body, request_model=Patch),),
+            config=RouteTestConfig(),
+        )

@@ -1,13 +1,13 @@
-"""Functional tests for edge cases, error scenarios, and boundary conditions."""
+"""Functional route-declaration edge cases for the redesigned router API."""
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import get, module, post, router, service
+from canary_framework.common import RouteContext
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
+from canary_framework.engine.params import analyze_route
+from canary_framework.engine.validation import validate_routes
 
 
 class _NotDecorated:
@@ -20,268 +20,156 @@ class _SomeDep:
 
 @pytest.mark.functional
 class TestEdgeCases:
-    """Tests for edge cases and error scenarios."""
-
-    # ── Undecorated class ──────────────────────────────────────────
+    """Tests for route and lifecycle boundaries before compiler integration."""
 
     @pytest.mark.asyncio
     async def test_undecorated_in_module_raises(self) -> None:
-        """Undecorated class in module services raises TypeError."""
-
         @service()
         class ValidService(ServiceBase):
             pass
 
-        with pytest.raises(TypeError, match="not decorated"):
+        with pytest.raises(TypeError, match="must be decorated"):
 
-            @module(services=[ValidService, _NotDecorated])
+            @module(children=[ValidService, _NotDecorated])
             class _TestModule(ModuleBase):
                 pass
 
-    # ── DI: missing dependency standalone ──────────────────────────
-
     @pytest.mark.asyncio
     async def test_service_missing_di(self) -> None:
-        """Service with unresolved DI — starts but attribute is None when not in module."""
-
         @service()
         class ServiceWithDep(ServiceBase):
             missing_dep: _SomeDep
 
         app = ServiceWithDep()
-        app.init()
+        await app.init()
         assert getattr(app, "missing_dep", None) is None
 
-    # ── Boolean query param edge cases ─────────────────────────────
-
     @pytest.mark.asyncio
-    async def test_bool_query_param_true_values(self) -> None:
-        """Boolean query params accept common truthy/falsy spellings; unrecognized → error."""
-
-        @service()
-        class MyService(ServiceBase):
-            router = Router()
-
-            @router.get("/check?flag={flag}")
+    async def test_bool_query_param_annotation_is_resolved(self) -> None:
+        @router()
+        class MyRouter(RouterBase):
+            @get("/check?flag={flag}")
             async def check(self, flag: bool) -> dict[str, bool]:
-                return {"flag": flag}
+                return {"enabled": flag}
 
-        app = MyService()
-        app.init()
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            for val in ("true", "True", "TRUE", "tRuE", "1", "yes", "YES", "on"):
-                r = await client.get(f"/check?flag={val}")
-                assert r.json()["flag"] is True, f"'{val}' should be True"
-
-            for val in ("false", "False", "0", "no", "off"):
-                r = await client.get(f"/check?flag={val}")
-                assert r.json()["flag"] is False, f"'{val}' should be False"
-
-            for val in ("", "anything"):
-                r = await client.get(f"/check?flag={val}")
-                assert r.status_code >= 400, f"'{val}' should be rejected"
-
-    # ── Empty path handling ────────────────────────────────────────
+        app = MyRouter()
+        await app.init()
+        analysis = analyze_route(app._collect_routes(RouteContext())[0])
+        assert analysis.query_params == ("flag",)
+        assert analysis.parameters["flag"].annotation is bool
+        assert not analysis.parameters["flag"].has_default
 
     @pytest.mark.asyncio
     async def test_service_root_path(self) -> None:
-        """Service with root path '/'."""
-
-        @service()
-        class RootService(ServiceBase):
-            router = Router()
-
-            @router.get("/")
+        @router()
+        class RootRouter(RouterBase):
+            @get("/")
             async def root(self) -> dict[str, str]:
                 return {"home": "yes"}
 
-        app = RootService()
-        app.init()
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/")
-            assert r.status_code == 200
-            assert r.json() == {"home": "yes"}
-
-    # ── Multiple HTTP methods on same path ─────────────────────────
+        app = RootRouter()
+        await app.init()
+        routes = app._collect_routes(RouteContext())
+        assert routes[0].full_path == "/"
+        assert analyze_route(routes[0]).starlette_path == "/"
 
     @pytest.mark.asyncio
     async def test_multiple_methods_same_path(self) -> None:
-        """GET and POST on same path both work."""
-
-        @service()
-        class MyService(ServiceBase):
-            router = Router()
-
-            @router.get("/item")
+        @router()
+        class MyRouter(RouterBase):
+            @get("/item")
             async def get_item(self) -> dict[str, str]:
                 return {"method": "get"}
 
-            @router.post("/item")
+            @post("/item")
             async def post_item(self) -> dict[str, str]:
                 return {"method": "post"}
 
-        app = MyService()
-        app.init()
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/item")
-            assert r.json() == {"method": "get"}
-            r = await client.post("/item")
-            assert r.json() == {"method": "post"}
-
-    # ── Router prefix edge cases ───────────────────────────────────
+        app = MyRouter()
+        await app.init()
+        routes = app._collect_routes(RouteContext())
+        validated = validate_routes(routes, config=app.config)  # type: ignore[arg-type]
+        assert [(item.route.method, item.analysis.starlette_path) for item in validated] == [
+            ("GET", "/item"),
+            ("POST", "/item"),
+        ]
 
     @pytest.mark.asyncio
-    async def test_router_prefix_trailing_slash_openapi(self) -> None:
-        """Router prefix with trailing slash — OpenAPI normalizes double slashes."""
-
-        @service()
-        class MyService(ServiceBase):
-            router = Router(prefix="/api/")
-
-            @router.get("/hello")
+    async def test_router_prefix_trailing_slash(self) -> None:
+        @router(prefix="/api/")
+        class MyRouter(RouterBase):
+            @get("/hello")
             async def hello(self) -> dict[str, str]:
                 return {"ok": "yes"}
 
-        app = MyService()
-        app.init()
-        await app.startup()
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/openapi.json")
-            assert r.status_code == 200
-            schema = r.json()
-            paths = schema.get("paths", {})
-            assert "/api/hello" in paths
-            assert "/api//hello" not in paths
+        app = MyRouter()
+        await app.init()
+        route = app._collect_routes(RouteContext())[0]
+        assert route.full_path == "/api/hello"
+        assert analyze_route(route).starlette_path == "/api/hello"
 
     @pytest.mark.asyncio
     async def test_router_prefix_sets_mount_path(self) -> None:
-        """Router prefix controls mount path in module context."""
-
-        @service()
-        class MyService(ServiceBase):
-            router = Router(prefix="/custom")
-
-            @router.get("/test")
+        @router(prefix="/custom")
+        class MyRouter(RouterBase):
+            @get("/test")
             async def test(self) -> dict[str, str]:
                 return {"ok": "yes"}
 
-        @module(services=[MyService])
+        @module(children=[MyRouter])
         class AppModule(ModuleBase):
             pass
 
         app = AppModule()
-        app.init()
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/custom/test")
-            assert r.status_code == 200
-
-    # ── Swagger and ReDoc docs ─────────────────────────────────────
-
-    @pytest.mark.asyncio
-    async def test_swagger_and_redoc_available(self) -> None:
-        """Both Swagger UI and ReDoc are available after startup."""
-
-        @service()
-        class MyService(ServiceBase):
-            router = Router()
-
-            @router.get("/test")
-            async def test(self) -> dict[str, str]:
-                return {"ok": "yes"}
-
-        app = MyService()
-        app.init()
-        await app.startup()
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/docs")
-            assert r.status_code == 200
-            assert "swagger" in r.text.lower()
-
-            r = await client.get("/redoc")
-            assert r.status_code == 200
-            assert "redoc" in r.text.lower()
-
-    # ── Deep nesting stress ────────────────────────────────────────
+        await app.init()
+        assert app._collect_routes(RouteContext())[0].full_path == "/custom/test"
 
     @pytest.mark.asyncio
     async def test_deeply_nested_module(self) -> None:
-        """Deeply nested module chain — all routes resolve."""
-
-        @service()
-        class LeafService(ServiceBase):
-            router = Router()
-
-            @router.get("/data")
+        @router()
+        class LeafRouter(RouterBase):
+            @get("/data")
             async def data(self) -> dict[str, str]:
                 return {"depth": "leaf"}
 
-        @module(services=[LeafService])
+        @module(children=[LeafRouter])
         class Level3(ModuleBase):
             pass
 
-        @module(services=[Level3])
+        @module(children=[Level3])
         class Level2(ModuleBase):
             pass
 
-        @module(services=[Level2])
+        @module(children=[Level2])
         class Level1(ModuleBase):
             pass
 
         app = Level1()
-        app.init()
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/data")
-            assert r.status_code == 200
-            assert r.json() == {"depth": "leaf"}
-
-    # ── return types (str, dict, list, BaseModel) ──────────────────
+        await app.init()
+        routes = app._collect_routes(RouteContext())
+        assert routes[0].full_path == "/data"
+        assert (
+            routes[0].handler.__self__
+            is app.direct_children[0].direct_children[0].direct_children[0]
+        )  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
-    async def test_return_types(self) -> None:
-        """Various return types are handled correctly."""
-
+    async def test_return_model_metadata_is_preserved(self) -> None:
         class Item(BaseModel):
             name: str
 
-        @service()
-        class MyService(ServiceBase):
-            router = Router()
-
-            @router.get("/str")
+        @router()
+        class MyRouter(RouterBase):
+            @get("/str")
             async def str_route(self) -> str:
                 return "plain text"
 
-            @router.get("/dict")
-            async def dict_route(self) -> dict[str, int]:
-                return {"a": 1}
-
-            @router.get("/list")
-            async def list_route(self) -> list[int]:
-                return [1, 2, 3]
-
-            @router.get("/model", response_model=Item)
+            @get("/model", response_model=Item)
             async def model_route(self) -> Item:
                 return Item(name="test")
 
-        app = MyService()
-        app.init()
-
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            r = await client.get("/str")
-            assert r.text == "plain text"
-
-            r = await client.get("/dict")
-            assert r.json() == {"a": 1}
-
-            r = await client.get("/list")
-            assert r.json() == [1, 2, 3]
-
-            r = await client.get("/model")
-            assert r.json()["name"] == "test"
+        app = MyRouter()
+        await app.init()
+        routes = app._collect_routes(RouteContext())
+        assert [route.full_path for route in routes] == ["/str", "/model"]
+        assert routes[1].spec.response_model is Item
