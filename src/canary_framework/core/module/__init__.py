@@ -1,5 +1,5 @@
-"""Module declaration base."""
+"""Composable module base."""
 
-from canary_framework.core.module._declaration import ModuleBase
+from canary_framework.core.module._base import ModuleBase
 
 __all__ = ["ModuleBase"]

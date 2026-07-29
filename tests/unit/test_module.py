@@ -1,42 +1,171 @@
-"""Unit tests for core.module module."""
+"""Unit tests for compositional ModuleBase."""
 
 import pytest
+from pydantic import Field
 
-from canary_framework.core.module import ModuleBase
+from canary_framework import CanaryConfig, get, module, router, service
+from canary_framework.common import RouteContext
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
 
 
 @pytest.mark.unit
-class TestModuleBase:
-    """Tests for ModuleBase class."""
+async def test_empty_decorated_module_is_a_route_less_object() -> None:
+    @module()
+    class EmptyModule(ModuleBase):
+        pass
 
-    def test_initialization(self) -> None:
-        """Test initialization."""
-        module = ModuleBase()
-        assert module._cf_parent_registry is None
-        assert module._cf_registry is None
-        assert module._cf_startup_order == []
-        assert module._cf_assembled is None
+    subject = EmptyModule()
+    await subject.init()
 
-    @pytest.mark.asyncio
-    async def test_init_empty_module(self) -> None:
-        """Test init on empty module."""
-        module = ModuleBase()
-        module.init()
+    assert subject.direct_children == ()
+    assert subject._collect_routes(RouteContext()) == ()
+    assert subject.config is not None
 
-    def test_asgi_app_lazy_loaded(self) -> None:
-        """Test asgi_app is lazily loaded."""
-        module = ModuleBase()
-        assert module._cf_assembled is None
-        app = module.asgi_app
-        assert module._cf_assembled is not None
-        assert app is module._cf_assembled.router
 
-    def test_asgi_app_empty_module_has_no_docs(self) -> None:
-        """Test asgi_app on empty module has no docs (docs come from routers)."""
-        module = ModuleBase()
-        app = module.asgi_app
-        routes = app.routes
-        paths = [route.path for route in routes]  # type: ignore[attr-defined]
-        assert "/openapi.json" not in paths
-        assert "/docs" not in paths
-        assert "/redoc" not in paths
+@pytest.mark.unit
+async def test_root_module_wires_typed_child_dependencies() -> None:
+    @service()
+    class Worker(ServiceBase):
+        pass
+
+    @module(children=(Worker,))
+    class App(ModuleBase):
+        worker: Worker
+
+    app = App()
+    await app.init()
+
+    assert app.worker is app.direct_children[0]
+
+
+@pytest.mark.unit
+async def test_module_delegates_child_lifecycle_in_dependency_order() -> None:
+    events: list[str] = []
+
+    @service()
+    class Dependency(ServiceBase):
+        async def _init(self) -> None:
+            events.append("dependency-init")
+
+        async def _startup(self) -> None:
+            events.append("dependency-startup")
+
+        async def _shutdown(self) -> None:
+            events.append("dependency-shutdown")
+
+    @service()
+    class Consumer(ServiceBase):
+        dependency: Dependency
+
+        async def _init(self) -> None:
+            events.append("consumer-init")
+
+        async def _startup(self) -> None:
+            events.append("consumer-startup")
+
+        async def _shutdown(self) -> None:
+            events.append("consumer-shutdown")
+
+    @module(children=(Consumer,))
+    class App(ModuleBase):
+        pass
+
+    app = App()
+    await app.init()
+    await app.startup()
+    await app.shutdown()
+
+    assert events == [
+        "dependency-init",
+        "consumer-init",
+        "dependency-startup",
+        "consumer-startup",
+        "consumer-shutdown",
+        "dependency-shutdown",
+    ]
+
+
+@pytest.mark.unit
+async def test_nested_module_routes_extend_context_and_inherit_config() -> None:
+    class AppConfig(CanaryConfig):
+        openapi_security_schemes: dict[str, dict[str, object]] = Field(
+            default_factory=lambda: {"bearerAuth": {"type": "http", "scheme": "bearer"}}
+        )
+
+    @router(prefix="/users", tags=("Users",))
+    class UserRouter(RouterBase):
+        @get("")
+        async def list_users(self) -> list[dict[str, str]]:
+            return [{"name": "Ada"}]
+
+    @module(prefix="/v1", tags=("v1",), children=(UserRouter,))
+    class UserModule(ModuleBase):
+        return_marker = "users"
+
+    @module(
+        prefix="/api",
+        security=("bearerAuth",),
+        children=(UserModule,),
+        config=AppConfig,
+    )
+    class App(ModuleBase):
+        return_marker = "app"
+
+    app = App()
+    await app.init()
+
+    routes = app._collect_routes(RouteContext())
+    assert [(route.method, route.full_path) for route in routes] == [("GET", "/api/v1/users")]
+    assert routes[0].tags == ("v1", "Users")
+    assert routes[0].security == ("bearerAuth",)
+    assert "bearerAuth" in app.config.openapi_security_schemes  # type: ignore[union-attr]
+    child_module = app.direct_children[0]
+    child_router = child_module.direct_children[0]  # type: ignore[union-attr]
+    assert child_router._cf_dependency_engine is None  # type: ignore[attr-defined]
+
+
+@pytest.mark.unit
+async def test_nested_module_uses_its_own_config_override() -> None:
+    class RootConfig(CanaryConfig):
+        openapi_title: str = "root"
+
+    class ChildConfig(CanaryConfig):
+        openapi_title: str = "child"
+
+    @module(config=ChildConfig)
+    class Child(ModuleBase):
+        pass
+
+    @module(children=(Child,), config=RootConfig)
+    class Root(ModuleBase):
+        pass
+
+    root = Root()
+    await root.init()
+
+    child = root.direct_children[0]
+    assert root.config is not None and root.config.openapi_title == "root"
+    assert child.config is not None and child.config.openapi_title == "child"
+
+
+@pytest.mark.unit
+async def test_module_ignores_ordinary_services_during_route_collection() -> None:
+    @service()
+    class Ordinary(ServiceBase):
+        pass
+
+    @router()
+    class Router(RouterBase):
+        @get("/health")
+        async def health(self) -> dict[str, str]:
+            return {"status": "ok"}
+
+    @module(children=(Ordinary, Router))
+    class App(ModuleBase):
+        pass
+
+    app = App()
+    await app.init()
+
+    assert [route.full_path for route in app._collect_routes(RouteContext())] == ["/health"]
+    assert tuple(type(child) for child in app.direct_children) == (Ordinary, Router)

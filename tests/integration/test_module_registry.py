@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 
+from canary_framework import module, service
 from canary_framework.common.types import (
     CF_SERVICE_MARKER,
     CF_SERVICE_META,
@@ -12,7 +13,7 @@ from canary_framework.common.types import (
     ServiceMeta,
     get_module_meta,
 )
-from canary_framework.core.service import ServiceBase
+from canary_framework.core import ModuleBase, ServiceBase
 from canary_framework.engine.container import DependencyEngine
 from canary_framework.engine.registry import Registry
 
@@ -167,3 +168,64 @@ async def test_promoted_service_starts_before_nested_module_declared_first() -> 
         "shared-startup",
         "consumer-startup",
     ]
+
+
+@pytest.mark.integration
+async def test_module_sibling_scopes_isolate_local_services() -> None:
+    @service()
+    class Shared(ServiceBase):
+        pass
+
+    @service()
+    class Consumer(ServiceBase):
+        shared: Shared
+
+    @module(children=(Consumer,))
+    class Left(ModuleBase):
+        pass
+
+    @module(children=(Consumer,))
+    class Right(ModuleBase):
+        pass
+
+    @module(children=(Left, Right))
+    class Root(ModuleBase):
+        pass
+
+    root = Root()
+    await root.init()
+    left, right = root.direct_children
+    left_consumer = left.direct_children[0]
+    right_consumer = right.direct_children[0]
+
+    assert left_consumer.shared is not right_consumer.shared  # type: ignore[attr-defined]
+    assert left._cf_dependency_engine.registry.has_local(Shared)  # type: ignore[attr-defined]
+    assert right._cf_dependency_engine.registry.has_local(Shared)  # type: ignore[attr-defined]
+
+
+@pytest.mark.integration
+async def test_module_reuses_parent_promoted_service_instance() -> None:
+    @service()
+    class Shared(ServiceBase):
+        pass
+
+    @service()
+    class Consumer(ServiceBase):
+        shared: Shared
+
+    @module(children=(Consumer,))
+    class Child(ModuleBase):
+        pass
+
+    @module(children=(Child, Shared))
+    class Root(ModuleBase):
+        pass
+
+    root = Root()
+    await root.init()
+    child = root.direct_children[0]
+    shared = root.direct_children[1]
+    consumer = child.direct_children[0]
+
+    assert consumer.shared is shared  # type: ignore[attr-defined]
+    assert not child._cf_dependency_engine.registry.has_local(Shared)  # type: ignore[attr-defined]
