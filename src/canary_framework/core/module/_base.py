@@ -56,9 +56,9 @@ class ModuleBase(ServiceBase):
             config=config,
         )
         await engine.init()
+        self._cf_dependency_engine = engine
         for dependency in resolve_deps(type(self)):
             setattr(self, dependency.attribute, engine.registry.get(dependency.target))
-        self._cf_dependency_engine = engine
 
     @override
     async def _startup(self) -> None:

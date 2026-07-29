@@ -3,8 +3,8 @@
 import pytest
 from pydantic import Field
 
-from canary_framework import CanaryConfig, get, module, router, service
-from canary_framework.common import RouteContext
+from canary_framework import CanaryConfig, ServiceNotFoundError, get, module, router, service
+from canary_framework.common import LifecycleState, RouteContext
 from canary_framework.core import ModuleBase, RouterBase, ServiceBase
 
 
@@ -36,6 +36,35 @@ async def test_root_module_wires_typed_child_dependencies() -> None:
     await app.init()
 
     assert app.worker is app.direct_children[0]
+
+
+@pytest.mark.unit
+async def test_module_wiring_failure_rolls_back_initialized_children_once() -> None:
+    events: list[str] = []
+
+    @service()
+    class Child(ServiceBase):
+        async def _init(self) -> None:
+            events.append("child-init")
+
+        async def on_shutdown(self) -> None:
+            events.append("child-on-shutdown")
+
+    @service()
+    class Missing(ServiceBase):
+        pass
+
+    @module(children=(Child,))
+    class App(ModuleBase):
+        missing: Missing
+
+    app = App()
+
+    with pytest.raises(ServiceNotFoundError, match="'Missing' is not registered"):
+        await app.init()
+
+    assert events == ["child-init", "child-on-shutdown"]
+    assert app.lifecycle_state is LifecycleState.FAILED
 
 
 @pytest.mark.unit
