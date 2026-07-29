@@ -7,8 +7,10 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, Field
 
-from canary_framework.common import CanaryConfig, RouteCompilationError
+from canary_framework import get, router
+from canary_framework.common import CanaryConfig, RouteCompilationError, RouteContext
 from canary_framework.common.routing import ResolvedRoute, RouteSpec
+from canary_framework.core import RouterBase
 from canary_framework.engine.params import analyze_route
 from canary_framework.engine.validation import validate_routes
 
@@ -25,6 +27,13 @@ class Patch(BaseModel):
 
 class ItemRouter:
     route_specs: tuple[RouteSpec, ...] = ()
+
+
+@router()
+class MountedRouter(RouterBase):
+    @get("/items")
+    async def read(self) -> dict[str, str]:
+        return {"ok": "yes"}
 
 
 async def search(user_id: int, query: str = "") -> dict[str, Any]:
@@ -123,10 +132,12 @@ def test_route_conflicts_fail_before_compilation(
 
 
 def test_same_router_class_under_distinct_prefixes_rejects_default_operation_id() -> None:
-    first = resolved("GET", "/v1/items", owner=ItemRouter())
-    second = resolved("GET", "/v2/items", owner=ItemRouter())
+    mounted = MountedRouter()
+    first = mounted._collect_routes(RouteContext(prefix="/v1"))[0]
+    second = mounted._collect_routes(RouteContext(prefix="/v2"))[0]
 
-    with pytest.raises(RouteCompilationError, match=r"duplicate operationId ItemRouter\.read"):
+    assert (first.full_path, second.full_path) == ("/v1/items", "/v2/items")
+    with pytest.raises(RouteCompilationError, match=r"duplicate operationId MountedRouter\.read"):
         validate_routes((first, second), config=RouteTestConfig())
 
 
@@ -152,17 +163,24 @@ def test_slash_normalization_and_valid_single_body_parameter() -> None:
     assert validated[0].analysis.body_param == "body"
 
 
-def test_custom_docs_paths_normalize_duplicate_slashes_and_query_suffixes() -> None:
-    class CustomDocsConfig(RouteTestConfig):
-        docs_openapi_path: str = "/docs///?format={format}"
-        docs_swagger_path: str = "/docs/"
-        docs_redoc_path: str = "//docs?theme={theme}"
+@pytest.mark.parametrize(
+    ("field_name", "docs_path"),
+    [
+        ("docs_openapi_path", "/custom///?format={format}"),
+        ("docs_swagger_path", "//custom/?theme={theme}"),
+        ("docs_redoc_path", "///custom//?view={view}"),
+    ],
+)
+def test_each_custom_docs_path_normalizes_slashes_and_strips_query(
+    field_name: str, docs_path: str
+) -> None:
+    config = RouteTestConfig().model_copy(update={field_name: docs_path})
 
     with pytest.raises(
         RouteCompilationError,
-        match="business route GET /docs conflicts with documentation endpoint",
+        match="business route GET /custom conflicts with documentation endpoint",
     ):
-        validate_routes((resolved("GET", "/docs"),), config=CustomDocsConfig())
+        validate_routes((resolved("GET", "/custom"),), config=config)
 
 
 def test_route_analysis_and_parameter_mapping_are_immutable() -> None:
