@@ -1,4 +1,4 @@
-"""不可变路由声明与解析契约。 Immutable routing declaration and resolution contracts."""
+"""Immutable routing declaration and resolution contracts."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 
 class _RouteOwner(Protocol):
-    """提供路由声明的节点。 A node that owns route declarations."""
+    """A node that owns route declarations."""
 
     @property
     def route_specs(self) -> tuple[RouteSpec, ...]:
@@ -22,7 +22,7 @@ class _RouteOwner(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ResponseSpec:
-    """响应文档声明。 Response documentation declaration."""
+    """Response documentation declaration."""
 
     description: str
     model: type | None = None
@@ -30,7 +30,7 @@ class ResponseSpec:
 
 @dataclass(frozen=True, slots=True)
 class RouteSpec:
-    """节点本地的不可变路由声明。 Immutable node-local route declaration."""
+    """Immutable node-local route declaration."""
 
     method: str
     local_path: str
@@ -53,7 +53,7 @@ class RouteSpec:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedRoute:
-    """完成上下文合并的不可变路由。 Immutable route with its context resolved."""
+    """Immutable route with its context resolved."""
 
     owner: _RouteOwner
     method: str
@@ -70,7 +70,7 @@ class ResolvedRoute:
 
 @dataclass(frozen=True, slots=True)
 class RouteContext:
-    """路由解析时继承的上下文。 Inherited context used during route resolution."""
+    """Inherited context used during route resolution."""
 
     prefix: str = ""
     tags: tuple[str, ...] = ()

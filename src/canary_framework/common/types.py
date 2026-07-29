@@ -17,10 +17,7 @@ from canary_framework.common.config import CanaryConfig
 
 
 class LifecycleState(StrEnum):
-    """服务节点的运行时生命周期状态。
-
-    Runtime lifecycle states for service nodes.
-    """
+    """Runtime lifecycle states for service nodes."""
 
     CREATED = "created"
     INITIALIZED = "initialized"
@@ -89,14 +86,14 @@ def unwrap_optional(tp: Any) -> tuple[Any, bool]:
 
 @dataclass(frozen=True, slots=True)
 class ServiceMeta:
-    """服务声明的不可变元数据。 Immutable metadata for a service declaration."""
+    """Immutable metadata for a service declaration."""
 
     name: str
 
 
 @dataclass(frozen=True, slots=True)
 class RouterMeta(ServiceMeta):
-    """路由节点的不可变元数据。 Immutable metadata for a router node."""
+    """Immutable metadata for a router node."""
 
     prefix: str = ""
     tags: tuple[str, ...] = ()
@@ -106,7 +103,7 @@ class RouterMeta(ServiceMeta):
 
 @dataclass(frozen=True, slots=True)
 class ModuleMeta(ServiceMeta):
-    """模块节点的不可变元数据。 Immutable metadata for a module node."""
+    """Immutable metadata for a module node."""
 
     children: tuple[type, ...] = ()
     prefix: str = ""
@@ -117,7 +114,7 @@ class ModuleMeta(ServiceMeta):
 
 @dataclass(slots=True)
 class ServiceEntry:
-    """服务实例的可变运行时记录。 Mutable runtime record for a service instance."""
+    """Mutable runtime record for a service instance."""
 
     cls: type
     name: str
@@ -213,20 +210,20 @@ def is_cf_service(cls: type) -> bool:
 
 
 def is_cf_router(cls: type) -> bool:
-    """检查类是否声明为路由节点。 Check whether a class is a router node."""
+    """Check whether a class is a router node."""
 
     return isinstance(getattr(cls, CF_SERVICE_META, None), RouterMeta)
 
 
 def get_service_meta(cls: type) -> ServiceMeta | None:
-    """获取服务节点元数据。 Get service-node metadata."""
+    """Get service-node metadata."""
 
     raw = getattr(cls, CF_SERVICE_META, None)
     return raw if isinstance(raw, ServiceMeta) else None
 
 
 def get_router_meta(cls: type) -> RouterMeta | None:
-    """获取路由节点元数据。 Get router-node metadata."""
+    """Get router-node metadata."""
 
     raw = getattr(cls, CF_SERVICE_META, None)
     return raw if isinstance(raw, RouterMeta) else None
