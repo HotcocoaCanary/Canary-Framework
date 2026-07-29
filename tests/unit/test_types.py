@@ -1,126 +1,116 @@
-"""Unit tests for common.types module."""
+"""Unit tests for immutable common contracts."""
+
+from collections.abc import Mapping
 
 import pytest
 
+from canary_framework.common.routing import (
+    ResolvedRoute,
+    ResponseSpec,
+    RouteContext,
+    RouteSpec,
+)
 from canary_framework.common.types import (
-    LifecycleHook,
+    LifecycleState,
     ModuleMeta,
+    RouterMeta,
     ServiceEntry,
     ServiceMeta,
+    unwrap_optional,
 )
 
 
 @pytest.mark.unit
-class TestLifecycleHook:
-    """Tests for LifecycleHook enum."""
-
-    def test_enum_values(self) -> None:
-        """Test that enum has correct values."""
-        assert LifecycleHook.BEFORE_STARTUP.value == "before_startup"
-        assert LifecycleHook.BEFORE_SHUTDOWN.value == "before_shutdown"
-
-    def test_enum_iteration(self) -> None:
-        """Test enum iteration."""
-        values = list(LifecycleHook)
-        assert len(values) == 2
+def test_lifecycle_state_has_all_runtime_states() -> None:
+    assert tuple(LifecycleState) == (
+        LifecycleState.CREATED,
+        LifecycleState.INITIALIZED,
+        LifecycleState.STARTED,
+        LifecycleState.STOPPED,
+        LifecycleState.FAILED,
+    )
 
 
 @pytest.mark.unit
-class TestServiceMeta:
-    """Tests for ServiceMeta dataclass."""
+def test_route_spec_freezes_collections() -> None:
+    source = {422: ResponseSpec("Validation failed")}
+    spec = RouteSpec(
+        method="get",
+        local_path="/items",
+        handler_name="items",
+        tags=["Items"],  # type: ignore[arg-type]
+        responses=source,
+    )
+    source[500] = ResponseSpec("Server error")
 
-    def test_default_values(self) -> None:
-        """Test default values are set correctly."""
-        meta = ServiceMeta(name="test")
-        assert meta.name == "test"
-
-    def test_custom_values(self) -> None:
-        """Test custom values are set correctly."""
-        meta = ServiceMeta(name="custom")
-        assert meta.name == "custom"
-
-
-@pytest.mark.unit
-class TestModuleMeta:
-    """Tests for ModuleMeta dataclass."""
-
-    def test_default_values(self) -> None:
-        """Test default values are set correctly."""
-        meta = ModuleMeta(name="test")
-        assert meta.name == "test"
-        assert meta.services == []
-
-    def test_custom_values(self) -> None:
-        """Test custom values are set correctly."""
-
-        class Service:
-            pass
-
-        meta = ModuleMeta(name="custom", services=[Service])
-        assert meta.name == "custom"
-        assert meta.services == [Service]
+    assert spec.method == "GET"
+    assert spec.tags == ("Items",)
+    assert isinstance(spec.responses, Mapping)
+    assert tuple(spec.responses) == (422,)
+    with pytest.raises(TypeError):
+        spec.responses[500] = ResponseSpec("Server error")  # type: ignore[index]
 
 
 @pytest.mark.unit
-class TestServiceEntry:
-    """Tests for ServiceEntry dataclass."""
+def test_metadata_is_frozen_and_tuple_backed() -> None:
+    service_meta = ServiceMeta(name="Clock")
+    router_meta = RouterMeta(name="Users", prefix="/users", tags=("Users",))
+    module_meta = ModuleMeta(name="Api", children=(str,), prefix="/api")
 
-    def test_default_values(self) -> None:
-
-        class MyClass:
-            pass
-
-        entry = ServiceEntry(cls=MyClass, name="test")
-        assert entry.cls == MyClass
-        assert entry.name == "test"
-        assert entry.instance is None
-
-    def test_custom_values(self) -> None:
-
-        class MyClass:
-            pass
-
-        instance = MyClass()
-        entry = ServiceEntry(cls=MyClass, name="test", instance=instance)
-        assert entry.cls == MyClass
-        assert entry.name == "test"
-        assert entry.instance is instance
+    assert service_meta.name == "Clock"
+    assert router_meta.tags == ("Users",)
+    assert module_meta.children == (str,)
+    with pytest.raises(AttributeError):
+        router_meta.prefix = "/changed"  # type: ignore[misc]
 
 
 @pytest.mark.unit
-def test_resolved_route_holds_full_path_and_handler() -> None:
-    from canary_framework.common import ResolvedRoute, RouteInfo
+def test_service_entry_tracks_runtime_instance() -> None:
+    entry = ServiceEntry(cls=str, name="text")
 
-    async def h() -> None: ...
+    entry.instance = "ready"
 
-    info = RouteInfo(
-        handler=h,
+    assert entry.instance == "ready"
+
+
+@pytest.mark.unit
+def test_resolved_route_derives_operation_id() -> None:
+    class Owner:
+        route_specs: tuple[RouteSpec, ...] = ()
+
+    async def handler() -> object:
+        return None
+
+    spec = RouteSpec(method="GET", local_path="/items", handler_name="items")
+    route = ResolvedRoute(
+        owner=Owner(),
         method="GET",
-        path="/x",
-        starlette_path="/x",
-        path_params=[],
-        query_params=[],
-        param_meta={},
+        full_path="/api/items",
+        handler=handler,
+        spec=spec,
     )
-    r = ResolvedRoute(full_path="/api/x", handler=h, info=info)
-    assert r.full_path == "/api/x"
-    assert r.info.method == "GET"
-    assert r.handler is h
+
+    assert route.operation_id == "Owner.items"
 
 
 @pytest.mark.unit
-def test_route_info_body_param_defaults_none() -> None:
-    from canary_framework.common import RouteInfo
+def test_route_context_has_empty_immutable_defaults() -> None:
+    context = RouteContext()
 
-    async def h() -> None: ...
+    assert context.prefix == ""
+    assert context.tags == ()
+    assert context.security == ()
+    with pytest.raises(AttributeError):
+        context.prefix = "/changed"  # type: ignore[misc]
 
-    info = RouteInfo(
-        handler=h,
-        method="POST",
-        path="/x",
-        starlette_path="/x",
-        path_params=[],
-        query_params=[],
-        param_meta={},
-    )
-    assert info.body_param is None
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("annotation", "expected"),
+    [
+        (str, (str, False)),
+        (str | None, (str, True)),
+    ],
+)
+def test_unwrap_optional(annotation: object, expected: tuple[object, bool]) -> None:
+    assert unwrap_optional(annotation) == expected

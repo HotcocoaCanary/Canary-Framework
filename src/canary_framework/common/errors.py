@@ -17,6 +17,14 @@ class CanaryFrameworkError(Exception):
     """
 
 
+class ApplicationNotInitializedError(CanaryFrameworkError):
+    """Raised when a runtime root is used before explicit initialization."""
+
+
+class LifecycleStateError(CanaryFrameworkError):
+    """Raised for an invalid lifecycle state transition."""
+
+
 class ConfigurationError(CanaryFrameworkError):
     """配置加载或验证失败时抛出。
 
@@ -45,6 +53,10 @@ class DependencyInjectionError(CanaryFrameworkError):
     """
 
 
+class DependencyDirectionError(DependencyInjectionError):
+    """Raised when a dependency edge violates the node-layer rules."""
+
+
 class LifecycleHookError(CanaryFrameworkError):
     """运行时钩子抛出未处理异常时抛出。
 
@@ -52,11 +64,19 @@ class LifecycleHookError(CanaryFrameworkError):
     """
 
 
+class RouteCompilationError(CanaryFrameworkError):
+    """Raised when routes cannot be compiled into one application."""
+
+
 __all__ = [
+    "ApplicationNotInitializedError",
     "CanaryFrameworkError",
     "CircularDependencyError",
     "ConfigurationError",
+    "DependencyDirectionError",
     "DependencyInjectionError",
     "LifecycleHookError",
+    "LifecycleStateError",
+    "RouteCompilationError",
     "ServiceNotFoundError",
 ]

@@ -11,9 +11,22 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import UnionType
-from typing import Any, Protocol, cast, get_args, get_origin
+from typing import Any, Protocol, get_args, get_origin
 
 from canary_framework.common.config import CanaryConfig
+
+
+class LifecycleState(StrEnum):
+    """服务节点的运行时生命周期状态。
+
+    Runtime lifecycle states for service nodes.
+    """
+
+    CREATED = "created"
+    INITIALIZED = "initialized"
+    STARTED = "started"
+    STOPPED = "stopped"
+    FAILED = "failed"
 
 
 class LifecycleHook(StrEnum):
@@ -74,63 +87,41 @@ def unwrap_optional(tp: Any) -> tuple[Any, bool]:
     return tp, False
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class ServiceMeta:
-    """@service装饰的类存储的元数据。
-
-    Attributes:
-        name: 服务的全局唯一名称。
-        config_cls: 服务的配置类（如有）。
-
-    Metadata stored on a @service-decorated class.
-
-    Attributes:
-        name: Globally unique service name.
-        config_cls: Optional config class for the service.
-    """
+    """服务声明的不可变元数据。 Immutable metadata for a service declaration."""
 
     name: str
+
+
+@dataclass(frozen=True, slots=True)
+class RouterMeta(ServiceMeta):
+    """路由节点的不可变元数据。 Immutable metadata for a router node."""
+
+    prefix: str = ""
+    tags: tuple[str, ...] = ()
+    security: tuple[str, ...] = ()
+    config_cls: type[CanaryConfig] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModuleMeta(ServiceMeta):
+    """模块节点的不可变元数据。 Immutable metadata for a module node."""
+
+    children: tuple[type, ...] = ()
+    prefix: str = ""
+    tags: tuple[str, ...] = ()
+    security: tuple[str, ...] = ()
     config_cls: type[CanaryConfig] | None = None
 
 
 @dataclass(slots=True)
-class ModuleMeta(ServiceMeta):
-    """@module装饰的类存储的元数据。
-
-    Attributes:
-        name: 模块的全局唯一名称。
-        services: 直接子服务列表。
-
-    Metadata stored on a @module-decorated class.
-
-    Attributes:
-        name: Globally unique module name.
-        services: Direct child services list.
-    """
-
-    services: list[type] = field(default_factory=list)
-
-
-@dataclass(slots=True)
 class ServiceEntry:
-    """单个@service或@module实例的运行时描述符。
-
-    Attributes:
-        cls: 服务/模块的类。
-        name: 服务/模块的名称。
-        instance: 实例对象，初始为None，在配置阶段创建。
-
-    Runtime descriptor for a single @service or @module instance.
-
-    Attributes:
-        cls: The service/module class.
-        name: The service/module name.
-        instance: Instance object, None initially, created during configuration.
-    """
+    """服务实例的可变运行时记录。 Mutable runtime record for a service instance."""
 
     cls: type
     name: str
-    instance: object | None = field(default=None)
+    instance: object | None = None
 
 
 # Service标记常量
@@ -221,27 +212,24 @@ def is_cf_service(cls: type) -> bool:
     return bool(getattr(cls, CF_SERVICE_MARKER, False))
 
 
+def is_cf_router(cls: type) -> bool:
+    """检查类是否声明为路由节点。 Check whether a class is a router node."""
+
+    return isinstance(getattr(cls, CF_SERVICE_META, None), RouterMeta)
+
+
 def get_service_meta(cls: type) -> ServiceMeta | None:
-    """获取服务类的元数据。
+    """获取服务节点元数据。 Get service-node metadata."""
 
-    Args:
-        cls: 服务类。
+    raw = getattr(cls, CF_SERVICE_META, None)
+    return raw if isinstance(raw, ServiceMeta) else None
 
-    Returns:
-        ServiceMeta对象，如果不存在则返回默认空元数据。
 
-    Get metadata for a service class.
+def get_router_meta(cls: type) -> RouterMeta | None:
+    """获取路由节点元数据。 Get router-node metadata."""
 
-    Args:
-        cls: The service class.
-
-    Returns:
-        ServiceMeta object, or default empty metadata if not found.
-    """
-    meta = getattr(cls, CF_SERVICE_META, None)
-    if meta is None:
-        return None
-    return cast(ServiceMeta, meta)
+    raw = getattr(cls, CF_SERVICE_META, None)
+    return raw if isinstance(raw, RouterMeta) else None
 
 
 def is_cf_module(cls: type) -> bool:
@@ -295,14 +283,18 @@ __all__ = [
     "HookFunction",
     "LifecycleAware",
     "LifecycleHook",
+    "LifecycleState",
     "ModuleMeta",
     "ResolvedRoute",
     "RouteInfo",
+    "RouterMeta",
     "ServiceEntry",
     "ServiceMeta",
     "get_module_meta",
+    "get_router_meta",
     "get_service_meta",
     "is_cf_module",
+    "is_cf_router",
     "is_cf_service",
     "unwrap_optional",
 ]
