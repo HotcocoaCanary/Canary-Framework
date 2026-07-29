@@ -1,102 +1,45 @@
-"""Integration tests for lifecycle."""
+"""Integration tests for the lifecycle template."""
 
 import pytest
 
-from canary_framework import (
-    before_shutdown,
-    before_startup,
-    module,
-    service,
-)
-from canary_framework.core.module import ModuleBase
+from canary_framework.common.errors import LifecycleHookError
+from canary_framework.common.types import LifecycleState
 from canary_framework.core.service import ServiceBase
 
 
 @pytest.mark.integration
-class TestLifecycle:
-    """Integration tests for lifecycle."""
+async def test_parent_service_private_lifecycle_order() -> None:
+    events: list[str] = []
 
-    @pytest.mark.asyncio
-    async def test_lifecycle_hooks_execution_order(self) -> None:
-        """Test that lifecycle hooks execute in order."""
+    class Parent(ServiceBase):
+        async def _init(self) -> None:
+            events.append("parent-init")
 
-        events: list[str] = []
+        async def _startup(self) -> None:
+            events.append("parent-startup")
 
-        @service()
-        class MyService(ServiceBase):
-            def on_init(self) -> None:
-                events.append("service-init")
+        async def _shutdown(self) -> None:
+            events.append("parent-shutdown")
 
-            @before_startup
-            def on_startup(self) -> None:
-                events.append("service-startup")
+    parent = Parent()
+    await parent.init()
+    await parent.startup()
+    await parent.shutdown()
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
-                events.append("service-shutdown")
+    assert events == ["parent-init", "parent-startup", "parent-shutdown"]
+    assert parent.lifecycle_state is LifecycleState.STOPPED
 
-        @module(services=[MyService])
-        class MyModule(ModuleBase):
-            def on_init(self) -> None:
-                events.append("module-init")
 
-            @before_startup
-            def on_startup(self) -> None:
-                events.append("module-startup")
+@pytest.mark.integration
+async def test_parent_extension_failure_is_wrapped() -> None:
+    class Parent(ServiceBase):
+        async def on_startup(self) -> None:
+            raise ValueError("startup failed")
 
-            @before_shutdown
-            def on_shutdown(self) -> None:
-                events.append("module-shutdown")
+    parent = Parent()
+    await parent.init()
 
-        app = MyModule()
-        app.init()
-        await app.startup()
-        await app.shutdown()
+    with pytest.raises(LifecycleHookError, match=r"Parent\.on_startup failed: startup failed"):
+        await parent.startup()
 
-        # Check that all hooks were called
-        assert len(events) == 4
-        assert "service-startup" in events
-        assert "service-shutdown" in events
-        assert "module-startup" in events
-        assert "module-shutdown" in events
-
-    @pytest.mark.asyncio
-    async def test_lifecycle_with_multiple_services(self) -> None:
-        """Test lifecycle with multiple services."""
-
-        startup_order: list[str] = []
-        shutdown_order: list[str] = []
-
-        @service()
-        class Service1(ServiceBase):
-            @before_startup
-            def on_startup(self) -> None:
-                startup_order.append("Service1")
-
-            @before_shutdown
-            def on_shutdown(self) -> None:
-                shutdown_order.append("Service1")
-
-        @service()
-        class Service2(ServiceBase):
-            @before_startup
-            def on_startup(self) -> None:
-                startup_order.append("Service2")
-
-            @before_shutdown
-            def on_shutdown(self) -> None:
-                shutdown_order.append("Service2")
-
-        @module(services=[Service1, Service2])
-        class MyModule(ModuleBase):
-            pass
-
-        app = MyModule()
-        app.init()
-        await app.startup()
-        await app.shutdown()
-
-        assert len(startup_order) == 2
-        assert len(shutdown_order) == 2
-        # Shutdown order should be reverse of startup order
-        assert shutdown_order == startup_order[::-1]
+    assert parent.lifecycle_state is LifecycleState.FAILED
