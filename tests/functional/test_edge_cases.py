@@ -1,11 +1,15 @@
 """Functional route-declaration edge cases for the redesigned router API."""
 
+from typing import Any, cast
+
 import pytest
 from pydantic import BaseModel
+from starlette.testclient import TestClient
 
 from canary_framework import get, module, post, router, service
-from canary_framework.common import RouteContext
+from canary_framework.common import CanaryConfig, RouteContext
 from canary_framework.core import ModuleBase, RouterBase, ServiceBase
+from canary_framework.engine.assembly import compile_assembly
 from canary_framework.engine.params import analyze_route
 from canary_framework.engine.validation import validate_routes
 
@@ -88,7 +92,7 @@ class TestEdgeCases:
         app = MyRouter()
         await app.init()
         routes = app._collect_routes(RouteContext())
-        validated = validate_routes(routes, config=app.config)  # type: ignore[arg-type]
+        validated = validate_routes(routes, config=cast(CanaryConfig, app.config))
         assert [(item.route.method, item.analysis.starlette_path) for item in validated] == [
             ("GET", "/item"),
             ("POST", "/item"),
@@ -149,9 +153,9 @@ class TestEdgeCases:
         routes = app._collect_routes(RouteContext())
         assert routes[0].full_path == "/data"
         assert (
-            routes[0].handler.__self__
-            is app.direct_children[0].direct_children[0].direct_children[0]
-        )  # type: ignore[attr-defined]
+            cast(Any, routes[0].handler).__self__
+            is cast(Any, app).direct_children[0].direct_children[0].direct_children[0]
+        )
 
     @pytest.mark.asyncio
     async def test_return_model_metadata_is_preserved(self) -> None:
@@ -173,3 +177,62 @@ class TestEdgeCases:
         routes = app._collect_routes(RouteContext())
         assert [route.full_path for route in routes] == ["/str", "/model"]
         assert routes[1].spec.response_model is Item
+
+    def test_compiled_root_path_and_same_path_methods(self) -> None:
+        """Root paths and method-specific siblings survive ASGI compilation."""
+
+        @router()
+        class EdgeRouter(RouterBase):
+            @get("/")
+            async def root(self) -> dict[str, str]:
+                return {"home": "yes"}
+
+            @get("/item")
+            async def get_item(self) -> dict[str, str]:
+                return {"method": "get"}
+
+            @post("/item")
+            async def post_item(self) -> dict[str, str]:
+                return {"method": "post"}
+
+        routes = EdgeRouter()._collect_routes(RouteContext())
+        app = compile_assembly(routes, config=CanaryConfig()).asgi_app
+
+        with TestClient(app) as client:
+            assert client.get("/").json() == {"home": "yes"}
+            assert client.get("/item").json() == {"method": "get"}
+            assert client.post("/item").json() == {"method": "post"}
+
+    def test_compiled_return_types_convert_nested_models(self) -> None:
+        """Text, models, and nested list/dict values preserve response behavior."""
+
+        class Item(BaseModel):
+            name: str
+
+        @router()
+        class ResultRouter(RouterBase):
+            @get("/text")
+            async def text(self) -> str:
+                return "plain text"
+
+            @get("/model", response_model=Item)
+            async def model(self) -> Item:
+                return Item(name="model")
+
+            @get("/nested")
+            async def nested(self) -> dict[str, object]:
+                return {
+                    "items": [Item(name="list")],
+                    "mapping": {"item": Item(name="dict")},
+                }
+
+        routes = ResultRouter()._collect_routes(RouteContext())
+        compiled = compile_assembly(routes, config=CanaryConfig()).asgi_app
+
+        with TestClient(compiled) as client:
+            assert client.get("/text").text == "plain text"
+            assert client.get("/model").json() == {"name": "model"}
+            assert client.get("/nested").json() == {
+                "items": [{"name": "list"}],
+                "mapping": {"item": {"name": "dict"}},
+            }
