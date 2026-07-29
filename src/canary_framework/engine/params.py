@@ -1,53 +1,108 @@
-"""Route handler parameter resolution utilities.
-
-Provides shared parameter inspection used by both the router and OpenAPI generator.
-"""
+"""Immutable route parameter analysis shared by route compilers."""
 
 from __future__ import annotations
 
 import inspect
+import re
 import warnings
-from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, get_type_hints
 
 from pydantic.fields import FieldInfo
 
+from canary_framework.common.routing import ResolvedRoute
 
-def resolve_params(route_fn: Any) -> dict[str, tuple[Any, bool, FieldInfo | None]]:
-    """解析路由处理器函数的参数注解、默认值和 Field 信息。
+_PARAM_PATTERN = re.compile(r"\{(\w+)\}")
 
-    返回 {param_name: (annotation, has_default, field_info)}，
-    "self" 参数被跳过。
 
-    Resolve parameter annotations, defaults, and Field info from a
-    route handler function.
+@dataclass(frozen=True, slots=True)
+class ParameterSpec:
+    """Immutable metadata needed to bind and document one handler parameter."""
 
-    Returns {param_name: (annotation, has_default, field_info)}.
-    The "self" parameter is skipped.
-    """
-    sig = inspect.signature(route_fn)
+    annotation: Any
+    has_default: bool
+    default: object
+    field_info: FieldInfo | None
+
+
+@dataclass(frozen=True, slots=True)
+class RouteAnalysis:
+    """One canonical parse of a resolved route and its handler signature."""
+
+    starlette_path: str
+    path_params: tuple[str, ...]
+    query_params: tuple[str, ...]
+    parameters: Mapping[str, ParameterSpec]
+    request_model: type | None
+    body_param: str | None
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize separators while preserving the root path."""
+    normalized = "/" + "/".join(part for part in path.split("/") if part)
+    return "/" if normalized == "/" else normalized
+
+
+def _handler_parameters(handler: Any) -> dict[str, ParameterSpec]:
+    signature = inspect.signature(handler)
     try:
-        type_hints = inspect.get_annotations(route_fn)
-    except Exception as e:
+        hints = get_type_hints(handler, include_extras=True)
+    except Exception as exc:
         warnings.warn(
-            f"Failed to resolve annotations for '{getattr(route_fn, '__name__', route_fn)}': {e}",
-            stacklevel=2,
+            f"Failed to resolve annotations for '{getattr(handler, '__name__', handler)}': {exc}",
+            stacklevel=3,
         )
-        type_hints = {}
+        hints = {}
 
-    result: dict[str, tuple[Any, bool, FieldInfo | None]] = {}
-    for name, param in sig.parameters.items():
+    parameters: dict[str, ParameterSpec] = {}
+    for name, parameter in signature.parameters.items():
         if name == "self":
             continue
-        annotation = type_hints.get(
+        annotation = hints.get(
             name,
-            param.annotation if param.annotation is not inspect.Parameter.empty else str,
+            parameter.annotation if parameter.annotation is not inspect.Parameter.empty else str,
         )
-        has_default = param.default is not inspect.Parameter.empty
-        field_info: FieldInfo | None = None
-        if has_default and isinstance(param.default, FieldInfo):
-            field_info = param.default
-        result[name] = (annotation, has_default, field_info)
-    return result
+        default = parameter.default
+        parameters[name] = ParameterSpec(
+            annotation=annotation,
+            has_default=default is not inspect.Parameter.empty,
+            default=None if default is inspect.Parameter.empty else default,
+            field_info=default if isinstance(default, FieldInfo) else None,
+        )
+    return parameters
 
 
-__all__ = ["resolve_params"]
+def analyze_route(route: ResolvedRoute) -> RouteAnalysis:
+    """Analyze path templates and handler parameters exactly once."""
+    local_path, separator, query_template = route.full_path.partition("?")
+    path_params = tuple(_PARAM_PATTERN.findall(local_path))
+    query_params = tuple(_PARAM_PATTERN.findall(query_template)) if separator else ()
+    parameters = _handler_parameters(route.handler)
+    templated = set(path_params) | set(query_params)
+    body_candidates = tuple(name for name in parameters if name not in templated)
+    body_param = (
+        body_candidates[0]
+        if route.spec.request_model is not None and len(body_candidates) == 1
+        else None
+    )
+    return RouteAnalysis(
+        starlette_path=_normalize_path(local_path),
+        path_params=path_params,
+        query_params=query_params,
+        parameters=MappingProxyType(parameters),
+        request_model=route.spec.request_model,
+        body_param=body_param,
+    )
+
+
+def resolve_params(route_fn: Any) -> dict[str, tuple[Any, bool, FieldInfo | None]]:
+    """Backward-compatible tuple view of handler parameter analysis."""
+    return {
+        name: (spec.annotation, spec.has_default, spec.field_info)
+        for name, spec in _handler_parameters(route_fn).items()
+    }
+
+
+__all__ = ["ParameterSpec", "RouteAnalysis", "analyze_route", "resolve_params"]
