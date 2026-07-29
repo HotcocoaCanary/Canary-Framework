@@ -14,7 +14,7 @@ from canary_framework.engine.openapi import OpenAPICompiler
 from canary_framework.engine.validation import validate_routes
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Assembly:
     """Immutable runtime bundle for one compiled app."""
 

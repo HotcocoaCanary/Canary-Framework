@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import FrozenInstanceError
 from typing import cast
 
 import pytest
@@ -59,6 +60,8 @@ def test_compiled_assembly_has_no_docs_when_no_routes_exist() -> None:
 
     assert assembly.routes == ()
     assert assembly.openapi == {}
+    with pytest.raises(FrozenInstanceError):
+        assembly.routes = ()
 
     with TestClient(assembly.asgi_app) as client:
         assert client.get("/openapi.json").status_code == 404
