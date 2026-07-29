@@ -1,11 +1,4 @@
-"""Canary Framework — lightweight decorator-driven Python async service framework.
-
-Core exports:
-    - Decorators: :func:`service`, :func:`module`,
-      :class:`Router`
-    - Lifecycle:  :class:`LifecycleHook`
-    - Exceptions: :class:`CanaryFrameworkError` and subclasses
-"""
+"""Canary Framework — lightweight decorator-driven Python async service framework."""
 
 from __future__ import annotations
 
@@ -21,12 +14,17 @@ from canary_framework.common import (
     LifecycleHookError,
     ServiceNotFoundError,
 )
-from canary_framework.core.router import Router
 from canary_framework.decorators import (
     before_shutdown,
     before_startup,
     config,
+    delete,
+    get,
     module,
+    patch,
+    post,
+    put,
+    router,
     service,
 )
 
@@ -38,12 +36,17 @@ __all__ = [
     "DependencyInjectionError",
     "LifecycleHook",
     "LifecycleHookError",
-    "Router",
     "ServiceNotFoundError",
     "__version__",
     "before_shutdown",
     "before_startup",
     "config",
+    "delete",
+    "get",
     "module",
+    "patch",
+    "post",
+    "put",
+    "router",
     "service",
 ]

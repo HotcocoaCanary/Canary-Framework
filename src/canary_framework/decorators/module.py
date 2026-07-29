@@ -1,15 +1,8 @@
-"""@module装饰器实现。
-
-将类标记为模块，设置元数据并修改基类继承链。
-
-@module decorator implementation.
-
-Marks classes as modules, sets metadata, and modifies base class chain.
-"""
+"""Explicit module declaration decorator."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from canary_framework.common import (
     CF_NAME_ATTR,
@@ -19,73 +12,48 @@ from canary_framework.common import (
     ModuleMeta,
     is_cf_service,
 )
-from canary_framework.core import ModuleBase
+from canary_framework.core.module import ModuleBase
+from canary_framework.decorators.router import _HANDLER_ROUTE_SPECS_ATTR
 
 
 def module(
     *,
-    services: list[type] | None = None,
+    children: Sequence[type] = (),
+    prefix: str = "",
+    tags: Sequence[str] = (),
+    security: Sequence[str] = (),
     config: type[CanaryConfig] | None = None,
-) -> Callable[[type], type[ModuleBase]]:
-    """声明一个类为模块。
+) -> Callable[[type[ModuleBase]], type[ModuleBase]]:
+    """Declare a module node with immutable child and context metadata."""
+    child_types = tuple(children)
+    for child in child_types:
+        if isinstance(child, type) and issubclass(child, CanaryConfig):
+            raise TypeError(f"Config {child.__name__} cannot be a Module child.")
+        if not is_cf_service(child):
+            raise TypeError(f"Module child {child!r} must be decorated by Canary Framework.")
+    if config is not None and not issubclass(config, CanaryConfig):
+        raise TypeError("module config must inherit from CanaryConfig.")
 
-    添加模块标记和元数据，修改类的基类使其继承自ModuleBase。
-    模块名称自动生成为``类名 + Module``。
-    依赖通过类的类型注解自动检测。
-
-    Args:
-        services: 模块直接包含的子服务类列表。
-        config: 模块的配置类（如有）。
-
-    Raises:
-        TypeError: 如果services中的任何服务未被装饰。
-
-    Returns:
-        装饰后的类。
-
-    Declare a class as a Canary Framework module.
-
-    Adds module marker and metadata, modifies the class to inherit from ModuleBase.
-    The module name is auto-generated as ``ClassName + Module``.
-    Dependencies are auto-detected from class type annotations.
-
-    Args:
-        services: Direct child services.
-        config: Optional config class for the module.
-
-    Raises:
-        TypeError: If any service in ``services`` is not decorated.
-
-    Returns:
-        The decorated class.
-    """
-    _services = list(services or ())
-
-    def decorator(cls: type) -> type[ModuleBase]:
+    def decorate(cls: type[ModuleBase]) -> type[ModuleBase]:
         if not issubclass(cls, ModuleBase):
-            raise TypeError(
-                f"@module '{cls.__name__}': must inherit from ModuleBase. "
-                f"Did you forget 'class {cls.__name__}(ModuleBase):'?"
-            )
-        name = cls.__name__
-        if config is not None and not issubclass(config, CanaryConfig):
-            raise TypeError(
-                f"@module '{name}': config must inherit from CanaryConfig. Got '{config.__name__}'."
-            )
-        for svc_cls in _services:
-            if not is_cf_service(svc_cls):
-                raise TypeError(
-                    f"@module '{name}': '{svc_cls.__name__}' "
-                    f"is not decorated with @service or @module."
-                )
-
-        meta = ModuleMeta(name=name, services=_services, config_cls=config)
+            raise TypeError(f"@module '{cls.__name__}' must inherit from ModuleBase.")
+        for value in cls.__dict__.values():
+            if getattr(value, _HANDLER_ROUTE_SPECS_ATTR, ()):
+                raise TypeError(f"Module {cls.__name__} may not declare business routes.")
+        meta = ModuleMeta(
+            name=cls.__name__,
+            children=child_types,
+            prefix=prefix,
+            tags=tuple(tags),
+            security=tuple(security),
+            config_cls=config,
+        )
         setattr(cls, CF_SERVICE_MARKER, True)
         setattr(cls, CF_SERVICE_META, meta)
-        setattr(cls, CF_NAME_ATTR, name)
+        setattr(cls, CF_NAME_ATTR, cls.__name__)
         return cls
 
-    return decorator
+    return decorate
 
 
 __all__ = ["module"]

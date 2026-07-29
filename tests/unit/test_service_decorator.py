@@ -1,41 +1,41 @@
-"""Unit tests for decorators.service module."""
+"""Contract tests for the explicit service declaration decorator."""
+
+import inspect
 
 import pytest
 
 from canary_framework.common import get_service_meta, is_cf_service
-from canary_framework.core.service import ServiceBase
-from canary_framework.decorators.service import service
+from canary_framework.core import ServiceBase
+from canary_framework.decorators import service
 
 
 @pytest.mark.unit
-class TestServiceDecorator:
-    """Tests for @service decorator."""
+def test_service_marks_explicit_service_subclass() -> None:
+    @service()
+    class ItemService(ServiceBase):
+        pass
 
-    def test_service_decorator_marks_class(self) -> None:
-        """Test @service marks class as service."""
+    assert issubclass(ItemService, ServiceBase)
+    assert is_cf_service(ItemService)
+    meta = get_service_meta(ItemService)
+    assert meta is not None
+    assert meta.name == "ItemService"
+    assert ItemService.__cf_name__ == "ItemService"  # type: ignore[attr-defined]
 
-        @service()
-        class MyService(ServiceBase):
+
+@pytest.mark.unit
+def test_service_requires_service_base() -> None:
+    with pytest.raises(TypeError, match="must inherit from ServiceBase"):
+
+        @service()  # type: ignore[arg-type]
+        class NotAService:
             pass
 
-        assert is_cf_service(MyService)
 
-    def test_service_decorator_inherits_service_base(self) -> None:
-        """Test @service makes class inherit from ServiceBase."""
-
-        @service()
-        class MyService(ServiceBase):
-            pass
-
-        assert issubclass(MyService, ServiceBase)
-
-    def test_service_decorator_sets_meta(self) -> None:
-        """Test @service sets metadata."""
-
-        @service()
-        class MyService(ServiceBase):
-            pass
-
-        meta = get_service_meta(MyService)
-        assert meta is not None
-        assert meta.name == "MyService"
+@pytest.mark.unit
+def test_service_has_no_legacy_keywords() -> None:
+    parameters = inspect.signature(service).parameters
+    assert tuple(parameters) == ()
+    assert "config" not in parameters
+    with pytest.raises(TypeError):
+        service(config=object)  # type: ignore[call-arg]
