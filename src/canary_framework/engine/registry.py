@@ -14,6 +14,7 @@ Provides service registration, lookup, and iteration with parent-child inheritan
 from __future__ import annotations
 
 from canary_framework.common import (
+    DependencyInjectionError,
     ServiceEntry,
     ServiceMeta,
     ServiceNotFoundError,
@@ -47,31 +48,26 @@ class Registry:
         self._by_name: dict[str, ServiceEntry] = {}
         self._by_class: dict[type, ServiceEntry] = {}
 
-    def register(self, cls: type, *, meta: ServiceMeta) -> None:
-        """注册一个服务（幂等操作）。
+    def register(
+        self,
+        cls: type,
+        name: str | None = None,
+        *,
+        meta: ServiceMeta | None = None,
+    ) -> None:
+        """Register a class by name or metadata, preserving insertion order.
 
-        如果类已注册，则跳过。
-
-        Args:
-            cls: 服务类。
-            meta: 服务元数据。
-
-        Raises:
-            ValueError: 如果同名服务已注册。
-
-        Register a ``@service`` or ``@module`` class (idempotent).
-
-        Args:
-            cls: The service class.
-            meta: Service metadata.
-
-        Raises:
-            ValueError: If a service with the same name is already registered.
+        ``name`` is the compact local-registry API; ``meta`` remains accepted
+        for transitional callers using the older metadata-based API.
         """
         if cls in self._by_class:
             return
-
-        name: str = meta.name
+        if name is None:
+            if meta is None:
+                raise TypeError("register() requires name or meta")
+            name = meta.name
+        elif meta is not None and meta.name != name:
+            raise ValueError("name and meta.name must match")
         if name in self._by_name:
             raise ValueError(f"Service/Module '{name}' is already registered.")
 
@@ -147,6 +143,15 @@ class Registry:
                 current = current.parent
         raise ServiceNotFoundError(f"'{cls.__name__}' is not registered.") from None
 
+    def get(self, cls: type) -> object:
+        """Return an instantiated service from this or an ancestor scope."""
+        entry = self.get_by_class(cls)
+        if entry.instance is None:
+            raise DependencyInjectionError(
+                f"Service '{cls.__name__}' has no instance in the registry."
+            )
+        return entry.instance
+
     def has(self, cls: type) -> bool:
         """检查服务是否已注册。
 
@@ -170,6 +175,20 @@ class Registry:
                 return True
             current = current.parent
         return False
+
+    def has_local(self, cls: type) -> bool:
+        """Return whether a class is registered in this scope itself."""
+        return cls in self._by_class
+
+    def local_entries(self) -> tuple[ServiceEntry, ...]:
+        """Return this scope's entries in registration order."""
+        return tuple(self._by_class.values())
+
+    def local_instances(self) -> tuple[object, ...]:
+        """Return instantiated objects owned by this scope."""
+        return tuple(
+            entry.instance for entry in self._by_class.values() if entry.instance is not None
+        )
 
     def all_entries(self) -> list[ServiceEntry]:
         """获取所有服务条目。

@@ -1,112 +1,178 @@
-"""Dependency resolution and topological sorting.
+"""Strict dependency resolution and graph ordering.
 
-Provides resolve_deps for extracting type-annotation-based dependencies,
-and topological_sort for producing a valid startup order via Kahn's algorithm.
+依赖声明从类级别注解解析为带属性名称的不可变规格。
+Dependency declarations are resolved from class annotations into immutable specs.
 """
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict, deque
-from collections.abc import Callable
-from typing import get_args, get_origin
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, get_type_hints
 
 from canary_framework.common import (
-    CF_SERVICE_MARKER,
     CircularDependencyError,
-    ServiceNotFoundError,
+    DependencyDirectionError,
+    DependencyInjectionError,
+    is_cf_module,
+    is_cf_router,
+    is_cf_service,
     unwrap_optional,
 )
-from canary_framework.common.logging import get_logger
-from canary_framework.engine.registry import Registry
-
-_log = get_logger("di")
 
 
-def resolve_deps(cls: type) -> dict[str, type]:
-    """Extract service dependencies from type annotations.
+@dataclass(frozen=True, slots=True)
+class DependencySpec:
+    """One class-level dependency declaration."""
 
-    Scans type hints of __init__ for attributes whose annotation
-    is a class carrying CF_SERVICE_MARKER. Unwraps Optional[T] and
-    T | None to discover the underlying service type.
+    attribute: str
+    target: type
 
-    Args:
-        cls: The service class to inspect.
 
-    Returns:
-        Dict mapping attribute names to dependency classes.
-    """
-    from typing import get_type_hints
+def _declaration_order(cls: type) -> tuple[tuple[str, Any], ...]:
+    """Collect class annotations base-first while preserving declaration order."""
+    ordered: dict[str, Any] = {}
+    for base in reversed(cls.__mro__):
+        for name, annotation in vars(base).get("__annotations__", {}).items():
+            ordered[name] = annotation
+    return tuple(ordered.items())
 
+
+def _resolution_error(cls: type, annotations: tuple[tuple[str, Any], ...], exc: Exception) -> None:
+    """Raise a contextual error for a failed type-hint evaluation."""
+    missing_name: str | None = None
+    match = re.search(r"name ['\"]([^'\"]+)['\"] is not defined", str(exc))
+    if match:
+        missing_name = match.group(1)
+
+    attribute = "<unknown>"
+    annotation: Any = missing_name or str(exc)
+    for name, raw in annotations:
+        if missing_name is None or missing_name in repr(raw):
+            attribute = name
+            annotation = raw
+            break
+    raise DependencyInjectionError(
+        f"Failed to resolve dependency annotation for {cls.__name__}.{attribute}: {annotation}"
+    ) from exc
+
+
+def validate_dependency_direction(owner: type, dependency: DependencySpec) -> None:
+    """Reject edges that point upward in the service/router/module layers."""
+    target = dependency.target
+    if is_cf_module(owner):
+        return
+    if is_cf_router(owner):
+        if is_cf_router(target) or is_cf_module(target):
+            raise DependencyDirectionError(
+                f"Router {owner.__name__}.{dependency.attribute} may depend only on Service; "
+                f"got {target.__name__}."
+            )
+        return
+    if is_cf_router(target):
+        raise DependencyDirectionError(
+            f"Service {owner.__name__}.{dependency.attribute} may not depend on Router "
+            f"{target.__name__}."
+        )
+
+
+def resolve_deps(cls: type) -> tuple[DependencySpec, ...]:
+    """Resolve marked class annotations in base-to-derived declaration order."""
+    declarations = _declaration_order(cls)
     try:
         hints = get_type_hints(cls)
-    except Exception as e:
-        import warnings
+    except Exception as exc:
+        _resolution_error(cls, declarations, exc)
 
-        warnings.warn(f"Failed to resolve type hints for '{cls.__name__}': {e}", stacklevel=2)
-        return {}
-
-    resolved: dict[str, type] = {}
-
-    for name, tp in hints.items():
-        tp, _ = unwrap_optional(tp)
-        origin = get_origin(tp)
-        if origin is Callable:
-            args = get_args(tp)
-            inner = [a for a in args if a is not type(None)]
-            if len(inner) == 1:
-                tp = inner[0]
-        if isinstance(tp, type) and hasattr(tp, CF_SERVICE_MARKER):
-            resolved[name] = tp
-    return resolved
+    resolved: list[DependencySpec] = []
+    for attribute, _ in declarations:
+        if attribute not in hints:
+            continue
+        target, _nullable = unwrap_optional(hints[attribute])
+        if isinstance(target, type) and is_cf_service(target):
+            dependency = DependencySpec(attribute=attribute, target=target)
+            validate_dependency_direction(cls, dependency)
+            resolved.append(dependency)
+    return tuple(resolved)
 
 
-def topological_sort(registry: Registry) -> list[str]:
-    """Topologically sort services in the registry by dependencies.
+def _cycle_path(
+    graph: Mapping[type, tuple[DependencySpec, ...]], residual: set[type], start: type
+) -> str:
+    """Find and format one actual residual cycle with its edge attributes."""
+    visiting: dict[type, int] = {}
+    nodes: list[type] = []
+    edges: list[DependencySpec] = []
 
-    Builds a dependency graph from type annotations via resolve_deps(),
-    then produces a valid startup order using Kahn's algorithm.
-
-    Args:
-        registry: The service registry.
-
-    Returns:
-        List of service names in dependency order.
-
-    Raises:
-        CircularDependencyError: If a circular dependency is detected.
-    """
-    names = registry.names()
-    in_degree: dict[str, int] = dict.fromkeys(names, 0)
-    adjacency: dict[str, list[str]] = defaultdict(list)
-
-    for entry in registry.all_entries():
-        for dep_type in resolve_deps(entry.cls).values():
-            try:
-                dep_entry = registry.get_by_class(dep_type)
-            except ServiceNotFoundError:
+    def walk(owner: type) -> str | None:
+        visiting[owner] = len(nodes)
+        nodes.append(owner)
+        for dependency in graph.get(owner, ()):
+            target = dependency.target
+            if target not in residual:
                 continue
-            if dep_entry.name in names:
-                adjacency[dep_entry.name].append(entry.name)
-                in_degree[entry.name] += 1
+            if target in visiting:
+                begin = visiting[target]
+                cycle_edges = [*edges[begin:], dependency]
+                text = " -> ".join(
+                    f"{node.__name__}.{edge.attribute}"
+                    for node, edge in zip(nodes[begin:], cycle_edges, strict=True)
+                )
+                return f"{text} -> {target.__name__}"
+            edges.append(dependency)
+            found = walk(target)
+            if found is not None:
+                return found
+            edges.pop()
+        nodes.pop()
+        visiting.pop(owner)
+        return None
 
-    queue = deque(n for n, d in in_degree.items() if d == 0)
-    result: list[str] = []
+    found = walk(start)
+    if found is not None:
+        return found
+    return " -> ".join(node.__name__ for node in residual)
 
+
+def topological_sort(
+    graph: Mapping[type, tuple[DependencySpec, ...]],
+) -> tuple[type, ...]:
+    """Return stable dependency-first ordering or report an attributed cycle."""
+    declaration_order = tuple(graph)
+    in_degree: dict[type, int] = dict.fromkeys(declaration_order, 0)
+    adjacency: dict[type, list[type]] = defaultdict(list)
+
+    for owner in declaration_order:
+        for dependency in graph[owner]:
+            target = dependency.target
+            if target not in in_degree:
+                continue
+            adjacency[target].append(owner)
+            in_degree[owner] += 1
+
+    queue = deque(node for node in declaration_order if in_degree[node] == 0)
+    result: list[type] = []
     while queue:
-        cur = queue.popleft()
-        result.append(cur)
-        for neighbour in adjacency[cur]:
-            in_degree[neighbour] -= 1
-            if in_degree[neighbour] == 0:
-                queue.append(neighbour)
+        current = queue.popleft()
+        result.append(current)
+        for dependent in adjacency[current]:
+            in_degree[dependent] -= 1
+            if in_degree[dependent] == 0:
+                queue.append(dependent)
 
-    if len(result) != len(names):
-        cyclic = [n for n in names if n not in result]
-        _log.error("Circular dependency detected: %s", cyclic)
-        raise CircularDependencyError(f"Circular dependency detected among: {sorted(cyclic)}")
+    if len(result) != len(declaration_order):
+        residual = set(declaration_order) - set(result)
+        start = next(node for node in declaration_order if node in residual)
+        path = _cycle_path(graph, residual, start)
+        raise CircularDependencyError(f"Circular dependency detected: {path}")
+    return tuple(result)
 
-    _log.debug("Topological sort result: %s", " → ".join(result))
-    return result
 
-
-__all__ = ["resolve_deps", "topological_sort"]
+__all__ = [
+    "DependencySpec",
+    "resolve_deps",
+    "topological_sort",
+    "validate_dependency_direction",
+]

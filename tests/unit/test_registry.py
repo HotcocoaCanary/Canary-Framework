@@ -1,179 +1,75 @@
-"""Unit tests for engine.registry module."""
+"""Unit tests for local and inherited service registry behavior."""
 
 import pytest
 
-from canary_framework.common.errors import ServiceNotFoundError
+from canary_framework.common.errors import DependencyInjectionError, ServiceNotFoundError
 from canary_framework.common.types import ServiceMeta
 from canary_framework.engine.registry import Registry
 
 
+class Shared:
+    pass
+
+
 @pytest.mark.unit
-class TestRegistry:
-    """Tests for Registry class."""
+def test_registry_distinguishes_local_from_inherited() -> None:
+    parent = Registry()
+    parent.register(Shared, "Shared")
+    child = Registry(parent=parent)
 
-    def test_register_and_get_by_name(self) -> None:
-        """Test registering a service and getting it by name."""
-        reg = Registry()
+    assert child.has(Shared)
+    assert not child.has_local(Shared)
+    assert tuple(entry.cls for entry in child.local_entries()) == ()
 
-        class TestService:
-            pass
 
-        meta = ServiceMeta(name="test_service")
+@pytest.mark.unit
+def test_local_entries_and_instances_preserve_registration_order() -> None:
+    class First:
+        pass
 
-        reg.register(TestService, meta=meta)
+    class Second:
+        pass
 
-        entry = reg.get_by_name("test_service")
-        assert entry.cls is TestService
-        assert entry.name == "test_service"
+    registry = Registry()
+    registry.register(First, meta=ServiceMeta(name="first"))
+    registry.register(Second, "second")
+    first = First()
+    registry.get_by_class(First).instance = first
 
-    def test_register_and_get_by_class(self) -> None:
-        """Test registering a service and getting it by class."""
-        reg = Registry()
+    assert tuple(entry.cls for entry in registry.local_entries()) == (First, Second)
+    assert registry.local_instances() == (first,)
 
-        class TestService:
-            pass
 
-        meta = ServiceMeta(name="test_service")
+@pytest.mark.unit
+def test_get_returns_inherited_instance() -> None:
+    parent = Registry()
+    parent.register(Shared, "Shared")
+    instance = Shared()
+    parent.get_by_class(Shared).instance = instance
 
-        reg.register(TestService, meta=meta)
+    assert Registry(parent=parent).get(Shared) is instance
 
-        entry = reg.get_by_class(TestService)
-        assert entry.cls is TestService
-        assert entry.name == "test_service"
 
-    def test_get_by_name_not_found(self) -> None:
-        """Test getting non-existent service by name raises error."""
-        reg = Registry()
+@pytest.mark.unit
+def test_get_rejects_uninstantiated_entry() -> None:
+    registry = Registry()
+    registry.register(Shared, "Shared")
 
-        with pytest.raises(ServiceNotFoundError):
-            reg.get_by_name("nonexistent")
+    with pytest.raises(DependencyInjectionError, match=r"Shared.*instance"):
+        registry.get(Shared)
 
-    def test_get_by_class_not_found(self) -> None:
-        """Test getting non-existent service by class raises error."""
-        reg = Registry()
 
-        class NonExistent:
-            pass
+@pytest.mark.unit
+def test_duplicate_name_and_missing_lookups_raise() -> None:
+    class Other:
+        pass
 
-        with pytest.raises(ServiceNotFoundError):
-            reg.get_by_class(NonExistent)
+    registry = Registry()
+    registry.register(Shared, "same")
 
-    def test_has_service(self) -> None:
-        """Test has method checks if service is registered."""
-        reg = Registry()
-
-        class TestService:
-            pass
-
-        meta = ServiceMeta(name="test_service")
-
-        assert reg.has(TestService) is False
-        reg.register(TestService, meta=meta)
-        assert reg.has(TestService) is True
-
-    def test_duplicate_register_duplicate_name_raises(self) -> None:
-        """Test registering same name twice raises ValueError."""
-        reg = Registry()
-
-        class Service1:
-            pass
-
-        class Service2:
-            pass
-
-        meta1 = ServiceMeta(name="same_name")
-        meta2 = ServiceMeta(name="same_name")
-
-        reg.register(Service1, meta=meta1)
-        with pytest.raises(ValueError):
-            reg.register(Service2, meta=meta2)
-
-    def test_idempotent_register(self) -> None:
-        """Test registering same class twice does nothing."""
-        reg = Registry()
-
-        class TestService:
-            pass
-
-        meta = ServiceMeta(name="test_service")
-
-        reg.register(TestService, meta=meta)
-        reg.register(TestService, meta=meta)  # Should not raise
-        assert len(reg.all_entries()) == 1
-
-    def test_all_entries(self) -> None:
-        """Test all_entries returns all entries."""
-        reg = Registry()
-
-        class A:
-            pass
-
-        class B:
-            pass
-
-        reg.register(A, meta=ServiceMeta(name="a"))
-        reg.register(B, meta=ServiceMeta(name="b"))
-
-        entries = reg.all_entries()
-        assert len(entries) == 2
-
-    def test_names(self) -> None:
-        """Test names returns all names."""
-        reg = Registry()
-
-        class A:
-            pass
-
-        class B:
-            pass
-
-        reg.register(A, meta=ServiceMeta(name="a"))
-        reg.register(B, meta=ServiceMeta(name="b"))
-
-        names = reg.names()
-        assert set(names) == {"a", "b"}
-
-    def test_len(self) -> None:
-        """Test all_entries returns correct count."""
-        reg = Registry()
-
-        class A:
-            pass
-
-        class B:
-            pass
-
-        assert len(reg.all_entries()) == 0
-        reg.register(A, meta=ServiceMeta(name="a"))
-        assert len(reg.all_entries()) == 1
-        reg.register(B, meta=ServiceMeta(name="b"))
-        assert len(reg.all_entries()) == 2
-
-    def test_contains(self) -> None:
-        """Test has works correctly."""
-        reg = Registry()
-
-        class A:
-            pass
-
-        class B:
-            pass
-
-        reg.register(A, meta=ServiceMeta(name="a"))
-
-        assert reg.has(A) is True
-        assert reg.has(B) is False
-
-    def test_parent_registry_lookup(self) -> None:
-        """Test lookup in parent registry."""
-        parent = Registry()
-        child = Registry(parent=parent)
-
-        class ParentService:
-            pass
-
-        parent.register(ParentService, meta=ServiceMeta(name="parent_service"))
-
-        assert child.has(ParentService) is True
-        entry = child.get_by_class(ParentService)
-        assert entry.cls is ParentService
+    with pytest.raises(ValueError, match="same"):
+        registry.register(Other, "same")
+    with pytest.raises(ServiceNotFoundError):
+        registry.get_by_class(Other)
+    with pytest.raises(ServiceNotFoundError):
+        registry.get_by_name("missing")

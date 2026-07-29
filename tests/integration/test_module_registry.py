@@ -1,85 +1,169 @@
-"""Integration tests for module registry."""
+"""Integration tests for nested dependency scopes."""
+
+from collections.abc import Callable
+from typing import cast
 
 import pytest
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
+from canary_framework.common.types import (
+    CF_SERVICE_MARKER,
+    CF_SERVICE_META,
+    ModuleMeta,
+    ServiceMeta,
+    get_module_meta,
+)
 from canary_framework.core.service import ServiceBase
+from canary_framework.engine.container import DependencyEngine
+from canary_framework.engine.registry import Registry
+
+
+def _service(cls: type[ServiceBase]) -> type[ServiceBase]:
+    setattr(cls, CF_SERVICE_MARKER, True)
+    setattr(cls, CF_SERVICE_META, ServiceMeta(name=cls.__name__))
+    return cls
+
+
+def _module(*children: type) -> Callable[[type[ServiceBase]], type[ServiceBase]]:
+    def decorate(cls: type[ServiceBase]) -> type[ServiceBase]:
+        setattr(cls, CF_SERVICE_MARKER, True)
+        setattr(cls, CF_SERVICE_META, ModuleMeta(name=cls.__name__, children=children))
+        return cls
+
+    return decorate
+
+
+class _EngineModule(ServiceBase):
+    engine: DependencyEngine
+
+    async def _init(self) -> None:
+        meta = get_module_meta(type(self))
+        assert meta is not None
+        self.engine = DependencyEngine(
+            children=meta.children,
+            parent_registry=cast(Registry, self._cf_parent_registry),
+            config=self._cf_config,
+        )
+        await self.engine.init()
+
+    async def _startup(self) -> None:
+        await self.engine.startup()
+
+    async def _shutdown(self) -> None:
+        await self.engine.shutdown()
+
+    async def _rollback_phase(self, *, started: bool) -> None:
+        if started:
+            await self.engine.rollback_started()
+        else:
+            await self.engine.rollback_initialized()
 
 
 @pytest.mark.integration
-class TestModuleRegistry:
-    """Integration tests for module registry."""
+async def test_sibling_modules_get_local_instances_of_same_dependency() -> None:
+    @_service
+    class Shared(ServiceBase):
+        pass
 
-    @pytest.mark.asyncio
-    async def test_registry_has_services(self) -> None:
-        """Test that registry contains all services."""
+    @_service
+    class LeftConsumer(ServiceBase):
+        shared: Shared
 
-        @service()
-        class Service1(ServiceBase):
-            pass
+    @_service
+    class RightConsumer(ServiceBase):
+        shared: Shared
 
-        @service()
-        class Service2(ServiceBase):
-            pass
+    @_module(LeftConsumer)
+    class Left(_EngineModule):
+        pass
 
-        @module(services=[Service1, Service2])
-        class MyModule(ModuleBase):
-            pass
+    @_module(RightConsumer)
+    class Right(_EngineModule):
+        pass
 
-        app = MyModule()
-        app.init()
+    engine = DependencyEngine(children=(Left, Right), parent_registry=None, config=None)
+    await engine.init()
 
-        # Check that registry has both services
-        assert app._cf_registry is not None
-        assert app._cf_registry.has(Service1)
-        assert app._cf_registry.has(Service2)
+    left = cast(_EngineModule, engine.registry.get(Left))
+    right = cast(_EngineModule, engine.registry.get(Right))
+    left_shared = left.engine.registry.get(Shared)
+    right_shared = right.engine.registry.get(Shared)
+    assert left_shared is not right_shared
+    assert left.engine.registry.has_local(Shared)
+    assert right.engine.registry.has_local(Shared)
+    assert not engine.registry.has_local(Shared)
 
-    @pytest.mark.asyncio
-    async def test_service_instances_created(self) -> None:
-        """Test that service instances are created."""
 
-        @service()
-        class MyService(ServiceBase):
-            pass
+@pytest.mark.integration
+async def test_parent_promoted_service_is_reused_by_sibling_modules() -> None:
+    @_service
+    class Shared(ServiceBase):
+        pass
 
-        @module(services=[MyService])
-        class MyModule(ModuleBase):
-            pass
+    @_service
+    class LeftConsumer(ServiceBase):
+        shared: Shared
 
-        app = MyModule()
-        app.init()
+    @_service
+    class RightConsumer(ServiceBase):
+        shared: Shared
 
-        # Check that service instance is created
-        entry = app._cf_registry.get_by_class(MyService)  # type: ignore[union-attr]
-        assert entry.instance is not None
-        assert isinstance(entry.instance, MyService)
+    @_module(LeftConsumer)
+    class Left(_EngineModule):
+        pass
 
-    @pytest.mark.asyncio
-    async def test_parent_child_module(self) -> None:
-        """Test parent and child modules."""
+    @_module(RightConsumer)
+    class Right(_EngineModule):
+        pass
 
-        @service()
-        class SharedService(ServiceBase):
-            def get_value(self) -> str:
-                return "shared"
+    engine = DependencyEngine(children=(Left, Shared, Right), parent_registry=None, config=None)
+    await engine.init()
 
-        @service()
-        class ChildService(ServiceBase):
-            shared_service: SharedService
+    shared = engine.registry.get(Shared)
+    left = cast(_EngineModule, engine.registry.get(Left))
+    right = cast(_EngineModule, engine.registry.get(Right))
+    assert left.engine.registry.get(Shared) is shared
+    assert right.engine.registry.get(Shared) is shared
+    assert not left.engine.registry.has_local(Shared)
+    assert not right.engine.registry.has_local(Shared)
 
-        @module(services=[SharedService, ChildService])
-        class ChildModule(ModuleBase):
-            pass
 
-        @module(services=[ChildModule])
-        class ParentModule(ModuleBase):
-            pass
+@pytest.mark.integration
+async def test_promoted_service_starts_before_nested_module_declared_first() -> None:
+    events: list[str] = []
 
-        app = ParentModule()
-        app.init()
+    @_service
+    class Shared(ServiceBase):
+        async def _init(self) -> None:
+            events.append("shared-init")
 
-        # Check that shared service is available
-        assert app.ChildModule is not None  # type: ignore[attr-defined]
-        assert hasattr(app.ChildModule.ChildService, "shared_service")  # type: ignore[attr-defined]
-        assert app.ChildModule.ChildService.shared_service.get_value() == "shared"  # type: ignore[attr-defined]
+        async def _startup(self) -> None:
+            events.append("shared-startup")
+
+    @_service
+    class Middle(ServiceBase):
+        shared: Shared
+
+    @_service
+    class Consumer(ServiceBase):
+        middle: Middle
+
+        async def _init(self) -> None:
+            events.append("consumer-init")
+
+        async def _startup(self) -> None:
+            events.append("consumer-startup")
+
+    @_module(Consumer)
+    class Nested(_EngineModule):
+        pass
+
+    engine = DependencyEngine(children=(Nested, Shared), parent_registry=None, config=None)
+    await engine.init()
+    await engine.startup()
+
+    assert events == [
+        "shared-init",
+        "consumer-init",
+        "shared-startup",
+        "consumer-startup",
+    ]
