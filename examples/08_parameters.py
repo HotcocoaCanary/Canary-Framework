@@ -8,44 +8,50 @@ invalid/missing parameter → 422 responses.
 ``false/False/0/no/off`` → False（因此 ``?enabled=1`` 为 True）。
 """
 
+from __future__ import annotations
+
+import asyncio
+
 import uvicorn
+from pydantic import Field
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import get, module, router
+from canary_framework.core import ModuleBase, RouterBase
 
 
-@service()
-class CalcApi(ServiceBase):
-    router = Router(prefix="/calc")
-
+@router(prefix="/calc")
+class CalcRouter(RouterBase):
     # Path parameters
-    @router.get("/square/{num}")
-    async def square(self, num: int) -> dict:
+    @get("/square/{num}")
+    async def square(self, num: int) -> dict[str, int]:
         return {"result": num * num}
 
-    @router.get("/divide/{a}/{b}")
-    async def divide(self, a: float, b: float) -> dict:
+    @get("/divide/{a}/{b}")
+    async def divide(self, a: float, b: float) -> dict[str, float]:
         return {"result": a / b}
 
     # Query parameters — declared in the route path with ?key={key}
-    @router.get("/search?q={query}&page={page}&limit={limit}")
-    async def search(self, query: str = "", page: int = 1, limit: int = 10) -> dict:
+    @get("/search?q={query}&page={page}&limit={limit}")
+    async def search(
+        self,
+        query: str = Field(default="", description="Search query"),
+        page: int = Field(default=1, ge=1),
+        limit: int = Field(default=10, ge=1, le=100),
+    ) -> dict[str, int | str]:
         return {"query": query, "page": page, "limit": limit}
 
     # Boolean query parameters
-    @router.get("/feature?enabled={flag}")
-    async def feature(self, flag: bool) -> dict:
+    @get("/feature?enabled={flag}")
+    async def feature(self, flag: bool) -> dict[str, bool]:
         return {"enabled": flag}
 
     # Mixed: path + query
-    @router.get("/users/{user_id}/posts?tag={tag}")
-    async def user_posts(self, user_id: int, tag: str = "") -> dict:
-        return {"user_id": user_id, "tag": tag}
+    @get("/users/{user_id}/posts?tag={tag}")
+    async def user_posts(self, user_id: int, tag: str | None = None) -> dict[str, int | str | None]:
+        return {"user_id": user_id, "tag": tag or ""}
 
 
-@module(services=[CalcApi])
+@module(children=(CalcRouter,))
 class App(ModuleBase):
     pass
 
@@ -58,7 +64,13 @@ class App(ModuleBase):
 #   curl http://127.0.0.1:8000/calc/feature?enabled=1   # → {"enabled": true}
 #   curl http://127.0.0.1:8000/calc/users/42/posts?tag=python
 
-if __name__ == "__main__":
+
+async def setup() -> ModuleBase:
     app = App()
-    app.init()
-    uvicorn.run(app, lifespan="on")
+    await app.init()
+    return app
+
+
+if __name__ == "__main__":
+    application = asyncio.run(setup())
+    uvicorn.run(application, lifespan="on")

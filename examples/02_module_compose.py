@@ -1,24 +1,25 @@
 """Example 2: Module Composing Multiple Services.
 
-A Module that composes a data service and an API service.
-Demonstrates: @module(), DI via type annotations, service composition.
+A Module that composes a data service and an API router.
+Demonstrates: @module(children=...), DI via type annotations,
+service composition, and transitive child registration.
 """
+
+from __future__ import annotations
+
+import asyncio
 
 import uvicorn
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
-
-# ── Data Service ──────────────────────────────────────────
+from canary_framework import get, module, router, service
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
 
 
 @service()
 class Counter(ServiceBase):
     """A simple counter service — no router, just logic."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._count = 0
 
@@ -27,35 +28,33 @@ class Counter(ServiceBase):
         return self._count
 
 
-# ── API Service ──────────────────────────────────────────
-
-
-@service()
-class CounterApi(ServiceBase):
+@router(prefix="/api")
+class CounterRouter(RouterBase):
     """Exposes Counter via HTTP — depends on Counter via DI."""
 
-    router = Router(prefix="/api")
-    counter: Counter  # injected by framework
+    counter: Counter
 
-    @router.get("/count")
-    async def get_count(self) -> dict:
+    @get("/count")
+    async def get_count(self) -> dict[str, int]:
         return {"count": self.counter.increment()}
 
-    @router.get("/reset?value={value}")
-    async def reset(self, value: int = 0) -> dict:
+    @get("/reset?value={value}")
+    async def reset(self, value: int = 0) -> dict[str, int]:
         self.counter._count = value
         return {"reset_to": value}
 
 
-# ── Root Module ──────────────────────────────────────────
-
-
-@module(services=[Counter, CounterApi])
+@module(children=(CounterRouter,))
 class App(ModuleBase):
     pass
 
 
-if __name__ == "__main__":
+async def setup() -> ModuleBase:
     app = App()
-    app.init()
-    uvicorn.run(app, lifespan="on")
+    await app.init()
+    return app
+
+
+if __name__ == "__main__":
+    application = asyncio.run(setup())
+    uvicorn.run(application, lifespan="on")

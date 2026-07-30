@@ -7,16 +7,17 @@ ValidationError → 422 responses,
 A ``(body, status)`` tuple return sets the HTTP status (e.g. ``return {...}, 404``).
 """
 
+from __future__ import annotations
+
+import asyncio
+
 import uvicorn
 from pydantic import BaseModel, Field
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import get, module, post, router
+from canary_framework.core import ModuleBase, RouterBase
 
 
-# ── Pydantic models ──────────────────────────────────────
 class CreateUser(BaseModel):
     """Request model with validation constraints."""
 
@@ -34,39 +35,47 @@ class UserResponse(BaseModel):
     age: int
 
 
-# ── Service ──────────────────────────────────────────────
-@service()
-class UserApi(ServiceBase):
-    router = Router(prefix="/api")
-    _users: list[dict] = []
-    _next_id: int = 1
+@router(prefix="/api")
+class UserRouter(RouterBase):
+    _users: list[dict[str, object]]
+    _next_id: int
 
-    @router.get("/users", response_model=list[UserResponse])
-    async def list_users(self) -> list[dict]:
+    def __init__(self) -> None:
+        super().__init__()
+        self._users = []
+        self._next_id = 1
+
+    @get("/users", response_model=list[UserResponse])
+    async def list_users(self) -> list[dict[str, object]]:
         return self._users
 
-    @router.post("/users", response_model=UserResponse)
-    async def create_user(self, user: CreateUser) -> dict:
+    @post("/users", response_model=UserResponse)
+    async def create_user(self, user: CreateUser) -> dict[str, object]:
         """request_model auto-detected from CreateUser type annotation."""
         new_user = {"id": self._next_id, **user.model_dump()}
         self._users.append(new_user)
         self._next_id += 1
         return new_user
 
-    @router.get("/users/{user_id}", response_model=UserResponse)
-    async def get_user(self, user_id: int) -> dict | tuple:
-        for u in self._users:
-            if u["id"] == user_id:
-                return u
+    @get("/users/{user_id}", response_model=UserResponse)
+    async def get_user(self, user_id: int) -> dict[str, object] | tuple[dict[str, str], int]:
+        for user in self._users:
+            if user["id"] == user_id:
+                return user
         return {"error": "Not found"}, 404
 
 
-@module(services=[UserApi])
+@module(children=(UserRouter,))
 class App(ModuleBase):
     pass
 
 
-if __name__ == "__main__":
+async def setup() -> ModuleBase:
     app = App()
-    app.init()
-    uvicorn.run(app, lifespan="on")
+    await app.init()
+    return app
+
+
+if __name__ == "__main__":
+    application = asyncio.run(setup())
+    uvicorn.run(application, lifespan="on")

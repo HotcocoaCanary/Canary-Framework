@@ -1,20 +1,23 @@
 """Example 5: Configuration via @config + CanaryConfig.
 
 A fully customized configuration injected via DI.
-Demonstrates: @config, CanaryConfig, DI for config,
-custom OpenAPI metadata, CDN URLs, log level.
+Demonstrates: @config, CanaryConfig, config ownership, custom OpenAPI
+metadata, CDN URLs, and log level.
 """
 
+from __future__ import annotations
+
+import asyncio
+from typing import Literal
+
 import uvicorn
+from pydantic import Field
 
-from canary_framework import config, module, service
-from canary_framework.common.config import CanaryConfig
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import config, get, module, router
+from canary_framework.common import CanaryConfig
+from canary_framework.core import ModuleBase, RouterBase
 
 
-# ── Custom configuration ─────────────────────────────────
 @config()
 class AppConfig(CanaryConfig):
     """Custom configuration for the application."""
@@ -22,30 +25,39 @@ class AppConfig(CanaryConfig):
     openapi_title: str = "My Custom API"
     openapi_version: str = "2.0.0"
     openapi_description: str = "A customized Canary Framework API"
-    openapi_servers: list[dict] = [
-        {"url": "http://localhost:8080", "description": "Local"},
-        {"url": "https://api.example.com", "description": "Production"},
-    ]
-    log_level: str = "DEBUG"
+    openapi_servers: list[dict[str, str]] = Field(
+        default_factory=lambda: [
+            {"url": "http://localhost:8080", "description": "Local"},
+            {"url": "https://api.example.com", "description": "Production"},
+        ]
+    )
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "DEBUG"
 
 
-# ── Service ──────────────────────────────────────────────
-@service()
-class Api(ServiceBase):
-    router = Router(prefix="/api")
+@router(prefix="/api")
+class ApiRouter(RouterBase):
+    @get("/info")
+    async def info(self) -> dict[str, str]:
+        config = self.config
+        assert config is not None
+        return {
+            "framework": "Canary",
+            "version": config.openapi_version,
+            "log_level": config.log_level,
+        }
 
-    @router.get("/info")
-    async def info(self) -> dict:
-        return {"framework": "Canary", "version": "0.5.0"}
 
-
-# ── Root Module ──────────────────────────────────────────
-@module(config=AppConfig, services=[Api])
+@module(config=AppConfig, children=(ApiRouter,))
 class App(ModuleBase):
     pass
 
 
-if __name__ == "__main__":
+async def setup() -> ModuleBase:
     app = App()
-    app.init()
-    uvicorn.run(app, lifespan="on")
+    await app.init()
+    return app
+
+
+if __name__ == "__main__":
+    application = asyncio.run(setup())
+    uvicorn.run(application, lifespan="on")

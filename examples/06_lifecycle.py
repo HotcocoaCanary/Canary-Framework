@@ -3,60 +3,57 @@
 Shows the execution order with print statements.
 """
 
+from __future__ import annotations
+
+import asyncio
+
 import uvicorn
 
-from canary_framework import (
-    before_shutdown,
-    before_startup,
-    module,
-    service,
-)
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import get, module, router, service
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
 
 
 @service()
 class Database(ServiceBase):
-    """Service with lifecycle hooks for connection management."""
+    """Service with lifecycle phases for connection management."""
 
-    async def setup_connection(self):
+    async def on_init(self) -> None:
+        self.pool: str | None = None
+        self.data: dict[str, list[object]] = {"users": [], "posts": []}
+        print("[Database] on_init: structural state prepared")
+
+    async def on_startup(self) -> None:
         self.pool = "pool-ready"
+        print("[Database] on_startup: pool ready")
 
-    async def seed_data(self):
-        self.data = {"users": [], "posts": []}
-
-    @before_startup
-    async def warm_cache(self):
-        print("[Database] before_startup: cache warmed")
-
-    @before_shutdown
-    async def close_connections(self):
-        print("[Database] before_shutdown: connections closed")
+    async def on_shutdown(self) -> None:
+        print("[Database] on_shutdown: connections closed")
         self.pool = None
 
 
-@service()
-class Api(ServiceBase):
-    router = Router(prefix="/api")
+@router(prefix="/api")
+class ApiRouter(RouterBase):
+    async def on_init(self) -> None:
+        print("[Api] on_init: routes ready")
 
-    @before_startup
-    async def load_routes(self):
-        print("[Api] before_startup: routes ready")
-
-    @router.get("/status")
-    async def status(self) -> dict:
+    @get("/status")
+    async def status(self) -> dict[str, str]:
         return {"status": "running"}
 
 
-@module(services=[Database, Api])
+@module(children=(Database, ApiRouter))
 class App(ModuleBase):
     pass
 
 
-if __name__ == "__main__":
-    print("=== Creating app ===")
+async def setup() -> ModuleBase:
     app = App()
     print("\n=== Calling init() ===")
-    app.init()
-    uvicorn.run(app, lifespan="on")
+    await app.init()
+    return app
+
+
+if __name__ == "__main__":
+    print("=== Creating app ===")
+    application = asyncio.run(setup())
+    uvicorn.run(application, lifespan="on")
