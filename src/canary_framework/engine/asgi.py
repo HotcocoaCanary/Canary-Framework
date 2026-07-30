@@ -11,7 +11,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, R
 from starlette.routing import Route
 from starlette.routing import Router as StarletteRouter
 
-from canary_framework.common.config import CanaryConfig
+from canary_framework.common import CanaryConfig, unwrap_optional
 from canary_framework.common.routing import ASGIApp
 from canary_framework.engine.params import ParameterSpec, RouteAnalysis
 from canary_framework.engine.validation import ValidatedRoute
@@ -32,6 +32,8 @@ _REDOC_HTML = (
 
 
 class ASGICompiler:
+    """Compile validated routes into one Starlette router."""
+
     def compile(
         self,
         routes: tuple[ValidatedRoute, ...],
@@ -39,6 +41,7 @@ class ASGICompiler:
         openapi: dict[str, object],
         config: CanaryConfig,
     ) -> ASGIApp:
+        """Return an ASGI app for routes and documentation endpoints."""
         if not routes:
             return cast(ASGIApp, StarletteRouter(routes=[]))
 
@@ -69,6 +72,7 @@ class ASGICompiler:
         request: Request,
         analysis: RouteAnalysis,
     ) -> dict[str, object]:
+        """Bind request values using retained route analysis."""
         arguments: dict[str, object] = {}
 
         for name in analysis.path_params:
@@ -110,7 +114,7 @@ class ASGICompiler:
         return parameter.default
 
     def _convert_param(self, value: str, parameter: ParameterSpec) -> object:
-        annotation = self._unwrap_optional(parameter.annotation)
+        annotation, _nullable = unwrap_optional(parameter.annotation)
         if annotation is None or annotation is str:
             return value
         if annotation is bool:
@@ -126,13 +130,8 @@ class ASGICompiler:
             return float(value)
         return value
 
-    def _unwrap_optional(self, annotation: object) -> object:
-        from canary_framework.common import unwrap_optional
-
-        inner, _nullable = unwrap_optional(annotation)
-        return inner
-
     def _auto_response(self, result: object, status_code: int) -> Response:
+        """Apply explicit Response, tuple status, then route status precedence."""
         if isinstance(result, Response):
             return result
         if (

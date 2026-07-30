@@ -22,7 +22,7 @@ class ItemsRouter(RouterBase):
 
 ## Bodies and responses
 
-Set `request_model` for a Pydantic request body and `response_model` for conversion/schema output. A handler may return a body, a Starlette `Response`, or `(body, status_code)`. The declared `status_code` is the default.
+Set `request_model` for a Pydantic request body and `response_model` for OpenAPI schema/documentation only. The actual response body is serialized from the handler's return value. A handler may return a body, a Starlette `Response`, or `(body, status_code)`. The declared `status_code` is the default for an ordinary body return.
 
 Endpoint options are `request_model`, `response_model`, `status_code`, `tags`, `summary`, `description`, `deprecated`, `operation_id`, and `responses`.
 

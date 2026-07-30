@@ -25,9 +25,17 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 - Standalone `RouterBase` applications and scoped `ModuleBase` composition.
 - Immutable route specifications, context propagation, route validation, and one Assembly compiler.
+- Folded the unreleased 0.5.2 Router redesign into this release: one memoized assembly produces one Starlette route table, one OpenAPI document, and documentation endpoints from resolved routes; scattered aggregation and standalone/mounted branches were removed.
 - Strict dependency direction, parent reuse, sibling isolation, and explicit promotion.
 - Root-owned OpenAPI compilation with local schema registries and conflict detection.
 - Explicit async lifecycle states: `CREATED`, `INITIALIZED`, `STARTED`, `STOPPED`, `FAILED`.
+
+### Fixed / 修复
+
+- OpenAPI schema generation uses a local registry per document, preventing stale `$ref` values across repeated builds.
+- Request binding consistently uses parameter names, including path parameters combined with request bodies.
+- Missing required query parameters and invalid boolean query values now return 422 instead of 500; boolean parsing accepts `1/true/yes/on` case-insensitively.
+- `(body, status_code)` handler returns preserve the tuple status instead of being stringified with the route default.
 
 ### Changed
 
@@ -35,6 +43,7 @@ This project follows Keep a Changelog and Semantic Versioning.
 - Services are lifecycle/DI/domain objects and are never served directly.
 - Modules cannot own business endpoints; they aggregate Router descendants.
 - Configuration is root/Module context rather than a DI service.
+- Explicit Router prefixes replace the old implicit `/{ServiceName}` namespace; route conflicts fail during compilation. The unreleased 0.5.2 memoized `ServiceBase.openapi()` experiment is superseded: OpenAPI is now exposed only by an initialized runtime-root Router or Module.
 
 ### Removed
 
@@ -43,6 +52,40 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [0.5.1] — 2026-06-15
 
-- Declared the `pydantic-settings` dependency explicitly.
+- 显式声明 `pydantic-settings` 依赖（`BaseSettings` / 配置类）。
 
-Earlier releases are preserved in Git tags and history.
+## [0.5.0] — 2026-06-15
+
+- 配置系统与核心优化；router 重构。
+
+## [0.4.11] — 2026-06-05
+
+- 底层优化：要求通过类型注解继承基类；修复 router 相关缺陷；推出独立配置类。
+
+## [0.4.0] — 2026-05-31
+
+- **ASGI 集成、移除独立 web 包的大重构**：框架从 FastAPI 迁移到直接的 ASGI（Starlette）集成，
+  重新设计模块启动生命周期。`0.4.x` 后续版本持续打磨依赖注入体验与日志能力。
+
+## [0.3.0] — 2026-05-27
+
+- 移除 Context 系统，改为基于类型注解的依赖注入；统一以 config 承载生命周期配置。
+
+## [0.2.0] — 2026-05-25
+
+- 发布流程与分支规范调整。
+
+## [0.1.0] — 2026-05-25
+
+- 首个开源版本：README、文档、社区文件与 CI/CD。
+
+---
+
+## 版本策略 / Versioning Policy
+
+0.6.0 已因 Service/Router/Module 核心模型的根本变化推进版本线。今后遵循语义化版本：在 0.x
+阶段，破坏性设计变化推进 minor 版本；补丁修复与兼容特性在对应版本线上发布。
+
+0.6.0 advances the version line because the Service/Router/Module core model changed fundamentally.
+From here, releases follow Semantic Versioning: while the project remains in 0.x, breaking design
+changes advance the minor version, while fixes and compatible features ship on the corresponding line.

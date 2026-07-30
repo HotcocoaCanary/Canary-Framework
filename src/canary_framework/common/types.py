@@ -74,26 +74,32 @@ CF_NAME_ATTR = "__cf_name__"
 
 
 def is_cf_service(cls: type) -> bool:
+    """Return whether a class is any declared framework service node."""
     return bool(getattr(cls, CF_SERVICE_MARKER, False))
 
 
 def is_cf_router(cls: type) -> bool:
+    """Return whether a class has Router metadata."""
     return isinstance(getattr(cls, CF_SERVICE_META, None), RouterMeta)
 
 
 def get_service_meta(cls: type) -> ServiceMeta | None:
+    """Return service metadata when present."""
     return raw if isinstance(raw := getattr(cls, CF_SERVICE_META, None), ServiceMeta) else None
 
 
 def get_router_meta(cls: type) -> RouterMeta | None:
+    """Return Router metadata when present."""
     return raw if isinstance(raw := getattr(cls, CF_SERVICE_META, None), RouterMeta) else None
 
 
 def is_cf_module(cls: type) -> bool:
+    """Return whether a class has Module metadata."""
     return isinstance(getattr(cls, CF_SERVICE_META, None), ModuleMeta)
 
 
 def get_module_meta(cls: type) -> ModuleMeta | None:
+    """Return Module metadata when present."""
     return raw if isinstance(raw := getattr(cls, CF_SERVICE_META, None), ModuleMeta) else None
 
 

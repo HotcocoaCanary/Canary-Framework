@@ -10,6 +10,14 @@ service() -> Callable[[type[ServiceBase]], type[ServiceBase]]
 
 `service` takes no parameters. It validates and marks a `ServiceBase` subclass as a lifecycle and dependency-injection node. The returned value is the same class, not a wrapper. See [Services](services.md).
 
+### `config`
+
+```text
+config() -> Callable[[type[CanaryConfig]], type[CanaryConfig]]
+```
+
+`config` takes no parameters. The returned class decorator requires a `CanaryConfig` subclass, marks it as a framework configuration class, and returns the same class without wrapping or instantiating it. Applying it to any other class raises `TypeError`. Router and Module `config=` arguments also require a `CanaryConfig` subclass. See [Configuration](configuration.md) for every built-in field.
+
 ### `router`
 
 ```text
@@ -61,7 +69,7 @@ Modules cannot declare endpoints directly. See [Modules](modules.md).
 
 - `path`: local endpoint path. Path templates such as `/{item_id}` bind path parameters. A query template such as `/search?q={query}&page={page}` declares and binds query parameters while the compiled Starlette path remains `/search`.
 - `request_model`: request-body model. It selects the sole handler parameter not named by the path or query template.
-- `response_model`: response model used for OpenAPI schema generation and normal response conversion.
+- `response_model`: response model used only for OpenAPI schema generation and documentation; the actual body is serialized from the handler's return value.
 - `status_code`: declared success status, default `200`.
 - `tags`: endpoint-local tags appended after inherited Module and Router tags.
 - `summary`: optional OpenAPI operation summary.

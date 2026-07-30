@@ -10,6 +10,14 @@ service() -> Callable[[type[ServiceBase]], type[ServiceBase]]
 
 `service` 没有参数。它校验并标记一个 `ServiceBase` 子类，使其成为生命周期与依赖注入节点。返回值是原类本身，不是包装类。参见[服务](services.md)。
 
+### `config`
+
+```text
+config() -> Callable[[type[CanaryConfig]], type[CanaryConfig]]
+```
+
+`config` 没有参数。它返回一个类装饰器：要求目标类继承 `CanaryConfig`，将其标记为框架配置类，并原样返回该类，不包装也不实例化。用于其他类时抛出 `TypeError`。Router 与 Module 的 `config=` 参数同样要求 `CanaryConfig` 子类。全部内置字段见[配置](configuration.md)。
+
 ### `router`
 
 ```text
@@ -61,7 +69,7 @@ Module 不能直接声明端点。参见 [Module](modules.md)。
 
 - `path`：端点局部路径。`/{item_id}` 这样的 path 模板绑定路径参数；`/search?q={query}&page={page}` 这样的 query-template 声明并绑定查询参数，而编译后的 Starlette 路径仍为 `/search`。
 - `request_model`：请求体模型；它选择唯一一个未出现在 path/query 模板中的处理器参数。
-- `response_model`：用于 OpenAPI schema 与普通响应转换的响应模型。
+- `response_model`：仅用于 OpenAPI schema 与文档的响应模型；实际响应体根据处理器返回值序列化。
 - `status_code`：声明的成功状态码，默认 `200`。
 - `tags`：追加在继承的 Module、Router 标签之后的端点局部标签。
 - `summary`：可选 OpenAPI 操作摘要。

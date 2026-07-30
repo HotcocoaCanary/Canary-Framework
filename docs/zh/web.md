@@ -22,7 +22,7 @@ class ItemsRouter(RouterBase):
 
 ## Body 与响应
 
-`request_model` 选择 Pydantic 请求体参数，`response_model` 控制转换与 schema。处理器可返回 body、Starlette `Response` 或 `(body, status_code)`；声明的 `status_code` 是普通响应默认值。
+`request_model` 选择 Pydantic 请求体参数，`response_model` 仅用于 OpenAPI schema 与文档，不控制运行时转换。实际响应体根据处理器返回值序列化。处理器可返回 body、Starlette `Response` 或 `(body, status_code)`；声明的 `status_code` 是普通 body 返回的默认值。
 
 端点选项包括 `request_model`、`response_model`、`status_code`、`tags`、`summary`、`description`、`deprecated`、`operation_id`、`responses`。
 

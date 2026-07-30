@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, MutableMapping
+from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel
@@ -43,6 +44,12 @@ class Envelope(BaseModel):
     profile: Profile
 
 
+class DocumentedResponse(BaseModel):
+    """Response shape declared only for OpenAPI documentation."""
+
+    documented: str
+
+
 class DocsConfig(CanaryConfig):
     """Custom paths and assets for documentation route tests."""
 
@@ -60,6 +67,7 @@ def resolved_route(
     method: str = "GET",
     path: str = "/items",
     request_model: type | None = None,
+    response_model: type | None = None,
     status_code: int = 200,
     operation_id: str | None = None,
 ) -> ResolvedRoute:
@@ -69,6 +77,7 @@ def resolved_route(
         local_path=path,
         handler_name=handler.__name__,
         request_model=request_model,
+        response_model=response_model,
         status_code=status_code,
         operation_id=operation_id,
     )
@@ -171,6 +180,57 @@ def test_response_precedence_is_response_then_tuple_then_route_status() -> None:
         assert client.get("/route-status").status_code == 201
         assert client.get("/tuple-status").status_code == 202
         assert client.get("/response-status").status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_response_model_documents_schema_without_converting_handler_result() -> None:
+    async def handler() -> dict[str, int]:
+        return {"actual": 7}
+
+    route = resolved_route(handler, response_model=DocumentedResponse)
+    compiled = validated(route)
+    document = OpenAPICompiler().compile(compiled, config=CanaryConfig())
+    paths = cast("dict[str, Any]", document["paths"])
+    response_schema = paths["/items"]["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]
+
+    assert response_schema == {"$ref": "#/components/schemas/DocumentedResponse"}
+    app = ASGICompiler().compile(compiled, openapi=document, config=CanaryConfig())
+    received = False
+    sent: list[MutableMapping[str, Any]] = []
+
+    async def receive() -> dict[str, Any]:
+        nonlocal received
+        if received:
+            return {"type": "http.disconnect"}
+        received = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: MutableMapping[str, Any]) -> None:
+        sent.append(message)
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.0"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/items",
+            "raw_path": b"/items",
+            "query_string": b"",
+            "headers": [],
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "root_path": "",
+        },
+        receive,
+        send,
+    )
+    assert sent[0]["type"] == "http.response.start"
+    assert sent[0]["status"] == 200
+    assert sent[1]["body"] == b'{"actual":7}'
 
 
 def test_optional_scalar_defaults_and_missing_required_query_are_bound() -> None:

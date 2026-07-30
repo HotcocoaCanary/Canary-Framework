@@ -17,6 +17,7 @@ _INVALID = re.compile(r"[^a-zA-Z0-9._-]+")
 
 
 def is_model(value: object) -> bool:
+    """Return whether a value is a Pydantic model class."""
     return isinstance(value, type) and issubclass(value, BaseModel)
 
 

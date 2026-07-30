@@ -7,10 +7,10 @@ from collections.abc import Callable
 from canary_framework.common import CF_NAME_ATTR, CanaryConfig
 
 
-def config() -> Callable[[type], type[CanaryConfig]]:
+def config[TConfig: CanaryConfig]() -> Callable[[type[TConfig]], type[TConfig]]:
     """Mark a CanaryConfig subclass and return it unchanged."""
 
-    def decorator(cls: type) -> type[CanaryConfig]:
+    def decorator(cls: type[TConfig]) -> type[TConfig]:
         if not issubclass(cls, CanaryConfig):
             raise TypeError(
                 f"@config '{cls.__name__}': must inherit from CanaryConfig. "
