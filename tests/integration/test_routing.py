@@ -1,154 +1,109 @@
-"""Integration tests for routing."""
+"""Integration tests for the new RouterBase and ModuleBase API."""
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import get, module, post, router
+from canary_framework.core import ModuleBase, RouterBase
+
+pytestmark = pytest.mark.integration
 
 
-@pytest.mark.integration
-class TestRouting:
-    """Integration tests for routing."""
+async def test_simple_get_route() -> None:
+    @router()
+    class MyRouter(RouterBase):
+        @get("/hello")
+        async def hello(self) -> dict[str, str]:
+            return {"message": "Hello World"}
 
-    @pytest.mark.asyncio
-    async def test_simple_get_route(self) -> None:
-        """Test simple GET route."""
+    @module(children=(MyRouter,))
+    class MyModule(ModuleBase):
+        pass
 
-        @service()
-        class MyRouter(ServiceBase):
-            router = Router()
+    app = MyModule()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/hello")
+    assert response.status_code == 200
+    assert response.json() == {"message": "Hello World"}
 
-            @router.get("/hello")
-            async def hello(self) -> dict[str, str]:
-                return {"message": "Hello World"}
 
-        @module(services=[MyRouter])
-        class MyModule(ModuleBase):
-            pass
+async def test_route_with_path_params() -> None:
+    @router()
+    class MyRouter(RouterBase):
+        @get("/greet/{name}")
+        async def greet(self, name: str) -> dict[str, str]:
+            return {"message": f"Hello {name}"}
 
-        app = MyModule()
-        app.init()
+    @module(children=(MyRouter,))
+    class MyModule(ModuleBase):
+        pass
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            response = await client.get("/hello")
-            assert response.status_code == 200
-            assert response.json() == {"message": "Hello World"}
+    app = MyModule()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/greet/Alice")
+    assert response.status_code == 200
+    assert response.json() == {"message": "Hello Alice"}
 
-    @pytest.mark.asyncio
-    async def test_route_with_path_params(self) -> None:
-        """Test route with path params."""
 
-        @service()
-        class MyRouter(ServiceBase):
-            router = Router()
+async def test_route_with_query_params() -> None:
+    @router()
+    class MyRouter(RouterBase):
+        @get("/add?a={a}&b={b}")
+        async def add(self, a: int, b: int) -> dict[str, int]:
+            return {"result": a + b}
 
-            @router.get("/greet/{name}")
-            async def greet(self, name: str) -> dict[str, str]:
-                return {"message": f"Hello {name}"}
+    @module(children=(MyRouter,))
+    class MyModule(ModuleBase):
+        pass
 
-        @module(services=[MyRouter])
-        class MyModule(ModuleBase):
-            pass
+    app = MyModule()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/add?a=2&b=3")
+    assert response.status_code == 200
+    assert response.json() == {"result": 5}
 
-        app = MyModule()
-        app.init()
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            response = await client.get("/greet/Alice")
-            assert response.status_code == 200
-            assert response.json() == {"message": "Hello Alice"}
+async def test_post_route_with_body() -> None:
+    class User(BaseModel):
+        name: str
+        age: int
 
-    @pytest.mark.asyncio
-    async def test_route_with_query_params(self) -> None:
-        """Test route with query params."""
+    @router()
+    class MyRouter(RouterBase):
+        @post("/users", request_model=User)
+        async def create_user(self, user: User) -> dict[str, int | str]:
+            return {"id": 1, "name": user.name, "age": user.age}
 
-        @service()
-        class MyRouter(ServiceBase):
-            router = Router()
+    @module(children=(MyRouter,))
+    class MyModule(ModuleBase):
+        pass
 
-            @router.get("/add?a={a}&b={b}")
-            async def add(self, a: int, b: int) -> dict[str, int]:
-                return {"result": a + b}
+    app = MyModule()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/users", json={"name": "Alice", "age": 30})
+    assert response.status_code == 200
+    assert response.json() == {"id": 1, "name": "Alice", "age": 30}
 
-        @module(services=[MyRouter])
-        class MyModule(ModuleBase):
-            pass
 
-        app = MyModule()
-        app.init()
+async def test_router_with_prefix() -> None:
+    @router(prefix="/api/v1")
+    class MyRouter(RouterBase):
+        @get("/test")
+        async def test(self) -> dict[str, str]:
+            return {"status": "ok"}
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            response = await client.get("/add?a=2&b=3")
-            assert response.status_code == 200
-            assert response.json() == {"result": 5}
+    @module(children=(MyRouter,))
+    class MyModule(ModuleBase):
+        pass
 
-    @pytest.mark.asyncio
-    async def test_post_route_with_body(self) -> None:
-        """Test POST route with request body."""
-
-        class User(BaseModel):
-            name: str
-            age: int
-
-        @service()
-        class MyRouter(ServiceBase):
-            router = Router()
-
-            @router.post("/users", request_model=User)
-            async def create_user(self, user: User) -> dict[str, int | str]:
-                return {"id": 1, "name": user.name, "age": user.age}
-
-        @module(services=[MyRouter])
-        class MyModule(ModuleBase):
-            pass
-
-        app = MyModule()
-        app.init()
-
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            response = await client.post("/users", json={"name": "Alice", "age": 30})
-            assert response.status_code == 200
-            assert response.json() == {"id": 1, "name": "Alice", "age": 30}
-
-    @pytest.mark.asyncio
-    async def test_router_with_prefix(self) -> None:
-        """Test router with prefix."""
-
-        @service()
-        class MyRouter(ServiceBase):
-            router = Router(prefix="/api/v1")
-
-            @router.get("/test")
-            async def test(self) -> dict[str, str]:
-                return {"status": "ok"}
-
-        @module(services=[MyRouter])
-        class MyModule(ModuleBase):
-            pass
-
-        app = MyModule()
-        app.init()
-
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            response = await client.get("/api/v1/test")
-            assert response.status_code == 200
-            assert response.json() == {"status": "ok"}
+    app = MyModule()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/v1/test")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}

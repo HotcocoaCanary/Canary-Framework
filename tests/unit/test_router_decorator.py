@@ -47,6 +47,7 @@ def test_all_http_verbs_attach_immutable_specs() -> None:
     ]
 
     for method_decorator, expected_method in decorators:
+
         async def handler() -> None:
             return None
 

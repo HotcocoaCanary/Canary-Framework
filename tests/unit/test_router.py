@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from canary_framework import get, module, router, service
@@ -36,7 +38,7 @@ async def test_standalone_router_recursively_injects_services() -> None:
     assert routes[0].full_path == "/api/items/{item_id}"
     assert routes[0].tags == ("v1", "Items")
     assert routes[0].security == ("bearerAuth",)
-    assert routes[0].handler.__self__ is subject
+    assert cast(Any, routes[0].handler).__self__ is subject
 
 
 @pytest.mark.unit

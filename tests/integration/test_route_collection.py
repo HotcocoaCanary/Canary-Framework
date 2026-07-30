@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from canary_framework import get, module, router, service
@@ -91,4 +93,4 @@ async def test_router_collects_its_own_routes_with_inherited_context() -> None:
 
     assert [route.full_path for route in routes] == ["/api/users"]
     assert routes[0].tags == ("v1", "Users")
-    assert routes[0].handler.__self__ is subject
+    assert cast(Any, routes[0].handler).__self__ is subject

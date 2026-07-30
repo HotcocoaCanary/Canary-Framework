@@ -33,7 +33,7 @@ def test_lifecycle_state_has_all_runtime_states() -> None:
 
 @pytest.mark.unit
 def test_route_spec_freezes_collections() -> None:
-    source = {422: ResponseSpec("Validation failed")}
+    source: dict[int | str, ResponseSpec] = {422: ResponseSpec("Validation failed")}
     spec = RouteSpec(
         method="get",
         local_path="/items",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
 from canary_framework import get, router, service
@@ -39,4 +41,4 @@ async def test_standalone_router_is_a_runtime_root() -> None:
     assert [route.full_path for route in routes] == ["/health"]
     assert callable(subject)
     assert subject.asgi_app is not None
-    assert "/health" in subject.openapi()["paths"]
+    assert "/health" in cast(dict[str, object], subject.openapi()["paths"])

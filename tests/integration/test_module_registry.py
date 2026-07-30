@@ -194,13 +194,15 @@ async def test_module_sibling_scopes_isolate_local_services() -> None:
 
     root = Root()
     await root.init()
-    left, right = root.direct_children
-    left_consumer = left.direct_children[0]
-    right_consumer = right.direct_children[0]
+    left, right = (cast(ModuleBase, node) for node in root.direct_children)
+    left_consumer = cast(Consumer, left.direct_children[0])
+    right_consumer = cast(Consumer, right.direct_children[0])
 
-    assert left_consumer.shared is not right_consumer.shared  # type: ignore[attr-defined]
-    assert left._cf_dependency_engine.registry.has_local(Shared)  # type: ignore[attr-defined]
-    assert right._cf_dependency_engine.registry.has_local(Shared)  # type: ignore[attr-defined]
+    assert left_consumer.shared is not right_consumer.shared
+    assert left._cf_dependency_engine is not None
+    assert right._cf_dependency_engine is not None
+    assert left._cf_dependency_engine.registry.has_local(Shared)
+    assert right._cf_dependency_engine.registry.has_local(Shared)
 
 
 @pytest.mark.integration
@@ -223,9 +225,10 @@ async def test_module_reuses_parent_promoted_service_instance() -> None:
 
     root = Root()
     await root.init()
-    child = root.direct_children[0]
-    shared = root.direct_children[1]
-    consumer = child.direct_children[0]
+    child = cast(ModuleBase, root.direct_children[0])
+    shared = cast(Shared, root.direct_children[1])
+    consumer = cast(Consumer, child.direct_children[0])
 
-    assert consumer.shared is shared  # type: ignore[attr-defined]
-    assert not child._cf_dependency_engine.registry.has_local(Shared)  # type: ignore[attr-defined]
+    assert consumer.shared is shared
+    assert child._cf_dependency_engine is not None
+    assert not child._cf_dependency_engine.registry.has_local(Shared)

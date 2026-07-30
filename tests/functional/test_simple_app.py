@@ -1,150 +1,101 @@
-"""Functional tests for simple app."""
+"""Functional tests for the 0.6 public application API."""
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
+from starlette.testclient import TestClient
 
-from canary_framework import (
-    before_startup,
-    module,
-    service,
-)
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+import canary_framework as cf
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
+
+pytestmark = pytest.mark.functional
 
 
-@pytest.mark.functional
-class TestSimpleApp:
-    """Functional tests for a simple app."""
+def test_public_surface_contains_only_new_routing_and_lifecycle_names() -> None:
+    for name in ("service", "router", "module", "get", "post", "put", "delete", "patch"):
+        assert name in cf.__all__
+        assert hasattr(cf, name)
+    for removed in ("Router", "LifecycleHook", "before_startup", "before_shutdown"):
+        assert removed not in cf.__all__
+        assert not hasattr(cf, removed)
 
-    @pytest.mark.asyncio
-    async def test_complete_app_flow(self) -> None:
-        """Test complete app flow."""
 
-        # Define a data model
-        class TodoItem(BaseModel):
-            id: int | None = None
-            title: str
-            completed: bool = False
+async def test_one_router_is_a_complete_application() -> None:
+    @cf.router(prefix="/health")
+    class HealthRouter(RouterBase):
+        @cf.get("")
+        async def health(self) -> dict[str, str]:
+            return {"status": "ok"}
 
-        # Define a service to manage todos
-        @service()
-        class TodoService(ServiceBase):
-            def __init__(self) -> None:
-                super().__init__()
-                self.todos: list[TodoItem] = []
-                self.next_id = 1
-                self.create(TodoItem(title="Learn Canary", completed=True))
-                self.create(TodoItem(title="Build an app", completed=False))
+    app = HealthRouter()
+    await app.init()
+    with TestClient(app) as client:
+        assert client.get("/health").json() == {"status": "ok"}
+        assert client.get("/openapi.json").status_code == 200
 
-            def get_all(self) -> list[TodoItem]:
-                return self.todos
 
-            def get_by_id(self, todo_id: int) -> TodoItem | None:
-                for todo in self.todos:
-                    if todo.id == todo_id:
-                        return todo
-                return None
+async def test_complete_app_flow() -> None:
+    class TodoItem(BaseModel):
+        id: int | None = None
+        title: str
+        completed: bool = False
 
-            def create(self, todo: TodoItem) -> TodoItem:
-                todo.id = self.next_id
-                self.next_id += 1
-                self.todos.append(todo)
-                return todo
+    @cf.service()
+    class TodoService(ServiceBase):
+        def __init__(self) -> None:
+            super().__init__()
+            self.todos = [
+                TodoItem(id=1, title="Learn Canary", completed=True),
+                TodoItem(id=2, title="Build an app"),
+            ]
 
-        # Define a router with API endpoints
-        @service()
-        class TodoRouter(ServiceBase):
-            router = Router()
-            todo_service: TodoService
+        def create(self, todo: TodoItem) -> TodoItem:
+            todo.id = len(self.todos) + 1
+            self.todos.append(todo)
+            return todo
 
-            @router.get("/todos")
-            async def list_todos(self) -> list[dict[str, int | str | bool]]:
-                return [todo.model_dump() for todo in self.todo_service.get_all()]  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
+    @cf.router()
+    class TodoRouter(RouterBase):
+        todo_service: TodoService
 
-            @router.post("/todos", request_model=TodoItem)
-            async def create_todo(self, todo: TodoItem) -> dict[str, int | str | bool]:
-                created = self.todo_service.create(todo)  # pyright: ignore[reportUnknownMemberType, reportAttributeAccessIssue]
-                return dict(created.model_dump())
+        @cf.get("/todos")
+        async def list_todos(self) -> list[TodoItem]:
+            return self.todo_service.todos
 
-        # Define the main module
-        @module(services=[TodoRouter])
-        class TodoApp(ModuleBase):
-            async def setup_test_data(self) -> None:
-                # Add some test data
-                self.TodoRouter.todo_service.create(  # type: ignore[attr-defined]
-                    TodoItem(title="Learn Canary", completed=True)
-                )
-                self.TodoRouter.todo_service.create(  # type: ignore[attr-defined]
-                    TodoItem(title="Build awesome app", completed=False)
-                )
+        @cf.post("/todos", request_model=TodoItem)
+        async def create_todo(self, todo: TodoItem) -> TodoItem:
+            return self.todo_service.create(todo)
 
-            @before_startup
-            async def on_startup(self) -> None:
-                pass
+    @cf.module(children=(TodoRouter,))
+    class TodoApp(ModuleBase):
+        pass
 
-        # Create and configure the app
-        app = TodoApp()
-        app.init()
+    app = TodoApp()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/todos")
+        assert [item["title"] for item in response.json()] == ["Learn Canary", "Build an app"]
+        response = await client.post("/todos", json={"title": "New todo"})
+        assert response.json()["id"] == 3
+        assert len((await client.get("/todos")).json()) == 3
 
-        # Test the API endpoints
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            # Test list todos
-            response = await client.get("/todos")
-            assert response.status_code == 200
-            todos = response.json()
-            assert len(todos) == 2
-            assert todos[0]["title"] == "Learn Canary"
-            assert todos[0]["completed"] is True
 
-            response = await client.post("/todos", json={"title": "New todo", "completed": False})
-            assert response.status_code == 200
-            new_todo = response.json()
-            assert new_todo["id"] == 3
-            assert new_todo["title"] == "New todo"
+async def test_openapi_docs() -> None:
+    @cf.router()
+    class MyRouter(RouterBase):
+        @cf.get("/test")
+        async def test(self) -> dict[str, str]:
+            return {"status": "ok"}
 
-            # Verify list now has 3 todos
-            response = await client.get("/todos")
-            assert len(response.json()) == 3
+    @cf.module(children=(MyRouter,))
+    class MyApp(ModuleBase):
+        pass
 
-    @pytest.mark.asyncio
-    async def test_openapi_docs(self) -> None:
-        """Test OpenAPI docs."""
-
-        @service()
-        class MyRouter(ServiceBase):
-            router = Router()
-
-            @router.get("/test")
-            async def test(self) -> dict[str, str]:
-                return {"status": "ok"}
-
-        @module(services=[MyRouter])
-        class MyApp(ModuleBase):
-            pass
-
-        app = MyApp()
-        app.init()
-        await app.startup()
-
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            # Test OpenAPI JSON
-            response = await client.get("/openapi.json")
-            assert response.status_code == 200
-            assert "openapi" in response.json()
-            assert "paths" in response.json()
-
-            # Test Swagger UI
-            response = await client.get("/docs")
-            assert response.status_code == 200
-
-            # Test ReDoc
-            response = await client.get("/redoc")
-            assert response.status_code == 200
+    app = MyApp()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        schema = await client.get("/openapi.json")
+        assert schema.status_code == 200
+        assert "paths" in schema.json()
+        assert (await client.get("/docs")).status_code == 200
+        assert (await client.get("/redoc")).status_code == 200

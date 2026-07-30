@@ -1,5 +1,7 @@
 """Integration tests for dependency instantiation and wiring."""
 
+from typing import cast
+
 import pytest
 
 from canary_framework import router, service
@@ -35,9 +37,9 @@ async def test_engine_instantiates_transitive_dependencies_once_and_wires_them()
     engine = DependencyEngine(children=(Consumer,), parent_registry=None, config=None)
     await engine.init()
 
-    consumer = engine.registry.get(Consumer)
-    middle = engine.registry.get(Middle)
-    deep = engine.registry.get(Deep)
+    consumer = cast(Consumer, engine.registry.get(Consumer))
+    middle = cast(Middle, engine.registry.get(Middle))
+    deep = cast(Deep, engine.registry.get(Deep))
     assert consumer.middle is middle
     assert consumer.deep is deep
     assert middle.deep is deep
@@ -67,7 +69,7 @@ async def test_engine_reuses_parent_registry_dependency_and_propagates_config() 
     engine = DependencyEngine(children=(Consumer,), parent_registry=parent, config=config)
     await engine.init()
 
-    consumer = engine.registry.get(Consumer)
+    consumer = cast(Consumer, engine.registry.get(Consumer))
     assert consumer.shared is shared
     assert consumer.config is config
     assert not engine.registry.has_local(Shared)
@@ -87,7 +89,10 @@ async def test_direct_children_follow_declaration_order_not_startup_order() -> N
     engine = DependencyEngine(children=(Consumer, Dependency), parent_registry=None, config=None)
     await engine.init()
 
-    assert tuple(type(node) for node in engine.direct_children) == (Consumer, Dependency)
+    assert [type(node).__name__ for node in engine.direct_children] == [
+        "Consumer",
+        "Dependency",
+    ]
     assert tuple(type(node) for node in engine.registry.local_instances()) == (
         Consumer,
         Dependency,
@@ -107,6 +112,6 @@ async def test_engine_mounts_router_without_standalone_engine() -> None:
     engine = DependencyEngine(children=(MountedRouter,), parent_registry=None, config=None)
     await engine.init()
 
-    router_instance = engine.registry.get(MountedRouter)
+    router_instance = cast(MountedRouter, engine.registry.get(MountedRouter))
     assert router_instance._cf_parent_registry is engine.registry
     assert router_instance._cf_dependency_engine is None

@@ -1,10 +1,3 @@
-"""Framework engine — registry, dependency resolution, and OpenAPI."""
+"""Internal runtime compiler package."""
 
-from canary_framework.engine.dependencies import resolve_deps, topological_sort
-from canary_framework.engine.registry import Registry
-
-__all__ = [
-    "Registry",
-    "resolve_deps",
-    "topological_sort",
-]
+__all__: list[str] = []

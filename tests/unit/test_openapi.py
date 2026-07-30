@@ -29,10 +29,13 @@ class OpenAPIConfig(CanaryConfig):
         default_factory=lambda: [{"url": "https://api.example.test"}]
     )
     openapi_security_schemes: dict[str, dict[str, object]] = Field(
-        default_factory=lambda: {
-            "bearerAuth": {"type": "http", "scheme": "bearer"},
-            "tenantAuth": {"type": "apiKey", "in": "header", "name": "X-Tenant"},
-        }
+        default_factory=lambda: cast(
+            dict[str, dict[str, object]],
+            {
+                "bearerAuth": {"type": "http", "scheme": "bearer"},
+                "tenantAuth": {"type": "apiKey", "in": "header", "name": "X-Tenant"},
+            },
+        )
     )
 
 

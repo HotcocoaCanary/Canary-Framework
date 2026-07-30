@@ -68,15 +68,18 @@ async def test_root_config_exclusively_supplies_document_metadata_and_schemes() 
         openapi_title: str = "Shop API"
         openapi_version: str = "3.0.0"
         openapi_security_schemes: dict[str, dict[str, object]] = Field(
-            default_factory=lambda: {"rootAuth": {"type": "http", "scheme": "bearer"}}
+            default_factory=lambda: cast(
+                dict[str, dict[str, object]], {"rootAuth": {"type": "http", "scheme": "bearer"}}
+            )
         )
 
     class FeatureConfig(CanaryConfig):
         openapi_title: str = "Feature API"
         openapi_security_schemes: dict[str, dict[str, object]] = Field(
-            default_factory=lambda: {
-                "featureAuth": {"type": "apiKey", "in": "header", "name": "X-Feature"}
-            }
+            default_factory=lambda: cast(
+                dict[str, dict[str, object]],
+                {"featureAuth": {"type": "apiKey", "in": "header", "name": "X-Feature"}},
+            )
         )
 
     @router(prefix="/users")

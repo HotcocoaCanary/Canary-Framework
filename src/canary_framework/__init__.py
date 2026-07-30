@@ -1,22 +1,23 @@
-"""Canary Framework — lightweight decorator-driven Python async service framework."""
+"""Canary Framework public API."""
 
 from __future__ import annotations
 
 __version__ = "0.5.1"
 
 from canary_framework.common import (
+    ApplicationNotInitializedError,
     CanaryConfig,
     CanaryFrameworkError,
     CircularDependencyError,
     ConfigurationError,
+    DependencyDirectionError,
     DependencyInjectionError,
-    LifecycleHook,
     LifecycleHookError,
+    LifecycleStateError,
+    RouteCompilationError,
     ServiceNotFoundError,
 )
 from canary_framework.decorators import (
-    before_shutdown,
-    before_startup,
     config,
     delete,
     get,
@@ -29,17 +30,17 @@ from canary_framework.decorators import (
 )
 
 __all__ = [
+    "ApplicationNotInitializedError",
     "CanaryConfig",
     "CanaryFrameworkError",
     "CircularDependencyError",
     "ConfigurationError",
+    "DependencyDirectionError",
     "DependencyInjectionError",
-    "LifecycleHook",
     "LifecycleHookError",
+    "LifecycleStateError",
+    "RouteCompilationError",
     "ServiceNotFoundError",
-    "__version__",
-    "before_shutdown",
-    "before_startup",
     "config",
     "delete",
     "get",

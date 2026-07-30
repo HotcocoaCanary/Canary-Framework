@@ -1,5 +1,7 @@
 """Functional tests for nested compositional modules."""
 
+from typing import cast
+
 import pytest
 
 from canary_framework import CanaryConfig, get, module, router, service
@@ -36,14 +38,14 @@ async def test_nested_module_inherits_nearest_config_and_parent_service() -> Non
 
     root = Root()
     await root.init()
-    feature = root.direct_children[0]
-    shared = root.direct_children[1]
-    router_instance = feature.direct_children[0]
+    feature = cast(ModuleBase, root.direct_children[0])
+    shared = cast(SharedDatabase, root.direct_children[1])
+    router_instance = cast(RecordRouter, feature.direct_children[0])
     route = root._collect_routes(RouteContext())[0]
 
     assert feature.config is root.config
     assert router_instance.config is root.config
-    assert router_instance.database is shared  # type: ignore[attr-defined]
+    assert router_instance.database is shared
     assert await route.handler() == {"source": "shared"}
 
 
@@ -68,7 +70,7 @@ async def test_nested_module_own_config_becomes_nearest_for_descendants() -> Non
 
     root = Root()
     await root.init()
-    feature = root.direct_children[0]
+    feature = cast(ModuleBase, root.direct_children[0])
     worker = feature.direct_children[0]
 
     assert root.config is not None and root.config.openapi_title == "Root"

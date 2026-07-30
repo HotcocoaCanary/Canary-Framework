@@ -2,7 +2,7 @@
 
 from collections.abc import Awaitable, Callable
 from dataclasses import FrozenInstanceError
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import BaseModel, Field
@@ -17,7 +17,9 @@ from canary_framework.engine.validation import validate_routes
 
 class RouteTestConfig(CanaryConfig):
     openapi_security_schemes: dict[str, dict[str, object]] = Field(
-        default_factory=lambda: {"bearerAuth": {"type": "http", "scheme": "bearer"}}
+        default_factory=lambda: cast(
+            dict[str, dict[str, object]], {"bearerAuth": {"type": "http", "scheme": "bearer"}}
+        )
     )
 
 
@@ -70,7 +72,7 @@ def resolved(
     operation_id: str | None = None,
     security: tuple[str, ...] = (),
 ) -> ResolvedRoute:
-    owner = ItemRouter() if owner is None else owner
+    route_owner = ItemRouter() if owner is None else cast(ItemRouter, owner)
     spec = RouteSpec(
         method=method,
         local_path=path,
@@ -79,7 +81,12 @@ def resolved(
         operation_id=operation_id,
     )
     return ResolvedRoute(
-        owner=owner, method=method, full_path=path, handler=handler, spec=spec, security=security
+        owner=route_owner,
+        method=method,
+        full_path=path,
+        handler=handler,
+        spec=spec,
+        security=security,
     )
 
 
@@ -189,7 +196,7 @@ def test_route_analysis_and_parameter_mapping_are_immutable() -> None:
     with pytest.raises(FrozenInstanceError):
         analysis.starlette_path = "/changed"  # type: ignore[misc]
     with pytest.raises(TypeError):
-        analysis.parameters["new"] = object()  # type: ignore[index, assignment]
+        analysis.parameters["new"] = object()  # type: ignore[index]
 
 
 def test_field_default_and_metadata_are_preserved() -> None:

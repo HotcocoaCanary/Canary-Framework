@@ -1,128 +1,91 @@
-"""Functional tests for async operations."""
+"""Functional tests for asynchronous router applications."""
 
 import asyncio
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from canary_framework import before_startup, module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import get, module, router, service
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
+
+pytestmark = pytest.mark.functional
 
 
-@pytest.mark.functional
-class TestAsyncOperations:
-    """Functional tests for async operations."""
+async def test_async_lifecycle_hooks() -> None:
+    events: list[str] = []
 
-    @pytest.mark.asyncio
-    async def test_async_lifecycle_hooks(self) -> None:
-        """Test async lifecycle hooks."""
+    @service()
+    class AsyncService(ServiceBase):
+        async def on_startup(self) -> None:
+            await asyncio.sleep(0.01)
+            events.append("async-startup")
 
-        events: list[str] = []
+    @module(children=(AsyncService,))
+    class MyModule(ModuleBase):
+        pass
 
-        @service()
-        class AsyncService(ServiceBase):
-            async def async_init(self) -> None:
-                await asyncio.sleep(0.01)
-                events.append("async-init")
+    app = MyModule()
+    await app.init()
+    await app.startup()
+    assert events == ["async-startup"]
 
-            @before_startup
-            async def async_startup(self) -> None:
-                await asyncio.sleep(0.01)
-                events.append("async-startup")
 
-        @module(services=[AsyncService])
-        class MyModule(ModuleBase):
-            pass
+async def test_concurrent_requests() -> None:
+    @service()
+    class CounterService(ServiceBase):
+        def __init__(self) -> None:
+            super().__init__()
+            self.count = 0
 
-        app = MyModule()
-        app.init()
-        await app.startup()
+        async def increment(self) -> int:
+            await asyncio.sleep(0.01)
+            self.count += 1
+            return self.count
 
-        assert "async-startup" in events
+    @router()
+    class CounterRouter(RouterBase):
+        counter_service: CounterService
 
-    @pytest.mark.asyncio
-    async def test_concurrent_requests(self) -> None:
-        """Test concurrent requests."""
+        @get("/increment")
+        async def increment(self) -> dict[str, int]:
+            return {"count": await self.counter_service.increment()}
 
-        @service()
-        class CounterService(ServiceBase):
-            def __init__(self) -> None:
-                super().__init__()
-                self.count = 0
+    @module(children=(CounterRouter,))
+    class CounterApp(ModuleBase):
+        pass
 
-            async def increment(self) -> int:
-                # Simulate async work
-                await asyncio.sleep(0.01)
-                self.count += 1
-                return self.count
+    app = CounterApp()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        responses = await asyncio.gather(*(client.get("/increment") for _ in range(5)))
+    assert all(response.status_code == 200 for response in responses)
+    assert app.direct_children[0].counter_service.count == 5  # type: ignore[attr-defined]
 
-        @service()
-        class CounterRouter(ServiceBase):
-            router = Router()
-            counter_service: CounterService
 
-            @router.get("/increment")
-            async def increment(self) -> dict[str, int]:
-                result = await self.counter_service.increment()
-                return {"count": result}
+async def test_long_running_operations() -> None:
+    @service()
+    class LongTaskService(ServiceBase):
+        async def do_work(self, seconds: float) -> dict[str, str | float]:
+            await asyncio.sleep(seconds)
+            return {"status": "done", "duration": seconds}
 
-        @module(services=[CounterRouter])
-        class CounterApp(ModuleBase):
-            pass
+    @router()
+    class TaskRouter(RouterBase):
+        long_task_service: LongTaskService
 
-        app = CounterApp()
-        app.init()
+        @get("/task?seconds={seconds}")
+        async def run_task(self, seconds: float) -> dict[str, str | float]:
+            return await self.long_task_service.do_work(seconds)
 
-        # Make concurrent requests
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            requests = [client.get("/increment") for _ in range(5)]
-            responses = await asyncio.gather(*requests)
+    @module(children=(TaskRouter,))
+    class TaskApp(ModuleBase):
+        pass
 
-            # All should succeed
-            for response in responses:
-                assert response.status_code == 200
-
-            # Count should be 5
-            assert app.CounterRouter.counter_service.count == 5  # type: ignore[attr-defined]
-
-    @pytest.mark.asyncio
-    async def test_long_running_operations(self) -> None:
-        """Test long running operations."""
-
-        @service()
-        class LongTaskService(ServiceBase):
-            async def do_work(self, seconds: float) -> dict[str, str | float]:
-                await asyncio.sleep(seconds)
-                return {"status": "done", "duration": seconds}
-
-        @service()
-        class TaskRouter(ServiceBase):
-            router = Router()
-            long_task_service: LongTaskService
-
-            @router.get("/task?seconds={seconds}")
-            async def run_task(self, seconds: float) -> dict[str, str | float]:
-                return await self.long_task_service.do_work(seconds)
-
-        @module(services=[TaskRouter])
-        class TaskApp(ModuleBase):
-            pass
-
-        app = TaskApp()
-        app.init()
-
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-            timeout=5.0,
-        ) as client:
-            response = await client.get("/task?seconds=0.1")
-            assert response.status_code == 200
-            result = response.json()
-            assert result["status"] == "done"
-            assert result["duration"] == 0.1
+    app = TaskApp()
+    await app.init()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", timeout=5.0
+    ) as client:
+        response = await client.get("/task?seconds=0.1")
+    assert response.status_code == 200
+    assert response.json() == {"status": "done", "duration": 0.1}

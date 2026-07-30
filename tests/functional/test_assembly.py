@@ -61,7 +61,7 @@ def test_compiled_assembly_has_no_docs_when_no_routes_exist() -> None:
     assert assembly.routes == ()
     assert assembly.openapi == {}
     with pytest.raises(FrozenInstanceError):
-        assembly.routes = ()
+        assembly.routes = ()  # type: ignore[misc]
 
     with TestClient(assembly.asgi_app) as client:
         assert client.get("/openapi.json").status_code == 404

@@ -1,127 +1,89 @@
-"""Functional tests for complex app."""
+"""Functional tests for nested modules and transitive service discovery."""
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import BaseModel
 
-from canary_framework import module, service
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from canary_framework.core.service import ServiceBase
+from canary_framework import get, module, post, router, service
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
+
+pytestmark = pytest.mark.functional
 
 
-@pytest.mark.functional
-class TestComplexApp:
-    """Functional tests for a complex app with multiple modules."""
+async def test_multi_module_app_discovers_router_services_transitively() -> None:
+    class User(BaseModel):
+        id: int | None = None
+        name: str
 
-    @pytest.mark.asyncio
-    async def test_multi_module_app(self) -> None:
-        """Test multi-module app."""
+    @service()
+    class UserService(ServiceBase):
+        def __init__(self) -> None:
+            super().__init__()
+            self.users: list[User] = []
 
-        # User module
-        class User(BaseModel):
-            id: int | None = None
-            name: str
-            email: str
+        def create(self, user: User) -> User:
+            user.id = len(self.users) + 1
+            self.users.append(user)
+            return user
 
-        @service()
-        class UserService(ServiceBase):
-            def __init__(self) -> None:
-                super().__init__()
-                self.users: list[User] = []
+    @router()
+    class UserRouter(RouterBase):
+        users: UserService
 
-            def create(self, user: User) -> User:
-                user.id = len(self.users) + 1
-                self.users.append(user)
-                return user
+        @get("/users")
+        async def list_users(self) -> list[User]:
+            return self.users.users
 
-            def get_all(self) -> list[User]:
-                return self.users
+        @post("/users", request_model=User)
+        async def create_user(self, user: User) -> User:
+            return self.users.create(user)
 
-        @service()
-        class UserRouter(ServiceBase):
-            router = Router()
-            user_service: UserService
+    class Product(BaseModel):
+        id: int | None = None
+        name: str
+        price: float
 
-            @router.get("/users")
-            async def list_users(self) -> list[User]:
-                return self.user_service.get_all()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
+    @service()
+    class ProductService(ServiceBase):
+        def __init__(self) -> None:
+            super().__init__()
+            self.products: list[Product] = []
 
-            @router.post("/users", request_model=User)
-            async def create_user(self, user: User) -> User:
-                return self.user_service.create(user)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportAttributeAccessIssue]
+        def create(self, product: Product) -> Product:
+            product.id = len(self.products) + 1
+            self.products.append(product)
+            return product
 
-        @module(services=[UserService, UserRouter])
-        class UserModule(ModuleBase):
-            pass
+    @router()
+    class ProductRouter(RouterBase):
+        products: ProductService
 
-        # Product module
-        class Product(BaseModel):
-            id: int | None = None
-            name: str
-            price: float
+        @get("/products")
+        async def list_products(self) -> list[Product]:
+            return self.products.products
 
-        @service()
-        class ProductService(ServiceBase):
-            def __init__(self) -> None:
-                super().__init__()
-                self.products: list[Product] = []
+        @post("/products", request_model=Product)
+        async def create_product(self, product: Product) -> Product:
+            return self.products.create(product)
 
-            def create(self, product: Product) -> Product:
-                product.id = len(self.products) + 1
-                self.products.append(product)
-                return product
+    @module(children=(UserRouter,))
+    class UserModule(ModuleBase):
+        pass
 
-            def get_all(self) -> list[Product]:
-                return self.products
+    @module(children=(ProductRouter,))
+    class ProductModule(ModuleBase):
+        pass
 
-        @service()
-        class ProductRouter(ServiceBase):
-            router = Router()
-            product_service: ProductService
+    @module(children=(UserModule, ProductModule))
+    class MainApp(ModuleBase):
+        pass
 
-            @router.get("/products")
-            async def list_products(self) -> list[Product]:
-                return self.product_service.get_all()
-
-            @router.post("/products", request_model=Product)
-            async def create_product(self, product: Product) -> Product:
-                return self.product_service.create(product)
-
-        @module(services=[ProductService, ProductRouter])
-        class ProductModule(ModuleBase):
-            pass
-
-        # Main app module
-        @module(services=[UserModule, ProductModule])
-        class MainApp(ModuleBase):
-            pass
-
-        # Create and configure app
-        app = MainApp()
-        app.init()
-
-        # Test both modules
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
-            # Test user module
-            response = await client.post(
-                "/users",
-                json={"name": "Alice", "email": "alice@example.com"},
-            )
-            assert response.status_code == 200
-
-            response = await client.get("/users")
-            assert len(response.json()) == 1
-
-            # Test product module
-            response = await client.post(
-                "/products",
-                json={"name": "Laptop", "price": 999.99},
-            )
-            assert response.status_code == 200
-
-            response = await client.get("/products")
-            assert len(response.json()) == 1
+    app = MainApp()
+    await app.init()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post("/users", json={"name": "Alice"})).status_code == 200
+        assert len((await client.get("/users")).json()) == 1
+        assert (
+            await client.post("/products", json={"name": "Laptop", "price": 999.99})
+        ).status_code == 200
+        assert len((await client.get("/products")).json()) == 1

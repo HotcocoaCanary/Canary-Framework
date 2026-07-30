@@ -7,8 +7,7 @@ Has zero framework-internal dependencies — safe for all other modules to impor
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from types import UnionType
 from typing import Any, Protocol, get_args, get_origin
@@ -24,35 +23,6 @@ class LifecycleState(StrEnum):
     STARTED = "started"
     STOPPED = "stopped"
     FAILED = "failed"
-
-
-class LifecycleHook(StrEnum):
-    """生命周期钩子阶段枚举。
-
-    定义了框架支持的两个生命周期钩子阶段：
-    - BEFORE_STARTUP: 启动前
-    - BEFORE_SHUTDOWN: 关闭前
-
-    Lifecycle phases for hook registration.
-
-    Defines two lifecycle hook phases supported by the framework:
-    - BEFORE_STARTUP: Before startup
-    - BEFORE_SHUTDOWN: Before shutdown
-    """
-
-    BEFORE_STARTUP = "before_startup"
-    BEFORE_SHUTDOWN = "before_shutdown"
-
-
-HookFunction = Callable[..., object]
-"""钩子函数类型别名。
-
-表示可以接受任意参数并返回任意类型的函数。
-
-Type alias for hook functions.
-
-Represents a function that can accept any arguments and return any type.
-"""
 
 
 class LifecycleAware(Protocol):
@@ -129,64 +99,6 @@ CF_SERVICE_META = "__cf_service_meta__"
 # 名称属性常量
 # Name attribute constant
 CF_NAME_ATTR = "__cf_name__"
-
-
-@dataclass(slots=True)
-class RouteInfo:
-    """单个 HTTP 路由的完整元数据。
-
-    在 Router 的 @router.get/@router.post 等方法中创建，替代原来的无类型 dict。
-    预计算 starlette_path、path_params、query_params 和 param_meta，
-    避免运行时和 OpenAPI 生成时的重复解析。
-
-    Complete metadata for a single HTTP route.
-
-    Created by Router's @router.get/@router.post etc. methods, replacing the untyped dict.
-    Pre-computes starlette_path, path_params, query_params, and param_meta
-    to avoid duplicate parsing at runtime and OpenAPI generation time.
-    """
-
-    handler: HookFunction
-    method: str
-    path: str
-    starlette_path: str
-    path_params: list[str]
-    query_params: list[str]
-    param_meta: dict[str, object]
-    summary: str | None = None
-    description: str | None = None
-    response_model: type | None = None
-    request_model: type | None = None
-    tags: list[str] = field(default_factory=list)
-    deprecated: bool = False
-    operation_id: str | None = None
-    responses: dict[str, object] = field(default_factory=dict)
-    router_prefix: str = ""
-    router_tags: list[str] = field(default_factory=list)
-    body_param: str | None = None
-
-
-@dataclass(slots=True)
-class ResolvedRoute:
-    """已解析、可直接组装的单条路由（聚合货币）。
-
-    full_path 已拼好前缀，handler 已绑定到拥有它的实例。
-
-    A fully-resolved route ready for assembly (the aggregation currency).
-    full_path is prefix-composed; handler is bound to its owning instance.
-    """
-
-    full_path: str
-    handler: HookFunction
-    info: RouteInfo
-
-
-# 生命周期钩子标记映射
-# Lifecycle hook marker mapping
-CF_HOOK_MARKER_MAP: dict[LifecycleHook, str] = {
-    LifecycleHook.BEFORE_STARTUP: "__cf_before_startup__",
-    LifecycleHook.BEFORE_SHUTDOWN: "__cf_before_shutdown__",
-}
 
 
 def is_cf_service(cls: type) -> bool:
@@ -273,17 +185,12 @@ def get_module_meta(cls: type) -> ModuleMeta | None:
 
 
 __all__ = [
-    "CF_HOOK_MARKER_MAP",
     "CF_NAME_ATTR",
     "CF_SERVICE_MARKER",
     "CF_SERVICE_META",
-    "HookFunction",
     "LifecycleAware",
-    "LifecycleHook",
     "LifecycleState",
     "ModuleMeta",
-    "ResolvedRoute",
-    "RouteInfo",
     "RouterMeta",
     "ServiceEntry",
     "ServiceMeta",

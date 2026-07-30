@@ -17,7 +17,7 @@ async def test_repeated_public_transition_is_rejected() -> None:
 
 async def test_sync_extension_is_rejected_and_marks_failed() -> None:
     class Subject(ServiceBase):
-        def on_init(self) -> None:
+        def on_init(self) -> None:  # type: ignore[override]
             self.called = True
 
     subject = Subject()

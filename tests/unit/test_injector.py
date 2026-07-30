@@ -111,7 +111,7 @@ def test_topological_sort_is_stable_and_dependency_first() -> None:
     class D:
         pass
 
-    graph = {
+    graph: dict[type, tuple[DependencySpec, ...]] = {
         A: (DependencySpec("b", B),),
         B: (DependencySpec("c", C),),
         C: (),
@@ -132,7 +132,7 @@ def test_cycle_error_reports_actual_edges() -> None:
     class C:
         pass
 
-    graph = {
+    graph: dict[type, tuple[DependencySpec, ...]] = {
         A: (DependencySpec("b", B),),
         B: (DependencySpec("c", C),),
         C: (DependencySpec("a", A),),

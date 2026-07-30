@@ -1,5 +1,7 @@
 """Unit tests for compositional ModuleBase."""
 
+from typing import cast
+
 import pytest
 from pydantic import Field
 
@@ -118,7 +120,9 @@ async def test_module_delegates_child_lifecycle_in_dependency_order() -> None:
 async def test_nested_module_routes_extend_context_and_inherit_config() -> None:
     class AppConfig(CanaryConfig):
         openapi_security_schemes: dict[str, dict[str, object]] = Field(
-            default_factory=lambda: {"bearerAuth": {"type": "http", "scheme": "bearer"}}
+            default_factory=lambda: cast(
+                dict[str, dict[str, object]], {"bearerAuth": {"type": "http", "scheme": "bearer"}}
+            )
         )
 
     @router(prefix="/users", tags=("Users",))
@@ -148,9 +152,9 @@ async def test_nested_module_routes_extend_context_and_inherit_config() -> None:
     assert routes[0].tags == ("v1", "Users")
     assert routes[0].security == ("bearerAuth",)
     assert "bearerAuth" in app.config.openapi_security_schemes  # type: ignore[union-attr]
-    child_module = app.direct_children[0]
-    child_router = child_module.direct_children[0]  # type: ignore[union-attr]
-    assert child_router._cf_dependency_engine is None  # type: ignore[attr-defined]
+    child_module = cast(ModuleBase, app.direct_children[0])
+    child_router = cast(RouterBase, child_module.direct_children[0])
+    assert child_router._cf_dependency_engine is None
 
 
 @pytest.mark.unit
