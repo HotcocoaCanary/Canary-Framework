@@ -32,10 +32,11 @@ async def test_plain_service_remains_non_callable() -> None:
     assert subject.lifecycle_state.value == "stopped"
 
 
-async def test_standalone_router_has_no_asgi_surface() -> None:
+async def test_standalone_router_is_a_runtime_root() -> None:
     subject = HealthRouter()
     await subject.init()
     routes = subject._collect_routes(RouteContext())
     assert [route.full_path for route in routes] == ["/health"]
-    assert not callable(subject)
-    assert not hasattr(subject, "asgi_app")
+    assert callable(subject)
+    assert subject.asgi_app is not None
+    assert "/health" in subject.openapi()["paths"]

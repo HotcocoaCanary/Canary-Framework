@@ -6,6 +6,7 @@ from typing import cast, override
 
 from canary_framework.common import CanaryConfig, ModuleMeta, get_module_meta
 from canary_framework.common.routing import ResolvedRoute, RouteContext
+from canary_framework.core._application import _ApplicationMixin
 from canary_framework.core.router import RouterBase
 from canary_framework.core.service import ServiceBase
 from canary_framework.engine.container import DependencyEngine
@@ -14,7 +15,7 @@ from canary_framework.engine.registry import Registry
 from canary_framework.engine.routing import extend_context
 
 
-class ModuleBase(ServiceBase):
+class ModuleBase(_ApplicationMixin):
     """Compose declared child nodes inside one dependency scope."""
 
     def __init__(self) -> None:
@@ -48,6 +49,8 @@ class ModuleBase(ServiceBase):
     @override
     async def _init(self) -> None:
         """Build and initialize this module's nested dependency scope."""
+        if self._cf_parent_registry is None:
+            self._assembly = None
         config = self._select_config()
         self._cf_config = config
         engine = DependencyEngine(

@@ -5,13 +5,13 @@ from __future__ import annotations
 from canary_framework.common import CanaryConfig, RouteContext, RouteSpec, get_router_meta
 from canary_framework.common.logging import ensure_logging
 from canary_framework.common.routing import ResolvedRoute
-from canary_framework.core.service import ServiceBase
+from canary_framework.core._application import _ApplicationMixin
 from canary_framework.engine.container import DependencyEngine
 from canary_framework.engine.dependencies import resolve_deps
 from canary_framework.engine.routing import resolve_router_routes
 
 
-class RouterBase(ServiceBase):
+class RouterBase(_ApplicationMixin):
     """Base class for declaration-driven routers."""
 
     __cf_route_specs__: tuple[RouteSpec, ...] = ()
@@ -41,6 +41,7 @@ class RouterBase(ServiceBase):
         """Initialize dependencies only when this router is a root node."""
         if self._cf_parent_registry is not None:
             return
+        self._assembly = None
         deps = resolve_deps(type(self))
         engine = DependencyEngine(
             children=tuple(dependency.target for dependency in deps),
