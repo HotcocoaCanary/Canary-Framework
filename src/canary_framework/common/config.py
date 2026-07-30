@@ -1,11 +1,4 @@
-"""Framework configuration — CanaryConfig base class.
-
-All framework-configurable parameters with sensible defaults and Pydantic
-validation.  Users subclass CanaryConfig to customize.
-
-CanaryConfig extends pydantic-settings BaseSettings, enabling environment
-variable overrides (e.g. `LOG_LEVEL=DEBUG`) and optional .env file loading.
-"""
+"""Validated framework configuration defaults."""
 
 from __future__ import annotations
 
@@ -16,14 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class CanaryConfig(BaseSettings):
-    """Canary Framework configuration base class.
-
-    All parameters have sensible defaults. Override fields in a subclass
-    to customize. Environment variables matching field names (case-
-    insensitive) are automatically loaded as overrides by BaseSettings.
-    Extra fields are allowed for user-defined config. .env file loading
-    is disabled by default — set `env_file` in `model_config` to enable.
-    """
+    """Define runtime and OpenAPI settings for a root or Module."""
 
     model_config = SettingsConfigDict(
         extra="allow",

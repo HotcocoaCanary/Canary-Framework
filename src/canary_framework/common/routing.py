@@ -13,8 +13,6 @@ ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 
 class _RouteOwner(Protocol):
-    """A node that owns route declarations."""
-
     @property
     def route_specs(self) -> tuple[RouteSpec, ...]:
         raise NotImplementedError
@@ -22,7 +20,7 @@ class _RouteOwner(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ResponseSpec:
-    """Response documentation declaration."""
+    """Describe one documented endpoint response."""
 
     description: str
     model: type | None = None
@@ -30,7 +28,7 @@ class ResponseSpec:
 
 @dataclass(frozen=True, slots=True)
 class RouteSpec:
-    """Immutable node-local route declaration."""
+    """Store an immutable endpoint declaration."""
 
     method: str
     local_path: str
@@ -53,7 +51,7 @@ class RouteSpec:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedRoute:
-    """Immutable route with its context resolved."""
+    """Bind a route declaration to its owner, handler, and context."""
 
     owner: _RouteOwner
     method: str
@@ -65,12 +63,13 @@ class ResolvedRoute:
 
     @property
     def operation_id(self) -> str:
+        """Return the explicit or stable default operation identifier."""
         return self.spec.operation_id or f"{type(self.owner).__name__}.{self.spec.handler_name}"
 
 
 @dataclass(frozen=True, slots=True)
 class RouteContext:
-    """Inherited context used during route resolution."""
+    """Carry inherited prefix, tags, and security while resolving routes."""
 
     prefix: str = ""
     tags: tuple[str, ...] = ()

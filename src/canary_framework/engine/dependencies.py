@@ -25,14 +25,11 @@ from canary_framework.common import (
 
 @dataclass(frozen=True, slots=True)
 class DependencySpec:
-    """One class-level dependency declaration."""
-
     attribute: str
     target: type
 
 
 def _declaration_order(cls: type) -> tuple[tuple[str, Any], ...]:
-    """Collect class annotations base-first while preserving declaration order."""
     ordered: dict[str, Any] = {}
     for base in reversed(cls.__mro__):
         for name, annotation in vars(base).get("__annotations__", {}).items():
@@ -41,7 +38,6 @@ def _declaration_order(cls: type) -> tuple[tuple[str, Any], ...]:
 
 
 def _resolution_error(cls: type, annotations: tuple[tuple[str, Any], ...], exc: Exception) -> None:
-    """Raise a contextual error for a failed type-hint evaluation."""
     missing_name: str | None = None
     match = re.search(r"name ['\"]([^'\"]+)['\"] is not defined", str(exc))
     if match:
@@ -60,7 +56,6 @@ def _resolution_error(cls: type, annotations: tuple[tuple[str, Any], ...], exc: 
 
 
 def validate_dependency_direction(owner: type, dependency: DependencySpec) -> None:
-    """Reject edges that point upward in the service/router/module layers."""
     target = dependency.target
     if is_cf_module(owner):
         return
@@ -79,7 +74,6 @@ def validate_dependency_direction(owner: type, dependency: DependencySpec) -> No
 
 
 def resolve_deps(cls: type) -> tuple[DependencySpec, ...]:
-    """Resolve marked class annotations in base-to-derived declaration order."""
     declarations = _declaration_order(cls)
     try:
         hints = get_type_hints(cls)
@@ -101,7 +95,6 @@ def resolve_deps(cls: type) -> tuple[DependencySpec, ...]:
 def _cycle_path(
     graph: Mapping[type, tuple[DependencySpec, ...]], residual: set[type], start: type
 ) -> str:
-    """Find and format one actual residual cycle with its edge attributes."""
     visiting: dict[type, int] = {}
     nodes: list[type] = []
     edges: list[DependencySpec] = []
@@ -139,7 +132,6 @@ def _cycle_path(
 def topological_sort(
     graph: Mapping[type, tuple[DependencySpec, ...]],
 ) -> tuple[type, ...]:
-    """Return stable dependency-first ordering or report an attributed cycle."""
     declaration_order = tuple(graph)
     in_degree: dict[type, int] = dict.fromkeys(declaration_order, 0)
     adjacency: dict[type, list[type]] = defaultdict(list)

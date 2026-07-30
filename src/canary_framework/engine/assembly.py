@@ -16,8 +16,6 @@ from canary_framework.engine.validation import validate_routes
 
 @dataclass(frozen=True, slots=True)
 class Assembly:
-    """Immutable runtime bundle for one compiled app."""
-
     routes: tuple[ResolvedRoute, ...]
     openapi: dict[str, object]
     asgi_app: ASGIApp
@@ -28,7 +26,6 @@ def compile_assembly(
     *,
     config: CanaryConfig,
 ) -> Assembly:
-    """Validate routes, then compile OpenAPI and ASGI artifacts."""
     validated = validate_routes(routes, config=config)
     if not validated:
         return Assembly(

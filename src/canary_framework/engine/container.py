@@ -31,7 +31,6 @@ class _LifecycleNode(Protocol):
 
 
 def _metadata(cls: type) -> ServiceMeta:
-    """Return a registry name for any marked framework node."""
     meta = get_service_meta(cls)
     if meta is None:
         raise TypeError(f"'{cls.__name__}' is not decorated with @service or @module.")
@@ -39,8 +38,6 @@ def _metadata(cls: type) -> ServiceMeta:
 
 
 class DependencyEngine:
-    """Build one registry scope and drive its nodes in dependency order."""
-
     def __init__(
         self,
         *,
@@ -58,16 +55,13 @@ class DependencyEngine:
 
     @property
     def direct_children(self) -> tuple[_LifecycleNode, ...]:
-        """Return direct children in declaration order."""
         return self._direct_children
 
     @property
     def config(self) -> CanaryConfig | None:
-        """Return the config nearest to this scope."""
         return self._config
 
     async def init(self) -> None:
-        """Register, instantiate, wire, and initialize this scope."""
         self._register_graph()
         self._instantiate_and_wire()
         try:
@@ -80,7 +74,6 @@ class DependencyEngine:
             raise
 
     async def startup(self) -> None:
-        """Start initialized nodes in dependency order."""
         try:
             for cls in self._order:
                 node = cast(_LifecycleNode, self.registry.get(cls))
@@ -91,7 +84,6 @@ class DependencyEngine:
             raise
 
     async def shutdown(self) -> None:
-        """Stop started nodes in reverse dependency order."""
         for node in reversed(self._started):
             if node.lifecycle_state is LifecycleState.STARTED:
                 await node.shutdown()
@@ -99,12 +91,10 @@ class DependencyEngine:
         self._initialized.clear()
 
     async def rollback_initialized(self) -> None:
-        """Roll back successful initialization in reverse order."""
         await self._rollback(self._initialized, started=False)
         self._initialized.clear()
 
     async def rollback_started(self) -> None:
-        """Roll back successful startup in reverse order."""
         await self._rollback(self._started, started=True)
         self._started.clear()
         self._initialized.clear()
@@ -114,7 +104,6 @@ class DependencyEngine:
             await node._rollback(started=started)
 
     def _register_graph(self) -> None:
-        """Construct the local graph while leaving nested module descendants scoped."""
         for cls in self._child_classes:
             self._register_local(cls)
 
@@ -129,12 +118,11 @@ class DependencyEngine:
         self._order = topological_sort(graph)
 
     def _register_local(self, cls: type) -> None:
-        """Register an owned node and its ordinary transitive dependencies."""
         if self.registry.has_local(cls):
             return
         if not is_cf_service(cls):
             raise TypeError(f"'{cls.__name__}' is not decorated with @service or @module.")
-        self.registry.register(cls, meta=_metadata(cls))
+        self.registry.register(cls, _metadata(cls).name)
         for dependency in resolve_deps(cls):
             if self.registry.has(dependency.target):
                 continue
@@ -143,7 +131,6 @@ class DependencyEngine:
     def _descendant_dependencies(
         self, cls: type, seen: set[type] | None = None
     ) -> tuple[DependencySpec, ...]:
-        """Find dependencies consumed below a module for promoted-edge ordering."""
         visited = set() if seen is None else seen
         if cls in visited:
             return ()
@@ -159,7 +146,6 @@ class DependencyEngine:
         return tuple(dependencies)
 
     def _instantiate_and_wire(self) -> None:
-        """Instantiate each local node once and wire local or inherited targets."""
         for cls in self._order:
             entry = self.registry.get_by_class(cls)
             instance = cls()

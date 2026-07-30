@@ -11,7 +11,6 @@ from canary_framework.engine.params import RouteAnalysis, analyze_route
 
 
 def _normalize_path(path: str) -> str:
-    """Normalize a configured or resolved path without changing root."""
     base = path.partition("?")[0]
     normalized = "/" + "/".join(part for part in base.split("/") if part)
     return "/" if normalized == "/" else normalized
@@ -27,8 +26,6 @@ def _error(route: ResolvedRoute, message: str) -> RouteCompilationError:
 
 @dataclass(frozen=True, slots=True)
 class ValidatedRoute:
-    """A route paired with its canonical analysis and effective operation ID."""
-
     route: ResolvedRoute
     analysis: RouteAnalysis
     operation_id: str
@@ -37,7 +34,6 @@ class ValidatedRoute:
 def validate_routes(
     routes: tuple[ResolvedRoute, ...], config: CanaryConfig
 ) -> tuple[ValidatedRoute, ...]:
-    """Analyze and validate all routes in deterministic declaration order."""
     analyses = tuple((route, analyze_route(route)) for route in routes)
 
     seen_paths: dict[tuple[str, str], ResolvedRoute] = {}

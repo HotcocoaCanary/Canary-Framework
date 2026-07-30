@@ -9,10 +9,7 @@ from canary_framework.core.service import ServiceBase
 
 
 def service() -> Callable[[type[ServiceBase]], type[ServiceBase]]:
-    """Mark an explicitly inherited class as a service node.
-
-    将显式继承 ``ServiceBase`` 的类标记为服务节点。
-    """
+    """Declare a lifecycle and dependency-injection service."""
 
     def decorate(cls: type[ServiceBase]) -> type[ServiceBase]:
         if not issubclass(cls, ServiceBase):

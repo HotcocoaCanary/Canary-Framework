@@ -11,8 +11,13 @@ from canary_framework import get, router
 from canary_framework.common import CanaryConfig, RouteCompilationError, RouteContext
 from canary_framework.common.routing import ResolvedRoute, RouteSpec
 from canary_framework.core import RouterBase
+from canary_framework.engine import params
 from canary_framework.engine.params import analyze_route
 from canary_framework.engine.validation import validate_routes
+
+
+def test_params_module_has_no_legacy_tuple_adapter() -> None:
+    assert not hasattr(params, "resolve_params")
 
 
 class RouteTestConfig(CanaryConfig):

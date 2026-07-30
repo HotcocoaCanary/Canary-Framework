@@ -12,33 +12,28 @@ from canary_framework.engine.routing import resolve_router_routes
 
 
 class RouterBase(_ApplicationMixin):
-    """Base class for declaration-driven routers."""
+    """Provide a runnable HTTP root with dependency injection and routes."""
 
     __cf_route_specs__: tuple[RouteSpec, ...] = ()
 
     def __init__(self) -> None:
-        """Initialize a router and defer standalone dependency assembly."""
         super().__init__()
         self._cf_dependency_engine: DependencyEngine | None = None
 
     @property
     def route_specs(self) -> tuple[RouteSpec, ...]:
-        """Return immutable route specifications declared on this router class."""
+        """Return endpoint declarations collected by the Router decorator."""
         return self.__cf_route_specs__
 
     def _standalone_config(self) -> CanaryConfig:
-        """Create and apply this router's standalone configuration once."""
         if self._cf_config is None:
             meta = get_router_meta(type(self))
-            config_cls = (
-                CanaryConfig if meta is None or meta.config_cls is None else meta.config_cls
-            )
+            config_cls = meta.config_cls if meta and meta.config_cls else CanaryConfig
             self._cf_config = config_cls()
             ensure_logging(self._cf_config.log_level)
         return self._cf_config
 
     async def _init(self) -> None:
-        """Initialize dependencies only when this router is a root node."""
         if self._cf_parent_registry is not None:
             return
         self._assembly = None
@@ -55,26 +50,21 @@ class RouterBase(_ApplicationMixin):
         self._cf_config = engine.config
 
     async def _startup(self) -> None:
-        """Start standalone dependencies in dependency order."""
         if self._cf_dependency_engine is not None:
             await self._cf_dependency_engine.startup()
 
     async def _shutdown(self) -> None:
-        """Stop standalone dependencies in reverse dependency order."""
         if self._cf_dependency_engine is not None:
             await self._cf_dependency_engine.shutdown()
 
     async def _rollback_phase(self, *, started: bool) -> None:
-        """Roll back standalone dependencies after a lifecycle failure."""
         if self._cf_dependency_engine is None:
             return
-        if started:
-            await self._cf_dependency_engine.rollback_started()
-        else:
-            await self._cf_dependency_engine.rollback_initialized()
+        engine = self._cf_dependency_engine
+        rollback = engine.rollback_started if started else engine.rollback_initialized
+        await rollback()
 
     def _collect_routes(self, context: RouteContext) -> tuple[ResolvedRoute, ...]:
-        """Resolve this router's routes against an inherited route context."""
         meta = get_router_meta(type(self))
         if meta is None:
             raise TypeError(f"{type(self).__name__} must be decorated with @router.")

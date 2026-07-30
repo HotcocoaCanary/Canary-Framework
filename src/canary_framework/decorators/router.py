@@ -34,8 +34,6 @@ def _route[**P, R](
     operation_id: str | None = None,
     responses: Mapping[int | str, ResponseSpec] | None = None,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-    """Attach one immutable route specification without wrapping the handler."""
-
     def decorate(handler: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
         spec = RouteSpec(
             method=method,
@@ -59,8 +57,6 @@ def _route[**P, R](
 
 
 class _RouteDecorator(Protocol):
-    """Typed public endpoint decorator factory."""
-
     def __call__[**P, R](
         self,
         path: str,
@@ -75,13 +71,10 @@ class _RouteDecorator(Protocol):
         operation_id: str | None = None,
         responses: Mapping[int | str, ResponseSpec] | None = None,
     ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
-        """Declare a route and preserve the decorated handler's type."""
         raise NotImplementedError
 
 
 def _method_decorator(method: str, public_name: str) -> _RouteDecorator:
-    """Create one named, typed HTTP method decorator."""
-
     def declare[**P, R](
         path: str,
         *,
@@ -110,6 +103,7 @@ def _method_decorator(method: str, public_name: str) -> _RouteDecorator:
         )
 
     declare.__name__ = public_name
+    declare.__doc__ = f"Declare a {method} endpoint."
     return declare
 
 
@@ -127,7 +121,7 @@ def router(
     security: Sequence[str] = (),
     config: type[CanaryConfig] | None = None,
 ) -> Callable[[type[RouterBase]], type[RouterBase]]:
-    """Declare a router node and collect its local endpoint specifications."""
+    """Declare a Router with inherited route context and optional config."""
     if config is not None and not issubclass(config, CanaryConfig):
         raise TypeError("router config must inherit from CanaryConfig.")
 

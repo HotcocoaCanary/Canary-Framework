@@ -1,5 +1,5 @@
 site_name: Canary Framework
-site_description: Lightweight decorator-driven Python async service framework with dependency injection
+site_description: Typed async Service, Router, and Module framework with dependency injection
 site_author: 张文博 (Canary)
 copyright: Copyright &copy; 2026 张文博 (Canary)
 

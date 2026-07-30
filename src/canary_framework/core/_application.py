@@ -46,9 +46,11 @@ class _ApplicationMixin(ServiceBase):
 
     @property
     def asgi_app(self) -> ASGIApp:
+        """Return the cached ASGI application for an initialized root."""
         return self._ensure_assembly().asgi_app
 
     def openapi(self) -> dict[str, object]:
+        """Return the cached OpenAPI document for an initialized root."""
         return self._ensure_assembly().openapi
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:

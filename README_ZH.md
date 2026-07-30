@@ -1,32 +1,8 @@
-<p align="center">
-  <h1 align="center">Canary Framework</h1>
-  <p align="center">轻量级 Python 异步服务框架 —— 装饰器驱动，注解式依赖注入</p>
-</p>
+<h1 align="center">Canary Framework 0.6</h1>
 
-<p align="center">
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="License"></a>
-  <a href="https://pypi.org/project/canary-framework/"><img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python"></a>
-  <a href="https://github.com/HotcocoaCanary/Canary-Framework/actions/workflows/ci.yml"><img src="https://github.com/HotcocoaCanary/Canary-Framework/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/HotcocoaCanary/Canary-Framework"><img src="https://img.shields.io/github/stars/HotcocoaCanary/Canary-Framework?style=social" alt="GitHub Stars"></a>
-</p>
+<p align="center">基于 Service、Router、Module 的强类型装饰器式 Python 异步框架。</p>
 
----
-
-Canary Framework 是一个**装饰器驱动**的 Python 异步服务框架。核心理念：**服务是最小单元，模块组合服务，模块本身也是服务。**
-
-> **0.5.x 是当前积极维护的版本线。** 只要核心设计理念不变，新特性与修复就会持续以 `0.5.x` 发布——
-> 详见变更日志中的[版本策略](./CHANGELOG.md#版本策略--versioning-policy)，以及
-> [What's New in 0.5.x](./docs/zh/whats-new.md) 了解最新的 router 重设计。
-
-## 核心特性
-
-- **装饰器驱动** — 使用 `@service` 和 `@module` 装饰器，需显式基类继承
-- **注解式依赖注入** — 用类型注解声明依赖：`db: Database`，无样板代码
-- **拓扑启动** — Kahn 算法确保依赖优先启动
-- **生命周期管理** — `@before_startup` / `@before_shutdown` 钩子
-- **ASGI 兼容** — 基于 Starlette，支持 uvicorn 等 ASGI 服务器
-- **模块化架构** — 层级化组合，模块可嵌套
-- **OpenAPI 支持** — 自动生成 Swagger UI 和 ReDoc 文档
+[English](README.md) · [中文文档](docs/zh/index.md) · [变更日志](CHANGELOG.md)
 
 ## 安装
 
@@ -34,243 +10,87 @@ Canary Framework 是一个**装饰器驱动**的 Python 异步服务框架。核
 pip install canary-framework
 ```
 
+需要 Python 3.12+。
+
+## 核心模型
+
+- **Service** 负责生命周期、依赖注入与领域逻辑，不是 ASGI 应用。
+- **Router** 是最小可运行 HTTP 应用。少量端点逻辑可以保留在 Router；需要复用或脱离 HTTP 测试时提取为 Service。
+- **Module** 通过 `children` 显式组合节点，形成依赖作用域，并递归聚合后代 Router。
+- 运行根必须先执行 `await app.init()`。ASGI lifespan 只负责 startup/shutdown，绝不负责初始化。
+- `on_init` 用于结构状态；依赖事件循环的长生命周期资源放在 `on_startup`，并在 `on_shutdown` 释放。
+- 配置属于运行根/Module 上下文，不是注入式 Service。根配置唯一拥有 OpenAPI 元数据、安全方案与文档路径。
+
 ## 快速开始
 
 ```python
-from pydantic import BaseModel
+import asyncio
 
-from canary_framework import service, module
-from canary_framework.core.service import ServiceBase
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
+import uvicorn
 
-class NewUser(BaseModel):
-    name: str
+from canary_framework import get, router
+from canary_framework.core import RouterBase
 
-@service()
-class Database(ServiceBase):
-    async def init(self):
-        await super().init()
-        self.conn = "connected"
 
-@service()
-class UserService(ServiceBase):
-    db: Database
+@router(prefix="/hello", tags=("Hello",))
+class HelloRouter(RouterBase):
+    @get("")
+    async def hello(self) -> dict[str, str]:
+        return {"message": "Hello, Canary!"}
 
-    async def get_user(self, user_id: int):
-        return {"id": user_id, "name": "Alice"}
 
-@service()
-class Api(ServiceBase):
-    router = Router(prefix="/api", tags=["users"])
-    user_service: UserService
-
-    @router.get("/users/{user_id}")
-    async def get_user(self, user_id: int) -> dict:
-        return self.user_service.get_user(user_id)
-
-    @router.post("/users")
-    async def create_user(self, user: NewUser) -> dict:
-        # `user` 是 BaseModel 参数，会被自动识别为请求体
-        return {"id": 1, "name": user.name}
-
-@module(services=[Database, UserService, Api])
-class App(ModuleBase):
-    pass
-
-# ---- 入口 ----
-
-async def setup():
-    app = App()
+async def setup() -> HelloRouter:
+    app = HelloRouter()
     await app.init()
     return app
 
-if __name__ == "__main__":
-    import asyncio
-    import uvicorn
 
-    app = asyncio.run(setup())
-    uvicorn.run(app, lifespan="on")
+application = asyncio.run(setup())
+uvicorn.run(application, lifespan="on")
 ```
 
-## 配置
+访问 `http://127.0.0.1:8000/hello`、`/docs`、`/redoc` 或 `/openapi.json`。
 
-使用 `@config` 装饰器和 `CanaryConfig` 自定义框架行为：
-
-```python
-from canary_framework import config
-from canary_framework.common.config import CanaryConfig
-
-@config()
-class AppConfig(CanaryConfig):
-    host: str = "0.0.0.0"
-    port: int = 8080
-    openapi_title: str = "My API"
-    log_level: str = "DEBUG"
-
-@module(services=[AppConfig, Database, Api])
-class App(ModuleBase):
-    config: AppConfig
-
-async def setup():
-    app = App()
-    await app.init()
-    return app, app.config
-```
-
-## Web 示例（带 OpenAPI）
+## 组合与传递式 DI
 
 ```python
-from canary_framework import service, module
-from canary_framework.core.service import ServiceBase
-from canary_framework.core.module import ModuleBase
-from canary_framework.core.router import Router
-from pydantic import BaseModel, Field
-
-class UserRequest(BaseModel):
-    name: str = Field(description="用户名")
-    email: str = Field(description="用户邮箱")
-
-class UserResponse(BaseModel):
-    id: int
-    name: str
-    email: str
+from canary_framework import get, module, router, service
+from canary_framework.core import ModuleBase, RouterBase, ServiceBase
 
 @service()
-class Users(ServiceBase):
-    router = Router(prefix="/users", tags=["Users"])
+class Greeting(ServiceBase):
+    def message(self, name: str) -> str:
+        return f"Hello, {name}!"
 
-    @router.get("/", summary="获取用户列表", description="获取所有用户")
-    async def list_users(self) -> list[UserResponse]:
-        return []
+@router(prefix="/api")
+class ApiRouter(RouterBase):
+    greeting: Greeting
 
-    @router.post("/",
-          summary="创建用户",
-          description="创建新用户",
-          request_model=UserRequest,
-          response_model=UserResponse)
-    async def create_user(self, body: UserRequest) -> UserResponse:
-        return UserResponse(id=1, name=body.name, email=body.email)
+    @get("/hello/{name}")
+    async def hello(self, name: str) -> dict[str, str]:
+        return {"message": self.greeting.message(name)}
 
-@module(services=[Users])
+@module(children=(ApiRouter,))
 class App(ModuleBase):
     pass
 ```
 
-## OpenAPI 文档
+`Greeting` 由 Router 注解传递发现，Module 只列显式组合节点。多个兄弟作用域需要共享同一 Service 实例时，将该 Service 提升到最近的共同父 Module。
 
-启动应用后，访问自动生成的文档：
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
-- **OpenAPI JSON**: `http://localhost:8000/openapi.json`
+## HTTP 与 OpenAPI
 
-## 架构
+使用顶层 `@get`、`@post`、`@put`、`@delete`、`@patch`。路径支持 path 模板（`/{item_id}`）与 query 模板（`/search?q={query}`）。端点支持请求/响应模型、状态码、标签、摘要、描述、废弃标记、operation ID 与额外响应。
 
-```
-src/canary_framework/
-├── common/              # 共享基础设施
-│   ├── config.py        # CanaryConfig
-│   ├── errors.py        # 框架异常
-│   ├── logging.py       # 框架日志
-│   └── types.py         # 数据类、标记和类型别名
-├── core/                # 基类
-│   ├── module/
-│   │   └── _base.py     # ModuleBase — 编排和依赖注入
-│   ├── service/
-│   │   ├── _base.py     # ServiceBase — 生命周期和 ASGI
-│   │   └── _hooks.py    # 生命周期钩子调用
-│   └── router/
-│       ├── _base.py     # Router — 路由收集和 ASGI 路由
-│       └── _utils.py    # 路由处理器构建
-├── decorators/          # 装饰器实现
-│   ├── module.py        # @module
-│   ├── service.py       # @service
-│   ├── config.py        # @config
-│   └── lifecycle.py     # @before_startup, @before_shutdown
-└── engine/              # 运行时引擎
-    ├── registry.py      # 服务注册表
-    ├── dependencies.py  # 拓扑排序 + resolve_deps
-    ├── openapi.py       # OpenAPI schema 生成
-    └── params.py        # 路由参数解析
-```
-
-### 依赖注入流程
-
-```
-@service() class MyService:
-    db: Database      ←  1. 用户通过类型注解声明依赖
-
-resolve_deps(MyService)
-    → get_type_hints() 读取 {db: Database}
-    → 按 CF_SERVICE_MARKER 过滤
-    → 返回 {"db": Database}
-
-    ↓ 拓扑排序：Kahn 算法构建依赖顺序
-    ↓ 实例化：按顺序创建实例
-    ↓ 注入：
-
-setattr(instance, "db", db_instance)   ←  2. 按注解键名注入
-```
-
-### 生命周期流程
-
-```
-app.init()
-  ├── 注册所有服务及传递依赖
-  ├── 拓扑排序 (Kahn 算法)
-  ├── 实例化服务
-  ├── 注入依赖 (注解驱动)
-  ├── 按拓扑顺序调用每个服务的 init()
-
-app.startup()
-  ├── 调用 @before_startup 钩子
-  └── 按拓扑顺序调用每个服务的 startup()
-
-app.shutdown()
-  ├── 调用 @before_shutdown 钩子
-  └── 逆拓扑顺序调用每个服务的 shutdown()
-```
+嵌套 Module/Router 的 prefix、tags、security 按确定顺序传播。运行根编译一张路由表与一份 OpenAPI。路由、文档路径、operation ID、安全方案与 schema 名冲突会在初始化时失败。
 
 ## 示例
 
-[examples/](./examples/) 目录包含可运行的、经过测试的示例：
+[`examples/`](examples) 中有十个可运行示例，从独立 Router 逐步到嵌套作用域、校验、OpenAPI 与分层应用。`04_module_aggregation.py` 演示递归路由聚合。
 
-| 文件 | 描述 |
-|---|---|
-| `01_standalone.py` | 单服务 + Router 独立模式 |
-| `02_module_compose.py` | 模块组合多个服务 |
-| `03_nested_modules.py` | 嵌套模块层级 |
-| `04_module_router.py` | 模块自带 Router |
-| `05_config.py` | 使用 @config() + CanaryConfig 配置 |
-| `06_lifecycle.py` | 生命周期钩子 (before_startup, before_shutdown) |
-| `07_validation.py` | Pydantic 请求/响应验证 |
-| `08_parameters.py` | 路径、查询、请求体参数绑定 |
-| `09_openapi.py` | OpenAPI 标题/版本/描述自定义 |
-| `10_full_app.py` | 完整博客 API + 嵌套模块 |
+## 破坏性发布
 
-## 测试
-
-```bash
-# 运行所有测试
-pytest
-
-# 运行单元测试
-pytest tests/unit/
-
-# 运行集成测试
-pytest tests/integration/
-```
-
-## 社区
-
-- 💬 [Discussions](https://github.com/HotcocoaCanary/Canary-Framework/discussions)
-- 🐛 [Issues](https://github.com/HotcocoaCanary/Canary-Framework/issues)
-- 📖 [Docs](https://HotcocoaCanary.github.io/Canary-Framework/)
-
-## 贡献
-
-参见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+0.6.0 不提供 0.5.x 兼容层。迁移表见[新特性](docs/zh/whats-new.md)。
 
 ## 许可证
 
-[Apache 2.0](./LICENSE) · Copyright 2026 张文博 (Canary)
+Apache-2.0。

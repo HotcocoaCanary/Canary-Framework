@@ -10,7 +10,6 @@ from canary_framework.common.types import RouterMeta
 
 
 def normalize_path(path: str) -> str:
-    """Normalize slash separators while preserving query templates."""
     base, separator, query = path.partition("?")
     normalized = "/" + "/".join(part for part in base.split("/") if part)
     if separator:
@@ -19,14 +18,12 @@ def normalize_path(path: str) -> str:
 
 
 def join_paths(*parts: str) -> str:
-    """Join path parts without changing a query-template suffix."""
     path, separator, query = "/".join(parts).partition("?")
     normalized = normalize_path(path)
     return f"{normalized}?{query}" if separator else normalized
 
 
 def ordered_unique(*groups: Iterable[str]) -> tuple[str, ...]:
-    """Flatten groups while retaining first occurrence order."""
     return tuple(dict.fromkeys(value for group in groups for value in group))
 
 
@@ -37,7 +34,6 @@ def extend_context(
     tags: tuple[str, ...],
     security: tuple[str, ...],
 ) -> RouteContext:
-    """Extend inherited route context with one node's metadata."""
     return RouteContext(
         prefix=join_paths(context.prefix, prefix) if prefix or context.prefix else "",
         tags=ordered_unique(context.tags, tags),
@@ -50,7 +46,6 @@ def resolve_router_routes(
     meta: RouterMeta,
     context: RouteContext,
 ) -> tuple[ResolvedRoute, ...]:
-    """Bind a router's immutable declarations against an inherited context."""
     effective = extend_context(
         context,
         prefix=meta.prefix,

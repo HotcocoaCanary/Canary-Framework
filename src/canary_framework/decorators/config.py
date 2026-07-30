@@ -1,9 +1,4 @@
-"""@config decorator — 标记配置类。
-
-将类标记为 Canary Framework 配置类。
-
-@config decorator — marks a config class.
-"""
+"""Configuration declaration decorator."""
 
 from __future__ import annotations
 
@@ -13,20 +8,7 @@ from canary_framework.common import CF_NAME_ATTR, CanaryConfig
 
 
 def config() -> Callable[[type], type[CanaryConfig]]:
-    """标记一个类为 Canary Framework 配置类。
-
-    配置类必须继承自 CanaryConfig。
-
-    Returns:
-        装饰后的类。
-
-    Mark a class as a Canary Framework config class.
-
-    The config class must inherit from CanaryConfig.
-
-    Returns:
-        The decorated class.
-    """
+    """Mark a CanaryConfig subclass and return it unchanged."""
 
     def decorator(cls: type) -> type[CanaryConfig]:
         if not issubclass(cls, CanaryConfig):

@@ -1,8 +1,4 @@
-"""Lifecycle-only service base class.
-
-ServiceBase owns the framework lifecycle state machine. HTTP routing and ASGI
-assembly are provided by higher-level runtime components.
-"""
+"""Lifecycle-only service base class."""
 
 from __future__ import annotations
 
@@ -16,10 +12,9 @@ from canary_framework.common.types import LifecycleState
 
 
 class ServiceBase:
-    """Base class implementing the asynchronous service lifecycle."""
+    """Provide the final lifecycle state machine for every runtime node."""
 
     def __init__(self) -> None:
-        """Initialize a service in the created state."""
         self._cf_state = LifecycleState.CREATED
         self._cf_parent_registry: object | None = None
         self._cf_config: CanaryConfig | None = None
@@ -33,11 +28,10 @@ class ServiceBase:
 
     @property
     def config(self) -> CanaryConfig | None:
-        """Return the configuration propagated by a parent module."""
+        """Return the configuration selected by the runtime context."""
         return self._cf_config
 
     def _require_state(self, phase: str, expected: LifecycleState) -> None:
-        """Ensure a public lifecycle phase is called from its required state."""
         if self._cf_state is not expected:
             raise LifecycleStateError(
                 f"{type(self).__name__}.{phase} requires state {expected.value}; "
@@ -45,7 +39,6 @@ class ServiceBase:
             )
 
     async def _call_extension(self, name: str) -> None:
-        """Call an async extension point and wrap failures consistently."""
         method = getattr(self, name)
         if not inspect.iscoroutinefunction(method):
             raise LifecycleHookError(f"{type(self).__name__}.{name} must be async")
@@ -58,7 +51,7 @@ class ServiceBase:
 
     @final
     async def init(self) -> None:
-        """Initialize this service and invoke its async extension."""
+        """Initialize structure exactly once."""
         self._require_state("init", LifecycleState.CREATED)
         try:
             await self._init()
@@ -71,7 +64,7 @@ class ServiceBase:
 
     @final
     async def startup(self) -> None:
-        """Start this service and invoke its async extension."""
+        """Start initialized resources exactly once."""
         self._require_state("startup", LifecycleState.INITIALIZED)
         try:
             await self._startup()
@@ -84,7 +77,7 @@ class ServiceBase:
 
     @final
     async def shutdown(self) -> None:
-        """Stop this service after invoking its shutdown extension."""
+        """Stop a started node exactly once."""
         self._require_state("shutdown", LifecycleState.STARTED)
         try:
             await self._call_extension("on_shutdown")
@@ -95,7 +88,6 @@ class ServiceBase:
         self._cf_state = LifecycleState.STOPPED
 
     async def _rollback(self, *, started: bool) -> None:
-        """Best-effort, idempotent cleanup after an init or startup failure."""
         if self._cf_rolled_back:
             return
         self._cf_rolled_back = True
@@ -108,32 +100,28 @@ class ServiceBase:
             self._cf_state = LifecycleState.STOPPED
 
     async def _rollback_phase(self, *, started: bool) -> None:
-        """Clean up resources created by the failed lifecycle phase."""
         del started
         await self._shutdown()
 
     async def _init(self) -> None:
-        """Private initialization phase for subclasses."""
         return None
 
     async def _startup(self) -> None:
-        """Private startup phase for subclasses."""
         return None
 
     async def _shutdown(self) -> None:
-        """Private shutdown phase for subclasses."""
         return None
 
     async def on_init(self) -> None:
-        """Async initialization extension point for subclasses."""
+        """Extend structural initialization."""
         return None
 
     async def on_startup(self) -> None:
-        """Async startup extension point for subclasses."""
+        """Extend event-loop resource startup."""
         return None
 
     async def on_shutdown(self) -> None:
-        """Async shutdown extension point for subclasses."""
+        """Extend resource shutdown."""
         return None
 
 

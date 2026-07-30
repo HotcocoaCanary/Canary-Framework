@@ -24,7 +24,7 @@ def module(
     security: Sequence[str] = (),
     config: type[CanaryConfig] | None = None,
 ) -> Callable[[type[ModuleBase]], type[ModuleBase]]:
-    """Declare a module node with immutable child and context metadata."""
+    """Declare a Module with explicit children and inherited route context."""
     child_types = tuple(children)
     for child in child_types:
         if isinstance(child, type) and issubclass(child, CanaryConfig):

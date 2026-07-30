@@ -331,6 +331,10 @@ async def scalar_parameters(
     """Handler containing every retained scalar parameter type."""
 
 
+async def mixed_literal_parameter(value: Literal[1, "all"]) -> None:
+    """Handler containing a mixed-type Literal query parameter."""
+
+
 def test_parameter_schemas_preserve_enum_literal_formats_and_nullable() -> None:
     path = (
         "/items/{item_id}?state={state}&mode={mode}&created={created}&changed={changed}"
@@ -358,6 +362,21 @@ def test_parameter_schemas_preserve_enum_literal_formats_and_nullable() -> None:
     assert by_name["blob"]["schema"] == {"type": "string", "format": "byte"}
     assert by_name["maybe"]["required"] is False
     assert by_name["maybe"]["schema"] == {"nullable": True, "type": "integer"}
+
+
+def test_mixed_literal_parameter_does_not_claim_one_scalar_type() -> None:
+    document = OpenAPICompiler().compile(
+        (
+            validated_route(
+                path="/items?value={value}",
+                handler=mixed_literal_parameter,
+            ),
+        ),
+        config=OpenAPIConfig(),
+    )
+
+    schema = operation(document, "/items", "GET")["parameters"][0]["schema"]
+    assert schema == {"enum": [1, "all"]}
 
 
 async def constrained_parameters(

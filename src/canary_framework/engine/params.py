@@ -19,8 +19,6 @@ _PARAM_PATTERN = re.compile(r"\{(\w+)\}")
 
 @dataclass(frozen=True, slots=True)
 class ParameterSpec:
-    """Immutable metadata needed to bind and document one handler parameter."""
-
     annotation: Any
     has_default: bool
     default: object
@@ -29,8 +27,6 @@ class ParameterSpec:
 
 @dataclass(frozen=True, slots=True)
 class RouteAnalysis:
-    """One canonical parse of a resolved route and its handler signature."""
-
     starlette_path: str
     path_params: tuple[str, ...]
     query_params: tuple[str, ...]
@@ -40,7 +36,6 @@ class RouteAnalysis:
 
 
 def _normalize_path(path: str) -> str:
-    """Normalize separators while preserving the root path."""
     normalized = "/" + "/".join(part for part in path.split("/") if part)
     return "/" if normalized == "/" else normalized
 
@@ -75,7 +70,6 @@ def _handler_parameters(handler: Any) -> dict[str, ParameterSpec]:
 
 
 def analyze_route(route: ResolvedRoute) -> RouteAnalysis:
-    """Analyze path templates and handler parameters exactly once."""
     local_path, separator, query_template = route.full_path.partition("?")
     path_params = tuple(_PARAM_PATTERN.findall(local_path))
     query_params = tuple(_PARAM_PATTERN.findall(query_template)) if separator else ()
@@ -97,12 +91,4 @@ def analyze_route(route: ResolvedRoute) -> RouteAnalysis:
     )
 
 
-def resolve_params(route_fn: Any) -> dict[str, tuple[Any, bool, FieldInfo | None]]:
-    """Backward-compatible tuple view of handler parameter analysis."""
-    return {
-        name: (spec.annotation, spec.has_default, spec.field_info)
-        for name, spec in _handler_parameters(route_fn).items()
-    }
-
-
-__all__ = ["ParameterSpec", "RouteAnalysis", "analyze_route", "resolve_params"]
+__all__ = ["ParameterSpec", "RouteAnalysis", "analyze_route"]

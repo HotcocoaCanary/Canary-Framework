@@ -16,39 +16,35 @@ from canary_framework.engine.routing import extend_context
 
 
 class ModuleBase(_ApplicationMixin):
-    """Compose declared child nodes inside one dependency scope."""
+    """Compose scoped children into a runnable application root."""
 
     def __init__(self) -> None:
-        """Initialize the module before its child dependency scope exists."""
         super().__init__()
         self._cf_dependency_engine: DependencyEngine | None = None
 
     @property
     def direct_children(self) -> tuple[ServiceBase, ...]:
-        """Return direct children in immutable declaration order."""
+        """Return instantiated children in declaration order."""
         if self._cf_dependency_engine is None:
             return ()
         return cast("tuple[ServiceBase, ...]", self._cf_dependency_engine.direct_children)
 
     def _module_meta(self) -> ModuleMeta:
-        """Return this decorated module's immutable declaration metadata."""
         meta = get_module_meta(type(self))
         if meta is None:
             raise TypeError(f"{type(self).__name__} must be decorated with @module.")
         return meta
 
     def _select_config(self) -> CanaryConfig:
-        """Select the nearest module config, inheriting from the parent scope."""
         meta = self._module_meta()
-        if meta.config_cls is not None:
-            return meta.config_cls()
+        if config_cls := meta.config_cls:
+            return config_cls()
         if self._cf_config is not None:
             return self._cf_config
         return CanaryConfig()
 
     @override
     async def _init(self) -> None:
-        """Build and initialize this module's nested dependency scope."""
         if self._cf_parent_registry is None:
             self._assembly = None
         config = self._select_config()
@@ -65,34 +61,26 @@ class ModuleBase(_ApplicationMixin):
 
     @override
     async def _startup(self) -> None:
-        """Start child nodes in dependency order."""
         if self._cf_dependency_engine is not None:
             await self._cf_dependency_engine.startup()
 
     @override
     async def _shutdown(self) -> None:
-        """Stop child nodes in reverse dependency order."""
         if self._cf_dependency_engine is not None:
             await self._cf_dependency_engine.shutdown()
 
     @override
     async def _rollback_phase(self, *, started: bool) -> None:
-        """Roll back child nodes completed before a module phase failed."""
         if self._cf_dependency_engine is None:
             return
-        if started:
-            await self._cf_dependency_engine.rollback_started()
-        else:
-            await self._cf_dependency_engine.rollback_initialized()
+        engine = self._cf_dependency_engine
+        rollback = engine.rollback_started if started else engine.rollback_initialized
+        await rollback()
 
     def _collect_routes(self, context: RouteContext) -> tuple[ResolvedRoute, ...]:
-        """Fold descendant router routes through this module's context."""
         meta = self._module_meta()
         current = extend_context(
-            context,
-            prefix=meta.prefix,
-            tags=meta.tags,
-            security=meta.security,
+            context, prefix=meta.prefix, tags=meta.tags, security=meta.security
         )
         routes: list[ResolvedRoute] = []
         for child in self.direct_children:

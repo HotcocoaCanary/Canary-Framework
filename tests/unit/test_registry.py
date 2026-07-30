@@ -3,7 +3,6 @@
 import pytest
 
 from canary_framework.common.errors import DependencyInjectionError, ServiceNotFoundError
-from canary_framework.common.types import ServiceMeta
 from canary_framework.engine.registry import Registry
 
 
@@ -31,13 +30,21 @@ def test_local_entries_and_instances_preserve_registration_order() -> None:
         pass
 
     registry = Registry()
-    registry.register(First, meta=ServiceMeta(name="first"))
+    registry.register(First, "first")
     registry.register(Second, "second")
     first = First()
     registry.get_by_class(First).instance = first
 
     assert tuple(entry.cls for entry in registry.local_entries()) == (First, Second)
     assert registry.local_instances() == (first,)
+
+
+@pytest.mark.unit
+def test_registry_rejects_legacy_meta_keyword() -> None:
+    registry = Registry()
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'meta'"):
+        registry.register(Shared, meta=object())  # type: ignore[call-arg]
 
 
 @pytest.mark.unit

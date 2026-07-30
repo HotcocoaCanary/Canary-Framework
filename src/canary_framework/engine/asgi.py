@@ -19,39 +19,19 @@ from canary_framework.engine.validation import ValidatedRoute
 _BOOL_TRUE = frozenset({"1", "true", "yes", "on"})
 _BOOL_FALSE = frozenset({"0", "false", "no", "off"})
 
-_SWAGGER_UI_HTML = """<!DOCTYPE html>
-<html>
-<head>
-    <title>Swagger UI</title>
-    <link rel="stylesheet" href="{swagger_css}">
-</head>
-<body>
-    <div id="swagger-ui"></div>
-    <script src="{swagger_js}"></script>
-    <script>
-        SwaggerUIBundle({{ url: "{openapi_path}", dom_id: "#swagger-ui" }});
-    </script>
-</body>
-</html>"""
-
-_REDOC_HTML = """<!DOCTYPE html>
-<html>
-<head>
-    <title>ReDoc</title>
-</head>
-<body>
-    <div id="redoc"></div>
-    <script src="{redoc_js}"></script>
-    <script>
-        Redoc.init("{openapi_path}", {{}}, document.getElementById("redoc"));
-    </script>
-</body>
-</html>"""
+_SWAGGER_UI_HTML = (
+    '<!DOCTYPE html><html><head><title>Swagger UI</title><link rel="stylesheet" href="{swagger_css}"></head>'
+    '<body><div id="swagger-ui"></div><script src="{swagger_js}"></script><script>'
+    'SwaggerUIBundle({{ url: "{openapi_path}", dom_id: "#swagger-ui" }});</script></body></html>'
+)
+_REDOC_HTML = (
+    '<!DOCTYPE html><html><head><title>ReDoc</title></head><body><div id="redoc"></div>'
+    '<script src="{redoc_js}"></script><script>Redoc.init("{openapi_path}", {{}}, '
+    'document.getElementById("redoc"));</script></body></html>'
+)
 
 
 class ASGICompiler:
-    """Compile validated routes into a Starlette app."""
-
     def compile(
         self,
         routes: tuple[ValidatedRoute, ...],
@@ -59,7 +39,6 @@ class ASGICompiler:
         openapi: dict[str, object],
         config: CanaryConfig,
     ) -> ASGIApp:
-        """Build an app and add docs routes only when business routes exist."""
         if not routes:
             return cast(ASGIApp, StarletteRouter(routes=[]))
 
@@ -192,13 +171,9 @@ class ASGICompiler:
         openapi: dict[str, object],
         config: CanaryConfig,
     ) -> list[Route]:
-        routes: list[Route] = []
-
         async def openapi_endpoint(request: Request) -> JSONResponse:
             del request
             return JSONResponse(openapi)
-
-        routes.append(Route(config.docs_openapi_path, endpoint=openapi_endpoint, methods=["GET"]))
 
         swagger_html = _SWAGGER_UI_HTML.format(
             swagger_css=config.docs_swagger_css_cdn,
@@ -206,23 +181,26 @@ class ASGICompiler:
             openapi_path=config.docs_openapi_path,
         )
 
-        async def swagger_endpoint(request: Request) -> HTMLResponse:
-            del request
-            return HTMLResponse(swagger_html)
-
-        routes.append(Route(config.docs_swagger_path, endpoint=swagger_endpoint, methods=["GET"]))
-
         redoc_html = _REDOC_HTML.format(
             redoc_js=config.docs_redoc_cdn,
             openapi_path=config.docs_openapi_path,
         )
 
-        async def redoc_endpoint(request: Request) -> HTMLResponse:
+        async def html_endpoint(request: Request, *, body: str) -> HTMLResponse:
             del request
-            return HTMLResponse(redoc_html)
+            return HTMLResponse(body)
 
-        routes.append(Route(config.docs_redoc_path, endpoint=redoc_endpoint, methods=["GET"]))
-        return routes
+        async def swagger_endpoint(request: Request) -> HTMLResponse:
+            return await html_endpoint(request, body=swagger_html)
+
+        async def redoc_endpoint(request: Request) -> HTMLResponse:
+            return await html_endpoint(request, body=redoc_html)
+
+        return [
+            Route(config.docs_openapi_path, endpoint=openapi_endpoint, methods=["GET"]),
+            Route(config.docs_swagger_path, endpoint=swagger_endpoint, methods=["GET"]),
+            Route(config.docs_redoc_path, endpoint=redoc_endpoint, methods=["GET"]),
+        ]
 
 
 __all__ = ["ASGICompiler"]
