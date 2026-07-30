@@ -235,7 +235,7 @@ if __name__ == "__main__":
     application = asyncio.run(setup())
 
     print("\n=== Blog API Started ===")
-    print("  Root:        http://127.0.0.1:8000/api")
+    print("  API prefix:  http://127.0.0.1:8000/api")
     print("  Swagger UI:  http://127.0.0.1:8000/docs")
     print("  ReDoc:       http://127.0.0.1:8000/redoc")
     print("  OpenAPI:     http://127.0.0.1:8000/openapi.json")

@@ -59,7 +59,7 @@ class App(ModuleBase):
 # Try these curl commands:
 #   curl http://127.0.0.1:8000/calc/square/5
 #   curl http://127.0.0.1:8000/calc/divide/10/3
-#   curl "http://127.0.0.1:8000/calc/search?q=hello&page=2"
+#   curl "http://127.0.0.1:8000/calc/search?query=hello&page=2"
 #   curl http://127.0.0.1:8000/calc/feature?enabled=true
 #   curl http://127.0.0.1:8000/calc/feature?enabled=1   # → {"enabled": true}
 #   curl http://127.0.0.1:8000/calc/users/42/posts?tag=python
