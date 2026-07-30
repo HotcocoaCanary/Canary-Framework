@@ -208,6 +208,8 @@ async def test_mounted_child_call_rejects_runtime_access() -> None:
 
     with pytest.raises(ApplicationNotInitializedError, match="not a runtime root"):
         await child(cast(Any, {"type": "http"}), receive, send)
+    with pytest.raises(ApplicationNotInitializedError, match="not a runtime root"):
+        await child(cast(Any, {"type": "lifespan"}), receive, send)
 
 
 def test_route_less_module_has_404_and_no_docs() -> None:

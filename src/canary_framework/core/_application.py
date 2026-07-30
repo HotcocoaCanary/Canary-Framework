@@ -52,6 +52,7 @@ class _ApplicationMixin(ServiceBase):
         return self._ensure_assembly().openapi
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        self._require_runtime_root()
         if scope["type"] == "lifespan":
             await self._handle_lifespan(receive, send)
             return
