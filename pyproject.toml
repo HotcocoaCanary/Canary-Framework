@@ -9,7 +9,7 @@ description = "Canary / cocoa — a minimal lifecycle, dependency-injection and 
 requires-python = ">=3.12"
 dependencies = []
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 keywords = [
     "framework",
     "dependency-injection",
@@ -40,7 +40,7 @@ email = "Cacao.Canary@outlook.com"
 
 [project.urls]
 Repository = "https://github.com/HotcocoaCanary/Canary-Framework"
-Documentation = "https://github.com/HotcocoaCanary/Canary-Framework/wiki"
+Documentation = "https://hotcocoacanary.github.io/Canary-Framework/"
 Issues = "https://github.com/HotcocoaCanary/Canary-Framework/issues"
 Changelog = "https://github.com/HotcocoaCanary/Canary-Framework/blob/main/CHANGELOG.md"
 
