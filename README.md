@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="README_ZH.md">中文</a> ·
-  <a href="docs/en/index.md">Documentation</a> ·
+  <a href="https://hotcocoacanary.github.io/Canary-Framework/">Documentation</a> ·
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
