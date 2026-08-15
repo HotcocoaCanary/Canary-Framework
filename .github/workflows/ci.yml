@@ -6,15 +6,12 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  ACTIONS_RUNNER_FORCE_ACTIONS_NODE_VERSION: node24
-
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.12", "3.13"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4

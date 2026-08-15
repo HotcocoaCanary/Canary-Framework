@@ -1,20 +1,21 @@
-## 变更说明
+## 变更说明 / Description
 
-<!-- 请描述这个 PR 做了什么 -->
+<!-- 请描述这个 PR 做了什么 / Describe what this PR does -->
 
-## 变更类型
+## 变更类型 / Type of change
 
-- [ ] 🐛 Bug 修复
-- [ ] ✨ 新功能
-- [ ] 📝 文档
-- [ ] ♻️ 重构
-- [ ] 🧪 测试
-- [ ] 🔧 配置/工具
+- [ ] 🐛 Bug 修复 / Bug fix
+- [ ] ✨ 新功能 / New feature
+- [ ] 📝 文档 / Documentation
+- [ ] ♻️ 重构 / Refactor
+- [ ] 🧪 测试 / Tests
+- [ ] 🔧 配置/工具 / Chore
 
-## 检查清单
+## 检查清单 / Checklist
 
-- [ ] 代码已通过 `ruff check` 和 `ruff format`
-- [ ] 类型检查已通过 `mypy`
-- [ ] 已添加/更新测试
-- [ ] 所有测试通过 `pytest`
-- [ ] 文档已更新（如需要）
+- [ ] `uv run ruff check src/ tests/` 通过 / passes
+- [ ] `uv run ruff format --check src/ tests/` 通过 / passes
+- [ ] `uv run mypy src/ tests/` 通过 / passes
+- [ ] 已添加/更新测试 / Tests added or updated
+- [ ] `uv run pytest` 全部通过 / All tests pass
+- [ ] 文档已更新（如需要）/ Documentation updated (if needed)
