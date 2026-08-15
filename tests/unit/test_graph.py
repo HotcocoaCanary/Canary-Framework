@@ -4,7 +4,7 @@ import pytest
 
 from canary_framework import cocoa
 from canary_framework.common.error import CircularDependencyError
-from canary_framework.core.core.graph import build_graph, topological_sort
+from canary_framework.runtime import build_graph, topological_sort
 
 pytestmark = pytest.mark.unit
 

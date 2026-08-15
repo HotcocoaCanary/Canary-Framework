@@ -83,6 +83,8 @@ nav:
       - Lifecycle: lifecycle.md
       - Dependency Injection: dependency-injection.md
       - Flock: flock.md
+  - Web:
+      - Web Apps: web.md
   - Architecture: architecture.md
   - API Reference: api-reference.md
 

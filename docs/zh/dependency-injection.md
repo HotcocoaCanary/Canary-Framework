@@ -57,14 +57,12 @@ class Config:
 ```python
 @canary
 class A:
-    def __init__(self, b: "B") -> None:
-        ...
+    def __init__(self, b: "B") -> None: ...
 
 
 @canary
 class B:
-    def __init__(self, a: A) -> None:
-        ...
+    def __init__(self, a: A) -> None: ...
 
 
 flock = A.run()
@@ -78,20 +76,17 @@ await flock.start()  # CircularDependencyError: Circular dependency detected: A 
 ```python
 @canary
 class Database:
-    def __init__(self, config: Config) -> None:
-        ...
+    def __init__(self, config: Config) -> None: ...
 
 
 @canary
 class Cache:
-    def __init__(self, config: Config) -> None:
-        ...
+    def __init__(self, config: Config) -> None: ...
 
 
 @canary
 class Root:
-    def __init__(self, database: Database, cache: Cache) -> None:
-        ...
+    def __init__(self, database: Database, cache: Cache) -> None: ...
 
 
 flock = Root.run()

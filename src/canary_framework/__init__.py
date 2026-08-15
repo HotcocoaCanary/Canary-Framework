@@ -20,12 +20,12 @@ topologically sorts it to get the startup order, and drives the lifecycle::
 
 from __future__ import annotations
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 from canary_framework.common.error import CanaryError, CircularDependencyError, LifecycleError
 from canary_framework.common.type import LifecycleState
-from canary_framework.core.core import Canary
 from canary_framework.core.decorator import cocoa, on_init, on_start, on_stop
+from canary_framework.runtime import Canary
 
 __all__ = [
     "Canary",

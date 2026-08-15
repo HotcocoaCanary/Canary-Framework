@@ -2,6 +2,30 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
+## [0.9.0] — 2026-08-15
+
+### Added
+
+- `canary_framework.web` extension — expose `@cocoa` services as an ASGI app (FastAPI-style).
+  - `@web_cocoa(deps=[...], title=..., version=...)` — mark a class as a `@cocoa` *and* an
+    HTTP route holder; a plain `Canary(*roots)` collects its `@get`/`@post`/… routes and
+    serves them, so `uvicorn app:app` just works (`app = Canary(LibraryAPI)`).
+  - Route decorators `@get` / `@post` / `@put` / `@patch` / `@delete` / `@route`.
+  - Auto-injection: path / query / header / cookie / body (Pydantic model) parameters are
+    bound by name from the request, plus `request: Request` injection; cocoa dependencies
+    remain on `self.<dep>`.
+  - Pydantic v2 validation for request bodies and responses (scalar coercion via
+    `TypeAdapter`; validation failures map to HTTP 422).
+  - Auto OpenAPI 3.1 document at `/openapi.json`, Swagger UI at `/docs`, Redoc at `/redoc`.
+- New optional dependency `canary-framework[web]` (starlette + pydantic + uvicorn).
+
+### Changed
+
+- Extracted the runtime engine (`Canary`) out of `core` into a new `canary_framework.runtime`
+  package. `Canary` now implements the ASGI protocol directly: an `Extension` protocol lets
+  extensions (web now, more later) plug in without `Canary` importing them; `Canary` handles
+  the lifespan and dispatches other scopes to the matching extension.
+
 ## [0.7.0] — 2026-08-15
 
 ### Breaking: 移除 web 层，改为 Canary / Flock 引擎

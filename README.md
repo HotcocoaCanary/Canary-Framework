@@ -37,12 +37,10 @@ class Database:
         self.config = config
 
     @start
-    async def connect(self) -> None:
-        ...
+    async def connect(self) -> None: ...
 
     @stop
-    async def disconnect(self) -> None:
-        ...
+    async def disconnect(self) -> None: ...
 
 
 @canary

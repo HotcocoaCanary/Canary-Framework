@@ -1,6 +1,6 @@
-"""Infrastructure — naming and the metadata markers shared across the framework.
+"""Infrastructure — naming helpers.
 
-基础设施：命名工具与元数据标记（框架内部共用的“协议”）。
+基础设施：命名工具。
 """
 
 from canary_framework.core.infra.naming import to_snake

@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import overload
 
-from canary_framework.core.infra.markers import _COCOA_ATTR, _ON_INIT, _ON_START, _ON_STOP
+from canary_framework.common.markers import COCOA_ATTR, ON_INIT, ON_START, ON_STOP
 
 
 @overload
@@ -42,7 +42,7 @@ def cocoa[T](
     _deps = list(deps or ())
 
     def mark(c: type[T]) -> type[T]:
-        setattr(c, _COCOA_ATTR, _deps)
+        setattr(c, COCOA_ATTR, _deps)
         return c
 
     return mark(cls) if cls is not None else mark
@@ -53,7 +53,7 @@ def on_init[T: Callable[..., object]](fn: T) -> T:
 
     注册初始化钩子，按拓扑序执行。
     """
-    setattr(fn, _ON_INIT, True)
+    setattr(fn, ON_INIT, True)
     return fn
 
 
@@ -62,7 +62,7 @@ def on_start[T: Callable[..., object]](fn: T) -> T:
 
     注册启动钩子，按拓扑序执行；此时依赖已注入完成。
     """
-    setattr(fn, _ON_START, True)
+    setattr(fn, ON_START, True)
     return fn
 
 
@@ -71,5 +71,5 @@ def on_stop[T: Callable[..., object]](fn: T) -> T:
 
     注册停止钩子，按逆拓扑序执行。
     """
-    setattr(fn, _ON_STOP, True)
+    setattr(fn, ON_STOP, True)
     return fn

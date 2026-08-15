@@ -18,8 +18,7 @@ from canary_framework import canary
 
 
 @canary
-class APIService:
-    ...
+class APIService: ...
 
 
 flock = APIService.run()

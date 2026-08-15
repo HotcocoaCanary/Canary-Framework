@@ -3,6 +3,10 @@
 运行时：持有整张单元图并驱动生命周期。``Canary(*roots)`` 支持多根编排，
 让“嵌套”“单独启动”“组合”共用同一条代码路径。引擎是 async 原生：钩子既可以是
 同步函数，也可以是协程函数，运行时按返回值自动判断是否 ``await``。
+
+``Canary`` 本身也是一个 ASGI 应用：``__call__`` 处理 lifespan 驱动生命周期，并把
+http/websocket 等 scope 委托给某个单元在 ``start()`` 阶段暴露的服务入口（鸭子类型，
+``Canary`` 不 import 任何具体扩展）。
 """
 
 from __future__ import annotations
@@ -10,11 +14,11 @@ from __future__ import annotations
 import inspect
 import types
 from collections.abc import Callable
-from typing import Literal, Self, TypeVar, cast
+from typing import Any, Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import LifecycleError
+from canary_framework.common.markers import SERVE_ATTR
 from canary_framework.common.type import LifecycleState
-from canary_framework.core.core.graph import build_graph, topological_sort
 from canary_framework.core.decorator.introspect import (
     deps_of,
     init_hooks,
@@ -23,6 +27,7 @@ from canary_framework.core.decorator.introspect import (
     stop_hooks,
 )
 from canary_framework.core.infra.naming import to_snake
+from canary_framework.runtime.graph import build_graph, topological_sort
 
 _T = TypeVar("_T")
 
@@ -35,7 +40,8 @@ class Canary:
     """A runtime that owns a graph of cocoas and drives their lifecycle.
 
     编排器：解析依赖图、按拓扑序驱动 ``init`` / ``start`` / ``stop``。
-    异步原生——同步钩子直接调用，异步钩子自动 ``await``。
+    异步原生——同步钩子直接调用，异步钩子自动 ``await``。带服务单元时，``Canary``
+    自身就是 ASGI 应用，可直接 ``uvicorn app:app``。
     """
 
     def __init__(self, *roots: type) -> None:
@@ -46,6 +52,7 @@ class Canary:
         self._state = LifecycleState.NEW
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
+        self._serve_app: Any | None = None
 
     # -- read access --------------------------------------------------
     @property
@@ -95,9 +102,9 @@ class Canary:
         self._state = LifecycleState.INITIALIZED
 
     async def start(self) -> None:
-        """``INITIALIZED -> STARTED``: inject deps (lazy) and run ``@on_start``.
+        """``INITIALIZED -> STARTED``: inject deps, run ``@on_start``, collect serve app.
 
-        注入依赖（懒注入），按序执行 ``@on_start``。
+        注入依赖（懒注入），按序执行 ``@on_start``，随后收集单元暴露的服务入口。
         """
         self._require(LifecycleState.INITIALIZED)
         self._state = LifecycleState.STARTING
@@ -107,6 +114,7 @@ class Canary:
                 self._inject(node)
                 for hook in start_hooks(node):
                     await self._invoke_hook(hook)
+            self._serve_app = self._collect_serve_app()
         except Exception:
             self._state = LifecycleState.FAILED
             raise
@@ -127,6 +135,56 @@ class Canary:
             self._state = LifecycleState.FAILED
             raise
         self._state = LifecycleState.STOPPED
+
+    # -- ASGI ---------------------------------------------------------
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        """Serve ASGI: lifespan drives the lifecycle, everything else delegates.
+
+        ``lifespan`` 交给 :meth:`_lifespan`；其余 scope（http/websocket/…）在确保已
+        启动后委托给单元暴露的服务入口。
+        """
+        if scope["type"] == "lifespan":
+            await self._lifespan(receive, send)
+            return
+        if self.state is LifecycleState.NEW:
+            await self._ensure_started()
+        if self._serve_app is None:
+            raise RuntimeError(f"Canary has no serving app for scope type {scope['type']!r}")
+        await self._serve_app(scope, receive, send)
+
+    async def _lifespan(self, receive: Any, send: Any) -> None:
+        while True:
+            message = await receive()
+            if message["type"] == "lifespan.startup":
+                try:
+                    await self._ensure_started()
+                    await send({"type": "lifespan.startup.complete"})
+                except Exception as exc:
+                    await send({"type": "lifespan.startup.failed", "message": str(exc)})
+            elif message["type"] == "lifespan.shutdown":
+                try:
+                    if self.state is LifecycleState.STARTED:
+                        await self.stop()
+                finally:
+                    await send({"type": "lifespan.shutdown.complete"})
+                return
+
+    async def _ensure_started(self) -> None:
+        if self.state is LifecycleState.NEW:
+            await self.init()
+            await self.start()
+
+    def _collect_serve_app(self) -> Any | None:
+        """Return the first serving app a unit exposed during ``start``, if any.
+
+        扫描各单元暴露的服务入口（如 web 单元在 ``@on_start`` 里构建的 app）。
+        ``Canary`` 只按属性名鸭子类型查找，不 import 任何具体扩展。
+        """
+        for instance in self.instances:
+            app = getattr(instance, SERVE_ATTR, None)
+            if app is not None:
+                return app
+        return None
 
     # -- context manager ----------------------------------------------
     async def __aenter__(self) -> Self:

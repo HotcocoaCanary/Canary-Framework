@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
-from canary_framework.core.infra.markers import _COCOA_ATTR, _ON_INIT, _ON_START, _ON_STOP
+from canary_framework.common.markers import COCOA_ATTR, ON_INIT, ON_START, ON_STOP
 
 
 def is_cocoa(cls: type) -> bool:
@@ -16,7 +16,7 @@ def is_cocoa(cls: type) -> bool:
 
     判断类是否被 ``@cocoa`` 标记过。
     """
-    return hasattr(cls, _COCOA_ATTR)
+    return hasattr(cls, COCOA_ATTR)
 
 
 def deps_of(cls: type) -> list[type]:
@@ -24,7 +24,7 @@ def deps_of(cls: type) -> list[type]:
 
     返回 ``@cocoa(deps=[...])`` 声明的依赖列表。
     """
-    return cast(list[type], list(getattr(cls, _COCOA_ATTR, ())))
+    return cast(list[type], list(getattr(cls, COCOA_ATTR, ())))
 
 
 def hooks_of(instance: object, marker: str) -> list[Callable[[], object]]:
@@ -48,12 +48,12 @@ def hooks_of(instance: object, marker: str) -> list[Callable[[], object]]:
 
 
 def init_hooks(instance: object) -> list[Callable[[], object]]:
-    return hooks_of(instance, _ON_INIT)
+    return hooks_of(instance, ON_INIT)
 
 
 def start_hooks(instance: object) -> list[Callable[[], object]]:
-    return hooks_of(instance, _ON_START)
+    return hooks_of(instance, ON_START)
 
 
 def stop_hooks(instance: object) -> list[Callable[[], object]]:
-    return hooks_of(instance, _ON_STOP)
+    return hooks_of(instance, ON_STOP)

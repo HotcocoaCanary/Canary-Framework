@@ -71,8 +71,7 @@ class UserRepository:
 
 ```python
 @canary
-class Config:
-    ...
+class Config: ...
 
 
 @canary
