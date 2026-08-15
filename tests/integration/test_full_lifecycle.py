@@ -14,7 +14,7 @@ from canary_framework import (
 pytestmark = pytest.mark.integration
 
 
-def test_full_lifecycle_order_and_singleton_sharing() -> None:
+async def test_full_lifecycle_order_and_singleton_sharing() -> None:
     # 闭包内的列表由各钩子就地追加，用于断言全局执行顺序。
     events: list[str] = []
 
@@ -64,7 +64,7 @@ def test_full_lifecycle_order_and_singleton_sharing() -> None:
         def banner(self) -> None:
             events.append("app.banner")
 
-    with Canary(App) as canary:
+    async with Canary(App) as canary:
         assert canary.state is LifecycleState.STARTED
         assert canary.order == (Config, Database, Repository, Service, App)
 
@@ -89,7 +89,7 @@ def test_full_lifecycle_order_and_singleton_sharing() -> None:
     ]
 
 
-def test_instances_and_getitem() -> None:
+async def test_instances_and_getitem() -> None:
     @cocoa
     class Config:
         pass
@@ -99,15 +99,15 @@ def test_instances_and_getitem() -> None:
         pass
 
     canary = Canary(Database)
-    canary.init()
-    canary.start()
+    await canary.init()
+    await canary.start()
 
     # instances 与 order 同序，__getitem__ 按类型取回对应单例。
     assert canary.instances == (canary[Config], canary[Database])
     assert isinstance(canary[Database], Database)
 
 
-def test_getitem_raises_key_error_for_unknown_type() -> None:
+async def test_getitem_raises_key_error_for_unknown_type() -> None:
     @cocoa
     class Known:
         pass
@@ -116,8 +116,8 @@ def test_getitem_raises_key_error_for_unknown_type() -> None:
         pass
 
     canary = Canary(Known)
-    canary.init()
-    canary.start()
+    await canary.init()
+    await canary.start()
 
     with pytest.raises(KeyError):
         canary[Unknown]

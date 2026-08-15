@@ -6,6 +6,7 @@
     python examples/library/main.py                     # 直接以脚本运行
 """
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -22,9 +23,9 @@ from examples.library.repositories import BookRepository
 from examples.library.services import LibraryService
 
 
-def main() -> None:
+async def main() -> None:
     print("一、组合 / 嵌套：以 LibraryApp 为根，整张图按拓扑序启动")
-    with Canary(LibraryApp) as lib:
+    async with Canary(LibraryApp) as lib:
         print("   启动顺序:", [t.__name__ for t in lib.order])
         svc = lib[LibraryApp].library_service  # 懒注入
         print("   单例共享:", lib[LibraryApp].library_service is lib[LibraryService])
@@ -36,10 +37,10 @@ def main() -> None:
         print("   《三体》剩余库存:", lib[BookRepository].get(1)["stock"])
 
     print("\n二、单独启动：BookRepository 自己也能飞（连它的 Database + Config 子树）")
-    with Canary(BookRepository) as books:
+    async with Canary(BookRepository) as books:
         print("   启动顺序:", [t.__name__ for t in books.order])
         print("   检索「活着」:", [b["title"] for b in books[BookRepository].search("活着")])
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -7,7 +7,7 @@ from canary_framework import Canary, cocoa, on_start
 pytestmark = pytest.mark.integration
 
 
-def test_composed_roots_share_singletons() -> None:
+async def test_composed_roots_share_singletons() -> None:
     @cocoa
     class Config:
         pass
@@ -24,7 +24,7 @@ def test_composed_roots_share_singletons() -> None:
     class OrderRepo:
         pass
 
-    with Canary(UserRepo, OrderRepo) as canary:
+    async with Canary(UserRepo, OrderRepo) as canary:
         assert set(canary.order) == {Config, Database, UserRepo, OrderRepo}
         # 拓扑约束：Config → Database → {UserRepo, OrderRepo}
         assert canary.order.index(Config) < canary.order.index(Database)
@@ -38,7 +38,7 @@ def test_composed_roots_share_singletons() -> None:
         assert canary[OrderRepo].database.config is canary[Config]
 
 
-def test_standalone_leaf_runs_without_a_dependency_graph() -> None:
+async def test_standalone_leaf_runs_without_a_dependency_graph() -> None:
     events: list[str] = []
 
     @cocoa
@@ -47,7 +47,7 @@ def test_standalone_leaf_runs_without_a_dependency_graph() -> None:
         def start(self) -> None:
             events.append("leaf.start")
 
-    with Canary(Leaf) as canary:
+    async with Canary(Leaf) as canary:
         assert canary.order == (Leaf,)
         assert canary.state.name == "STARTED"
 

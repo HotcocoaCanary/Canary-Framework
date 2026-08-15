@@ -8,22 +8,22 @@ from canary_framework.common.error import CircularDependencyError, LifecycleErro
 pytestmark = pytest.mark.unit
 
 
-def test_lifecycle_state_transitions() -> None:
+async def test_lifecycle_state_transitions() -> None:
     @cocoa
     class Service:
         pass
 
     canary = Canary(Service)
     assert canary.state is LifecycleState.NEW
-    canary.init()
+    await canary.init()
     assert canary.state is LifecycleState.INITIALIZED
-    canary.start()
+    await canary.start()
     assert canary.state is LifecycleState.STARTED
-    canary.stop()
+    await canary.stop()
     assert canary.state is LifecycleState.STOPPED
 
 
-def test_hooks_run_in_topological_order() -> None:
+async def test_hooks_run_in_topological_order() -> None:
     calls: list[str] = []
 
     @cocoa
@@ -47,17 +47,17 @@ def test_hooks_run_in_topological_order() -> None:
             calls.append("B.start")
 
     canary = Canary(B)
-    canary.init()
+    await canary.init()
     assert calls == ["A.init"]
 
-    canary.start()
+    await canary.start()
     assert calls == ["A.init", "A.start", "B.start"]
 
-    canary.stop()
+    await canary.stop()
     assert calls == ["A.init", "A.start", "B.start", "A.stop"]
 
 
-def test_dependency_injection_is_lazy() -> None:
+async def test_dependency_injection_is_lazy() -> None:
     @cocoa
     class Dep:
         pass
@@ -67,14 +67,14 @@ def test_dependency_injection_is_lazy() -> None:
         pass
 
     canary = Canary(Service)
-    canary.init()
+    await canary.init()
     assert not hasattr(canary[Service], "dep")  # 未注入
 
-    canary.start()
+    await canary.start()
     assert isinstance(canary[Service].dep, Dep)  # start 阶段注入
 
 
-def test_singleton_is_shared_across_the_graph() -> None:
+async def test_singleton_is_shared_across_the_graph() -> None:
     @cocoa
     class Dep:
         pass
@@ -92,12 +92,12 @@ def test_singleton_is_shared_across_the_graph() -> None:
         pass
 
     canary = Canary(Root)
-    canary.init()
-    canary.start()
+    await canary.init()
+    await canary.start()
     assert canary[Root].a.dep is canary[Root].b.dep is canary[Dep]
 
 
-def test_nesting_standalone_and_composition() -> None:
+async def test_nesting_standalone_and_composition() -> None:
     @cocoa
     class Config:
         pass
@@ -115,22 +115,22 @@ def test_nesting_standalone_and_composition() -> None:
         pass
 
     nested = Canary(App)
-    nested.init()
-    nested.start()
+    await nested.init()
+    await nested.start()
     assert nested.order == (Config, Database, Repo, App)
 
     standalone = Canary(Database)
-    standalone.init()
-    standalone.start()
+    await standalone.init()
+    await standalone.start()
     assert standalone.order == (Config, Database)
 
     composed = Canary(Config, Repo)
-    composed.init()
-    composed.start()
+    await composed.init()
+    await composed.start()
     assert set(composed.order) == {Config, Database, Repo}
 
 
-def test_context_manager_drives_full_lifecycle() -> None:
+async def test_context_manager_drives_full_lifecycle() -> None:
     @cocoa
     class Service:
         @on_start
@@ -141,7 +141,7 @@ def test_context_manager_drives_full_lifecycle() -> None:
         def stop(self) -> None:
             self.running = False
 
-    with Canary(Service) as canary:
+    async with Canary(Service) as canary:
         assert canary.state is LifecycleState.STARTED
         assert canary[Service].running is True
 
@@ -157,7 +157,7 @@ def test_non_cocoa_root_raises_type_error() -> None:
         Canary(Plain)
 
 
-def test_cycle_fails_the_canary() -> None:
+async def test_cycle_fails_the_canary() -> None:
     @cocoa
     class A:
         pass
@@ -170,19 +170,19 @@ def test_cycle_fails_the_canary() -> None:
 
     canary = Canary(A)
     with pytest.raises(CircularDependencyError):
-        canary.init()
+        await canary.init()
     assert canary.state is LifecycleState.FAILED
 
 
-def test_illegal_transition_raises() -> None:
+async def test_illegal_transition_raises() -> None:
     @cocoa
     class Service:
         pass
 
     canary = Canary(Service)
     with pytest.raises(LifecycleError):
-        canary.stop()  # 不能从未启动直接停止
+        await canary.stop()  # 不能从未启动直接停止
 
-    canary.init()
+    await canary.init()
     with pytest.raises(LifecycleError):
-        canary.init()  # 不能重复初始化
+        await canary.init()  # 不能重复初始化

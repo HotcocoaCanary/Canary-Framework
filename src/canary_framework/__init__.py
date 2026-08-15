@@ -7,9 +7,9 @@ topologically sorts it to get the startup order, and drives the lifecycle::
     @cocoa(deps=[Database])
     class UserService: ...
 
-    with Canary(UserService) as canary:   # compose / nest
-        canary[Database]                 # shared singleton
-        canary.order                     # topological startup order
+    async with Canary(UserService) as canary:   # compose / nest
+        canary[Database]                       # shared singleton
+        canary.order                           # topological startup order
 
 中文版：``@cocoa`` 标记最小单元，:class:`Canary` 编排一组单元——解析依赖图、
 按拓扑序得到启动顺序，并驱动生命周期。

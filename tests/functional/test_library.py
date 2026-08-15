@@ -61,10 +61,10 @@ def _build_library() -> type:
     return LibraryApp
 
 
-def test_full_library_lifecycle() -> None:
+async def test_full_library_lifecycle() -> None:
     app_type = _build_library()
 
-    with Canary(app_type) as canary:
+    async with Canary(app_type) as canary:
         svc = canary[app_type].library_service
 
         assert svc.borrow(1, 1) == "张三：借出《三体》"
@@ -76,12 +76,12 @@ def test_full_library_lifecycle() -> None:
     assert canary.state.name == "STOPPED"
 
 
-def test_repository_can_run_standalone() -> None:
+async def test_repository_can_run_standalone() -> None:
     app_type = _build_library()
-    with Canary(app_type) as canary:
+    async with Canary(app_type) as canary:
         book_repo = canary[app_type].library_service.book_repository
 
     # 单独启动一个仓库，只拉起它自己的子树
     repo_type = type(book_repo)
-    with Canary(repo_type) as solo:
+    async with Canary(repo_type) as solo:
         assert [t.__name__ for t in solo.order] == ["Config", "Database", "BookRepository"]

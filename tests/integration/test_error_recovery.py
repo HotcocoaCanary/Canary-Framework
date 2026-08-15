@@ -15,7 +15,7 @@ from canary_framework import (
 pytestmark = pytest.mark.integration
 
 
-def test_init_failure_propagates_and_marks_failed() -> None:
+async def test_init_failure_propagates_and_marks_failed() -> None:
     @cocoa
     class Broken:
         @on_init
@@ -24,15 +24,15 @@ def test_init_failure_propagates_and_marks_failed() -> None:
 
     canary = Canary(Broken)
     with pytest.raises(RuntimeError, match="init exploded"):
-        canary.init()
+        await canary.init()
 
     assert canary.state is LifecycleState.FAILED
     # 失败态是不可逆的——后续 start 直接拒绝。
     with pytest.raises(LifecycleError):
-        canary.start()
+        await canary.start()
 
 
-def test_start_failure_after_partial_start() -> None:
+async def test_start_failure_after_partial_start() -> None:
     started: list[str] = []
 
     @cocoa
@@ -49,16 +49,16 @@ def test_start_failure_after_partial_start() -> None:
             raise RuntimeError("start exploded")
 
     canary = Canary(Second)
-    canary.init()
+    await canary.init()
     with pytest.raises(RuntimeError, match="start exploded"):
-        canary.start()
+        await canary.start()
 
     assert canary.state is LifecycleState.FAILED
     # 已启动的 First 保持启动；Second 在自身钩子内失败。
     assert started == ["first", "second"]
 
 
-def test_stop_failure_propagates_and_marks_failed() -> None:
+async def test_stop_failure_propagates_and_marks_failed() -> None:
     @cocoa
     class Broken:
         @on_stop
@@ -66,10 +66,10 @@ def test_stop_failure_propagates_and_marks_failed() -> None:
             raise RuntimeError("stop exploded")
 
     canary = Canary(Broken)
-    canary.init()
-    canary.start()
+    await canary.init()
+    await canary.start()
 
     with pytest.raises(RuntimeError, match="stop exploded"):
-        canary.stop()
+        await canary.stop()
 
     assert canary.state is LifecycleState.FAILED
