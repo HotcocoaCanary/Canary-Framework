@@ -18,7 +18,7 @@ from typing import Any, Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import LifecycleError
 from canary_framework.common.markers import SERVE_ATTR
-from canary_framework.common.type import LifecycleState
+from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
     deps_of,
     init_hooks,
@@ -137,7 +137,7 @@ class Canary:
         self._state = LifecycleState.STOPPED
 
     # -- ASGI ---------------------------------------------------------
-    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         """Serve ASGI: lifespan drives the lifecycle, everything else delegates.
 
         ``lifespan`` 交给 :meth:`_lifespan`；其余 scope（http/websocket/…）在确保已
@@ -152,7 +152,7 @@ class Canary:
             raise RuntimeError(f"Canary has no serving app for scope type {scope['type']!r}")
         await self._serve_app(scope, receive, send)
 
-    async def _lifespan(self, receive: Any, send: Any) -> None:
+    async def _lifespan(self, receive: Receive, send: Send) -> None:
         while True:
             message = await receive()
             if message["type"] == "lifespan.startup":
