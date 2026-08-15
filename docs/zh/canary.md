@@ -1,122 +1,90 @@
-# Canary
+# 运行时（Canary）
 
-**Canary** 是框架的最小运行单元：一个被 `@canary` 标记的普通 Python class。
-
-```python
-from canary_framework import canary
-
-
-@canary
-class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-```
-
-`@canary` 会：
-
-1. 注册该类，
-2. 记录其元数据，
-3. 发现其生命周期 Hook，
-4. 使其成为 `Canary` 的子类，从而获得异步上下文管理协议与 `state` 属性。
-
-它**不会**向类动态添加生命周期方法。你的方法仍是普通方法，静态类型检查器可以正常识别。
-
-## 声明依赖
-
-Canary 通过 `__init__` 类型注解声明依赖。任何带类注解（或字符串前向引用）且无默认值的参数都被视为依赖：
+`Canary` 是持有整张 [cocoa](cocoa.md) 依赖图并驱动其生命周期的编排器。它本身不是业务单元
+—— 只负责解析、排序与运行。
 
 ```python
-@canary
-class UserService:
-    def __init__(self, database: Database, cache: Cache) -> None:
-        self.database = database
-        self.cache = cache
-```
-
-带默认值的参数**不会**被注入：
-
-```python
-@canary
-class Repository:
-    def __init__(self, database: Database, timeout: float = 30.0) -> None:
-        self.database = database
-        self.timeout = timeout
-```
-
-这里只有 `database` 是依赖，`timeout` 保留默认值。
-
-完整契约见[依赖注入](dependency-injection.md)。
-
-## 生命周期 Hook
-
-每个 Canary 每个阶段最多声明一个 Hook：
-
-| 阶段 | 装饰器 | 执行时机 |
-|---|---|---|
-| 启动 | `@start` | `__aenter__` 时 |
-| 停止 | `@stop` | `__aexit__` 时 |
-
-每个 Hook 都是可选的。没有任何 Hook 的 Canary 完全合法：
-
-```python
-@canary
-class UserRepository:
-    def __init__(self, database: Database) -> None:
-        self.database = database
-```
-
-## 用 `run()` 编排依赖图
-
-`Canary.run()` 是一个 classmethod，返回一个 [`Flock`](flock.md) —— 图句柄，用于发现该 Canary 的传递依赖、进行拓扑排序，并驱动整张图：
-
-```python
-@canary
-class Config: ...
+from canary_framework import Canary
 
 
-@canary
-class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-
-
-@canary
-class UserService:
-    def __init__(self, database: Database) -> None:
-        self.database = database
-
-
-async with UserService.run() as flock:
-    assert flock[Database] is flock[UserService].database
-```
-
-编排、回滚与关闭的细节见 [Flock](flock.md)。
-
-## 直接使用 Canary
-
-Canary 遵循 Python 异步上下文管理协议，因此可以不依赖 `Flock` 独立运行：
-
-```python
-database = Database(Config())
-
-async with database:
-    ...  # 运行中
-```
-
-`__aenter__` 执行 `@start`；`__aexit__` 执行 `@stop`。
-
-你也可以显式调用协议方法：
-
-```python
-await database.__aenter__()
+app = Canary(UserService)
+await app.init()
+await app.start()
 ...
-await database.__aexit__(None, None, None)
+await app.stop()
 ```
 
-## `state` 属性
+## 构造
 
-每个 Canary 都暴露一个来自 `LifecycleState` 的 `state` 属性：
+```python
+app = Canary(*roots)
+```
 
-`NEW → INITIALIZED → STARTING → RUNNING → STOPPING → STOPPED`
+每个根都必须被 `@cocoa` 标记，否则 `Canary` 在构造时抛出 `TypeError`。传入多个根会把它们
+的依赖图合并为一张共享图。
 
-出错时进入 `FAILED`。详见[生命周期](lifecycle.md)。
+## 生命周期方法
+
+| 方法 | 状态迁移 | 作用 |
+|---|---|---|
+| `await app.init()` | `NEW → INITIALIZED` | 建图、拓扑排序、按序执行 `@on_init` |
+| `await app.start()` | `INITIALIZED → STARTED` | 注入依赖、按序执行 `@on_start`、收集服务入口 |
+| `await app.stop()` | `STARTED → STOPPED` | 逆序执行 `@on_stop` |
+
+引擎是异步原生的：钩子可同步可异步，运行时按返回值判断是否 `await`。状态机与错误处理见
+[生命周期](lifecycle.md)。
+
+`Canary` 也实现了异步上下文管理器协议：
+
+```python
+async with Canary(UserService) as app:
+    assert app[Database] is app[UserService].database
+```
+
+## 访问实例
+
+用 `__getitem__` 获取图中某类型的共享单例：
+
+```python
+users = app[UserService]
+assert users.database is app[Database]
+```
+
+`order` 属性返回拓扑启动顺序（依赖在前）；`instances` 按同序返回对应实例；`state` 返回
+当前的 `LifecycleState`。
+
+## 多根编排
+
+因为 `Canary` 接受多个根，同一个单元可以参与不同的图 —— 任意子图也能独立启动：
+
+```python
+# 完整应用
+app = Canary(LibraryApp)
+await app.start()
+
+# 仅数据层，独立启动
+books = Canary(BookRepository)
+await books.start()
+```
+
+依赖在单张图内共享，但在两个独立的 `Canary` 实例之间不共享。
+
+## 服务 ASGI
+
+`Canary` 本身就是一个 ASGI 应用。它的 `__call__(scope, receive, send)` 处理 `lifespan`
+scope 以驱动 `init()` / `start()` / `stop()`，并把其余 scope（`http`、`websocket`、…）委托
+给某个单元在 `start()` 阶段暴露的**服务入口**。
+
+这正是 [web 扩展](web.md) 的工作方式：`@web_cocoa` 注入一个 `@on_start` 钩子，在启动阶段
+构建 Starlette 应用并打上标记暴露出来；`Canary` 按鸭子类型找到它并委托给它 —— 而不 import
+任何具体扩展：
+
+```python
+from canary_framework import Canary
+
+app = Canary(LibraryAPI)  # app 本身就是 ASGI 应用
+
+# uvicorn examples.library.web:app
+```
+
+这种鸭子类型的接线方式见 [架构](architecture.md)。

@@ -1,122 +1,92 @@
-# Canary
+# Runtime (Canary)
 
-A **Canary** is the smallest runnable unit of the framework: an ordinary Python class marked with `@canary`.
-
-```python
-from canary_framework import canary
-
-
-@canary
-class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-```
-
-`@canary`:
-
-1. registers the class,
-2. records its metadata,
-3. discovers its lifecycle hooks,
-4. makes it a subclass of `Canary`, so it gains the async context-manager protocol and the `state` property.
-
-It does **not** dynamically add lifecycle methods to the class. Your methods remain ordinary methods that static type checkers understand.
-
-## Declaring dependencies
-
-A Canary declares its dependencies through its `__init__` type annotations. Any parameter that has a class annotation (or a string forward reference) and no default value is treated as a dependency:
+`Canary` is the orchestrator that owns a graph of [cocoas](cocoa.md) and drives their
+lifecycle. It is not itself a business unit — it only resolves, orders, and runs them.
 
 ```python
-@canary
-class UserService:
-    def __init__(self, database: Database, cache: Cache) -> None:
-        self.database = database
-        self.cache = cache
-```
-
-Parameters with a default value are **not** injected:
-
-```python
-@canary
-class Repository:
-    def __init__(self, database: Database, timeout: float = 30.0) -> None:
-        self.database = database
-        self.timeout = timeout
-```
-
-Here only `database` is a dependency; `timeout` keeps its default.
-
-See [Dependency Injection](dependency-injection.md) for the full contract.
-
-## Lifecycle hooks
-
-A Canary may declare at most one hook per stage:
-
-| Stage | Decorator | Runs |
-|---|---|---|
-| Start | `@start` | on `__aenter__` |
-| Stop | `@stop` | on `__aexit__` |
-
-Each hook is optional. A Canary with no hooks is perfectly valid:
-
-```python
-@canary
-class UserRepository:
-    def __init__(self, database: Database) -> None:
-        self.database = database
-```
-
-## Orchestrating the graph with `run()`
-
-`Canary.run()` is a classmethod that returns a [`Flock`](flock.md) — a graph handle that discovers this Canary's transitive dependencies, topologically sorts them, and drives the whole graph:
-
-```python
-@canary
-class Config: ...
+from canary_framework import Canary
 
 
-@canary
-class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-
-
-@canary
-class UserService:
-    def __init__(self, database: Database) -> None:
-        self.database = database
-
-
-async with UserService.run() as flock:
-    assert flock[Database] is flock[UserService].database
-```
-
-See [Flock](flock.md) for orchestration, rollback, and shutdown details.
-
-## Using a Canary directly
-
-A Canary follows Python's async context-manager protocol, so it runs standalone without a `Flock`:
-
-```python
-database = Database(Config())
-
-async with database:
-    ...  # running
-```
-
-`__aenter__` runs `@start`; `__aexit__` runs `@stop`.
-
-You can also call the protocol methods explicitly:
-
-```python
-await database.__aenter__()
+app = Canary(UserService)
+await app.init()
+await app.start()
 ...
-await database.__aexit__(None, None, None)
+await app.stop()
 ```
 
-## The `state` property
+## Construction
 
-Every Canary exposes a `state` property drawn from `LifecycleState`:
+```python
+app = Canary(*roots)
+```
 
-`NEW → INITIALIZED → STARTING → RUNNING → STOPPING → STOPPED`
+Each root must be decorated with `@cocoa`, otherwise `Canary` raises `TypeError` at
+construction. Passing several roots composes their graphs into one shared graph.
 
-with `FAILED` on error. See [Lifecycle](lifecycle.md).
+## The lifecycle methods
+
+| Method | Transition | What it does |
+|---|---|---|
+| `await app.init()` | `NEW → INITIALIZED` | build the graph, topologically sort it, run `@on_init` in order |
+| `await app.start()` | `INITIALIZED → STARTED` | inject dependencies, run `@on_start` in order, collect the serving app |
+| `await app.stop()` | `STARTED → STOPPED` | run `@on_stop` in reverse order |
+
+The engine is async-native: hooks may be sync or async, and the runtime `await`s based on the
+returned value. See [Lifecycle](lifecycle.md) for the state machine and error handling.
+
+`Canary` also implements the async context-manager protocol:
+
+```python
+async with Canary(UserService) as app:
+    assert app[Database] is app[UserService].database
+```
+
+## Accessing instances
+
+Use `__getitem__` to fetch the shared singleton of a type in this graph:
+
+```python
+users = app[UserService]
+assert users.database is app[Database]
+```
+
+The `order` property returns the topological startup order (dependencies first); `instances`
+returns the corresponding instances in the same order; `state` returns the current
+`LifecycleState`.
+
+## Multi-root composition
+
+Because a `Canary` accepts several roots, the same unit can participate in different graphs —
+and any sub-tree can be launched on its own:
+
+```python
+# Full application
+app = Canary(LibraryApp)
+await app.start()
+
+# Just the data layer, independently
+books = Canary(BookRepository)
+await books.start()
+```
+
+Dependencies are shared within a single graph but not across two separate `Canary` instances.
+
+## Serving ASGI
+
+`Canary` is itself an ASGI application. Its `__call__(scope, receive, send)` handles the
+`lifespan` scope to drive `init()` / `start()` / `stop()`, and delegates every other scope
+(`http`, `websocket`, …) to a **serving app** that one of its units exposed during `start()`.
+
+This is how the [web extension](web.md) works: `@web_cocoa` injects an `@on_start` hook that
+builds a Starlette app and exposes it under a marker; `Canary` finds it by duck typing and
+delegates to it — without importing any concrete extension:
+
+```python
+from canary_framework import Canary
+
+app = Canary(LibraryAPI)  # app is the ASGI application
+
+# uvicorn examples.library.web:app
+```
+
+See [Architecture](architecture.md) for how this duck-typing is wired.

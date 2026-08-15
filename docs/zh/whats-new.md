@@ -1,64 +1,58 @@
-# 0.7.0 新特性
+# 0.9.0 新特性
 
-0.7.0 是一次破坏性重构。Service / Router / Module 的 web 层被移除，替换为纯 **Canary / Flock** 生命周期与依赖注入引擎。
+0.9.0 带来了 **web 扩展**，并把运行时引擎抽到独立包。核心模型 —— `@cocoa` 单元 + `Canary`
+编排器 —— 与 0.8.0 一致。
 
-## 迁移对照表
+## 新增
 
-| 0.6.0 | 0.7.0 |
+- **`canary_framework.web`** —— 把 `@cocoa` 服务暴露为 ASGI 应用：
+  - `@web_cocoa(deps=[...], title=..., version=...)` 把单元标记为 HTTP 路由持有者。
+  - `@get` / `@post` / `@put` / `@patch` / `@delete` / `@route` 标记处理器方法。
+  - 参数按名字自动绑定 —— 路径、查询、请求头、Cookie，以及 Pydantic `BaseModel` 请求体 ——
+    由 Pydantic v2 校验（失败映射为 HTTP 422）。
+  - 自动生成 OpenAPI 3.1（`/openapi.json`）、Swagger UI（`/docs`）、Redoc（`/redoc`）。
+- **`canary-framework[web]`** 可选依赖（starlette + pydantic + uvicorn）。
+
+```python
+from pydantic import BaseModel
+from canary_framework import Canary
+from canary_framework.web import get, post, web_cocoa
+
+
+class BorrowRequest(BaseModel):
+    member_id: int
+
+
+@web_cocoa(deps=[BookRepository, LibraryService])
+class LibraryAPI:
+    @get("/books/{book_id}")
+    async def get_book(self, book_id: int) -> dict: ...
+
+    @post("/books/{book_id}/borrow")
+    async def borrow(self, book_id: int, body: BorrowRequest) -> dict: ...
+
+
+app = Canary(LibraryAPI)  # app 本身就是 ASGI 应用
+```
+
+## 变更
+
+- **运行时引擎迁移**：从 `core` 抽到 `canary_framework.runtime`。`Canary` 现在同时是一个
+  ASGI 应用：它在 `lifespan` 上驱动生命周期，并把其余 scope 委托给单元在 `start()` 阶段
+  暴露的服务入口 —— 通过标记做鸭子类型，不 import 任何具体扩展。
+
+## 从 0.8.0 迁移
+
+0.8.0 引入了现在的命名。对从 0.7.0 世界来的读者，映射如下：
+
+| 0.7.0 | 0.8.0+ |
 |---|---|
-| `@service()` / `ServiceBase` | `@canary` |
-| `@router()` / `RouterBase` | 已移除 |
-| `@module()` / `ModuleBase` | 已移除 |
-| `@get` / `@post` / … | 已移除 |
-| `on_init` / `on_startup` / `on_shutdown` | `@start` / `@stop` |
-| `await app.init()` + ASGI lifespan | `Canary.run()` + `await flock.start()` |
-| config service | `@canary class Config` |
-| OpenAPI / 文档端点 | 已移除 |
+| `@canary` | `@cocoa(deps=[...])` |
+| `__init__(database: Database)` | `@cocoa(deps=[Database])` |
+| `@start` / `@stop` | `@on_start` / `@on_stop`（外加 `@on_init`） |
+| `Canary.run()` / `Flock` | `Canary(*roots)` |
+| `await flock.start()` | `await app.init(); await app.start()` |
+| `flock[Database]` | `app[Database]` |
+| `async with X.run() as flock` | `async with Canary(X) as app` |
 
-## 之前
-
-```python
-from canary_framework import get, router
-from canary_framework.core import RouterBase
-
-
-@router(prefix="/hello", tags=("Hello",))
-class HelloRouter(RouterBase):
-    @get("")
-    async def hello(self) -> dict[str, str]:
-        return {"message": "Hello, Canary!"}
-```
-
-## 之后
-
-```python
-from canary_framework import canary
-
-
-@canary
-class Config:
-    def __init__(self) -> None:
-        self.database_url = "postgresql://localhost/dev"
-
-
-@canary
-class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-
-
-async def main() -> None:
-    async with Database.run() as flock:
-        assert flock[Database].config is flock[Config]
-
-
-asyncio.run(main())
-```
-
-## 关键变化
-
-- **Canary 取代 Service。** Canary 是普通 class，依赖来自 `__init__` 注解。
-- **生命周期 Hook 取代生命周期方法。** `@start`、`@stop` 映射到 `__aenter__` / `__aexit__`。
-- **`Flock` 取代运行根。** `Canary.run()` 返回一个 `Flock`，它发现、排序并驱动依赖图。
-- **无 web 层。** 路由、OpenAPI 与配置系统被移除，框架是纯引擎。
-- **独立使用。** Canary 本身就是异步上下文管理器。
+完整历史见 [变更日志](https://github.com/HotcocoaCanary/Canary-Framework/blob/main/CHANGELOG.md)。

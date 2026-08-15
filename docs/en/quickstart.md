@@ -8,80 +8,75 @@ pip install canary-framework
 
 Requires Python 3.12+.
 
-## Declare Canaries
+## Declare units
 
-Mark any plain class with `@canary`:
+Mark any plain class with `@cocoa`. Dependencies are declared with `deps=[...]`:
 
 ```python
-from canary_framework import canary
+from canary_framework import cocoa
 
 
-@canary
+@cocoa
 class Config:
     def __init__(self) -> None:
         self.database_url = "postgresql://localhost/dev"
-```
-
-Dependencies are declared through the `__init__` signature:
-
-```python
-from canary_framework import canary
 
 
-@canary
+@cocoa(deps=[Config])
 class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
+    # `self.config` is injected at start() time
+    def __init__(self) -> None:
+        self.pool = None
 ```
 
 ## Add lifecycle behaviour
 
-Use `@start` and `@stop` — both optional, and each may be sync or async:
+Use `@on_init`, `@on_start` and `@on_stop` — all optional, each sync or async:
 
 ```python
-from canary_framework import canary, start, stop
+from canary_framework import cocoa, on_init, on_start, on_stop
 
 
-@canary
+@cocoa(deps=[Config])
 class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
+    @on_init
+    def setup(self) -> None:
         self.pool = ConnectionPool(self.config.database_url)
 
-    @start
+    @on_start
     async def connect(self) -> None:
         await self.pool.connect()
 
-    @stop
+    @on_stop
     async def disconnect(self) -> None:
         await self.pool.close()
 ```
 
-## Run with a Flock
+## Run with `Canary`
 
-`Canary.run()` returns a `Flock` that discovers the graph from the root Canary, topologically sorts it, and drives the lifecycle:
+`Canary(*roots)` resolves the graph from each root, topologically sorts it, and drives the
+lifecycle explicitly:
 
 ```python
 import asyncio
 
-from canary_framework import canary
+from canary_framework import Canary, cocoa
 
 
-@canary
-class UserService:
-    def __init__(self, database: Database) -> None:
-        self.database = database
+@cocoa(deps=[Database])
+class UserService: ...
 
 
 async def main() -> None:
-    flock = UserService.run()
-    await flock.start()
+    app = Canary(UserService)
+    await app.init()
+    await app.start()
 
     try:
-        users = flock[UserService]
-        assert users.database is flock[Database]
+        users = app[UserService]
+        assert users.database is app[Database]
     finally:
-        await flock.stop()
+        await app.stop()
 
 
 asyncio.run(main())
@@ -91,30 +86,58 @@ Or use it as an async context manager:
 
 ```python
 async def main() -> None:
-    async with UserService.run() as flock:
-        assert flock[Database] is flock[UserService].database
+    async with Canary(UserService) as app:
+        assert app[Database] is app[UserService].database
 
 
 asyncio.run(main())
 ```
 
-## Run a single Canary standalone
+## Compose multiple roots
 
-A Canary follows Python's async context-manager protocol, so you can drive it directly:
+`Canary` accepts several roots, composing their graphs into one:
 
 ```python
-async def main() -> None:
-    database = Database(Config())
-    async with database:
-        ...  # running
-
-
-asyncio.run(main())
+app = Canary(UserService, ReportService)
+await app.start()
+assert app[Database] is app[UserService].database
 ```
+
+Any sub-tree can be launched on its own — `Canary(Database)` starts only `Database` and its
+dependencies (`Config`).
+
+## Expose it as a web app
+
+Add the optional `web` extension to serve a unit over HTTP:
+
+```bash
+pip install "canary-framework[web]"
+```
+
+```python
+from canary_framework import Canary
+from canary_framework.web import get, web_cocoa
+
+
+@web_cocoa(deps=[Database])
+class LibraryAPI:
+    @get("/books")
+    async def list_books(self) -> list[dict]:
+        return self.database.all("books")
+
+
+app = Canary(LibraryAPI)  # `app` is the ASGI application
+```
+
+```bash
+uvicorn examples.library.web:app --reload
+```
+
+Open `/docs` for the interactive OpenAPI document. See [Web Apps](web.md).
 
 ## What's next
 
-- [Canary](canary.md) — declaration and the dependency contract.
+- [Cocoa Units](cocoa.md) — declaration, dependencies and hooks.
+- [Runtime (Canary)](canary.md) — orchestration, multi-root and ASGI.
 - [Lifecycle](lifecycle.md) — the state machine and hook ordering.
-- [Dependency Injection](dependency-injection.md) — forward references, cycles, scoping.
-- [Flock](flock.md) — orchestration, rollback, and shutdown.
+- [Dependency Injection](dependency-injection.md) — injection, sharing, cycles.

@@ -1,27 +1,43 @@
 # API Reference
 
-## `canary`
+Everything below is exported from `canary_framework` unless stated otherwise.
+
+## `cocoa`
 
 ```python
-def canary(cls: type[T]) -> type[T]
+def cocoa(cls=None, *, deps: list[type] | None = None)
 ```
 
-Declares `cls` as a Canary. Returns a `Canary` subclass carrying the same namespace.
+Marks `cls` as a cocoa — the minimum unit. `deps` is the ordered list of dependency types.
+Usable directly or as a decorator factory:
 
-Raises `RegistrationError` if `cls` is already a Canary, uses `__slots__`, declares an invalid constructor, or declares duplicate hooks for one stage.
+```python
+@cocoa
+class Config: ...
+
+
+@cocoa(deps=[Config])
+class Database: ...
+```
+
+## `on_init` / `on_start` / `on_stop`
+
+```python
+def on_init(fn) -> fn
+def on_start(fn) -> fn
+def on_stop(fn) -> fn
+```
+
+Register a method as a lifecycle hook. Each accepts sync or async functions, and any number of
+hooks may share a stage.
 
 ## `Canary`
 
-Base class shared by every Canary.
-
-### `run` — classmethod
-
 ```python
-@classmethod
-def run(cls) -> Flock
+class Canary(*roots: type)
 ```
 
-Returns a `Flock` that orchestrates this Canary's transitive dependency graph.
+The orchestrator. Raises `TypeError` if a root is not decorated with `@cocoa`.
 
 ### `state` — property
 
@@ -30,80 +46,42 @@ Returns a `Flock` that orchestrates this Canary's transitive dependency graph.
 def state(self) -> LifecycleState
 ```
 
-Returns the current lifecycle state of the instance.
-
-### `__aenter__`
-
-```python
-async def __aenter__(self) -> Canary
-```
-
-Runs the `@start` hook and enters the `RUNNING` state. Raises `LifecycleError` unless the Canary is `INITIALIZED`.
-
-### `__aexit__`
-
-```python
-async def __aexit__(self, exc_type, exc, tb) -> bool | None
-```
-
-Runs the `@stop` hook and enters the `STOPPED` state. No-op if not running.
-
-## `start`, `stop`
-
-```python
-def start(func: F) -> F
-def stop(func: F) -> F
-```
-
-Mark a method as the startup / stop hook of a Canary. Each may be sync or async, and at most one of each stage is allowed per Canary.
-
-## `Flock`
-
-```python
-class Flock:
-    def __init__(self, root: type[Canary]) -> None
-```
-
-The lifecycle orchestrator returned by `Canary.run()`. Raises `DependencyError` if `root` is not a registered Canary.
-
-### `root` — property
-
-The root Canary type.
-
-### `state` — property
-
-```python
-@property
-def state(self) -> FlockState
-```
-
-The current orchestration state.
+The current lifecycle state.
 
 ### `order` — property
 
 ```python
 @property
-def order(self) -> tuple[type[Canary], ...]
+def order(self) -> tuple[type, ...]
 ```
 
-Canary types in dependency-first topological order.
+Unit types in topological startup order (dependencies first).
 
 ### `instances` — property
 
 ```python
 @property
-def instances(self) -> dict[type[Canary], Canary]
+def instances(self) -> tuple[object, ...]
 ```
 
-A copy of the created instances, keyed by Canary type.
+The instances, in topological order.
 
 ### `__getitem__`
 
 ```python
-def __getitem__(self, canary_type: type[T]) -> T
+def __getitem__(self, cls: type[T]) -> T
 ```
 
-Returns the shared instance of `canary_type` in this graph. Raises `KeyError` if absent.
+Returns the shared singleton for `cls` in this graph. Raises `KeyError` if absent.
+
+### `init`
+
+```python
+async def init(self) -> None
+```
+
+Builds the graph, topologically sorts it, and runs `@on_init` in order.
+`NEW → INITIALIZED`.
 
 ### `start`
 
@@ -111,7 +89,8 @@ Returns the shared instance of `canary_type` in this graph. Raises `KeyError` if
 async def start(self) -> None
 ```
 
-Builds the graph, constructs, and starts every Canary in topological order. Raises `StartupError` on failure (after rollback).
+Injects dependencies, runs `@on_start` in order, then collects any serving app.
+`INITIALIZED → STARTED`.
 
 ### `stop`
 
@@ -119,29 +98,68 @@ Builds the graph, constructs, and starts every Canary in topological order. Rais
 async def stop(self) -> None
 ```
 
-Stops running Canaries in reverse topological order. Raises `LifecycleError` if not running.
+Runs `@on_stop` in reverse topological order. `STARTED → STOPPED`.
+
+### `__call__` — ASGI
+
+```python
+async def __call__(self, scope, receive, send) -> None
+```
+
+Serves ASGI: `lifespan` drives the lifecycle; other scopes are delegated to the serving app a
+unit exposed during `start()`.
 
 ### `__aenter__` / `__aexit__`
 
-Async context-manager protocol wrapping `start` / `stop`.
+Async context-manager protocol wrapping `init()` + `start()` / `stop()`.
 
 ## Enums
 
 ### `LifecycleState`
 
-Per-Canary state: `NEW`, `INITIALIZED`, `STARTING`, `RUNNING`, `STOPPING`, `STOPPED`, `FAILED`.
+`NEW`, `INITIALIZING`, `INITIALIZED`, `STARTING`, `STARTED`, `STOPPING`, `STOPPED`, `FAILED`.
 
-### `FlockState`
+### `State`
 
-Per-Flock state: `NEW`, `STARTING`, `RUNNING`, `STOPPING`, `STOPPED`, `FAILED`.
+The base enum every state enum inherits; a mount point for `issubclass` checks, not itself used.
 
 ## Exceptions
 
 | Exception | Base | Meaning |
 |---|---|---|
-| `CanaryError` | `Exception` | base class for all framework errors |
-| `RegistrationError` | `CanaryError` | invalid Canary declaration |
-| `DependencyError` | `CanaryError` | dependency resolution or wiring failure |
-| `CircularDependencyError` | `DependencyError` | dependency cycle; exposes `.cycle` |
-| `LifecycleError` | `CanaryError` | illegal lifecycle operation |
-| `StartupError` | `CanaryError` | startup failure; exposes `.canary_type` |
+| `CanaryError` | `Exception` | base class for every framework error |
+| `CircularDependencyError` | `CanaryError` | dependency cycle; exposes `.cycle` (list of type names) |
+| `LifecycleError` | `CanaryError` | illegal lifecycle transition |
+
+All framework and extension errors inherit `CanaryError`, so `except CanaryError` catches
+everything.
+
+## Introspection (`canary_framework.core`)
+
+| Function | Purpose |
+|---|---|
+| `is_cocoa(cls)` | `True` if `cls` was decorated with `@cocoa` |
+| `deps_of(cls)` | the declared dependencies |
+| `hooks_of(instance, marker)` | marked methods of `instance`, base-first |
+| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | hooks for a stage |
+| `to_snake(name)` | `UserService` → `user_service` |
+
+## Graph algorithms (`canary_framework.runtime`)
+
+| Function | Purpose |
+|---|---|
+| `build_graph(roots)` | instantiate each root and its transitive deps, one instance each |
+| `topological_sort(graph)` | Kahn's algorithm; raises `CircularDependencyError` on a cycle |
+
+## Web extension (`canary_framework.web`)
+
+| Name | Purpose |
+|---|---|
+| `@web_cocoa(deps=[...], title=..., version=...)` | mark a class as a `@cocoa` *and* an HTTP route holder |
+| `@get` / `@post` / `@put` / `@patch` / `@delete` / `@route(method, path)` | mark a method as a route handler |
+| `Query` / `Path` / `Header` / `Cookie` / `Body` | parameter source markers (as a default or via `Annotated`) |
+| `WebError` | base class for web-extension errors |
+| `RouteRegistrationError` | duplicate method + path |
+| `MissingParameterError` | required request parameter absent (maps to HTTP 422) |
+
+See [Web Apps](web.md) for usage.

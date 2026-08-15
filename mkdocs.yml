@@ -1,5 +1,5 @@
 site_name: Canary Framework
-site_description: Typed async lifecycle and dependency-injection framework
+site_description: A minimal, decorator-driven dependency-injection, lifecycle and ASGI web framework
 site_author: 张文博 (Canary)
 copyright: Copyright &copy; 2026 张文博 (Canary)
 
@@ -39,6 +39,7 @@ theme:
     - content.tooltips
   icon:
     repo: fontawesome/brands/github
+    logo: material/bird
 
 # 内部设计文档（docs/superpowers/**）不纳入站点构建。
 # Internal design docs under docs/superpowers/** are excluded from the built site.
@@ -68,6 +69,9 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - tables
   - attr_list
   - md_in_html
@@ -79,10 +83,10 @@ nav:
   - What's New: whats-new.md
   - Quick Start: quickstart.md
   - Core:
-      - Canary: canary.md
+      - Cocoa Units: cocoa.md
+      - Runtime (Canary): canary.md
       - Lifecycle: lifecycle.md
       - Dependency Injection: dependency-injection.md
-      - Flock: flock.md
   - Web:
       - Web Apps: web.md
   - Architecture: architecture.md

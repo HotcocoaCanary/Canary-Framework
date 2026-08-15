@@ -36,7 +36,7 @@ classifiers = [
 
 [[project.authors]]
 name = "张文博 (Canary)"
-email = "Hotcocoa.Canary@outlook.com"
+email = "Cacao.Canary@outlook.com"
 
 [project.urls]
 Repository = "https://github.com/HotcocoaCanary/Canary-Framework"

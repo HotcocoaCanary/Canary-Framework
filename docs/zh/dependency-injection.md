@@ -1,95 +1,105 @@
 # 依赖注入
 
-Canary 通过构造函数类型注解表达依赖关系，无需额外的 DSL —— 依赖图直接存在于类型定义中。
+cocoa 通过 `@cocoa(deps=[...])` 声明依赖。无需额外 DSL，也无需 `__init__` 装配 —— 依赖图
+就写在装饰器里。
 
 ## 契约
 
-一个 `__init__` 参数是依赖，当它：
-
-- 具有**类注解**（或**字符串前向引用**），且
-- **没有默认值**。
-
 ```python
-@canary
-class UserService:
-    def __init__(self, database: Database, cache: Cache) -> None:
-        self.database = database
-        self.cache = cache
+@cocoa(deps=[Database, Cache])
+class UserService: ...
 ```
 
-规则：
+`deps=[...]` 是一个有序的 cocoa 类型列表。在 `start()` 阶段，运行时把每个依赖注入到实例上，
+属性名由类名转 snake_case 得到：
 
-- 带默认值的参数永远不会被注入。
-- 无注解的参数，或注解为非类类型的参数，必须带默认值 —— 否则在装饰阶段抛出 `RegistrationError`。
-- `*args` 与 `**kwargs` 会被 `RegistrationError` 拒绝。
+| 依赖类型 | 注入属性 |
+|---|---|
+| `Config` | `self.config` |
+| `Database` | `self.database` |
+| `UserService` | `self.user_service` |
+
+```python
+@cocoa(deps=[Database])
+class UserService:
+    @on_start
+    def warm_up(self) -> None:
+        self.database.ping()  # 在 @on_start 执行前已注入
+```
+
+因为注入发生在 `start()` 而非 `__init__`，构造函数保持空、单元构建廉价。不要在 `__init__`
+里读注入属性；请用 `@on_init` 或 `@on_start`。
 
 ## 解析
 
-框架读取 `inspect.signature` 与 `typing.get_type_hints` 来解析依赖。参数名在装饰阶段分类；具体类型在构图阶段解析，因此支持前向引用。
+`init()` 通过递归遍历每个根的 `deps=[...]` 建图，并把每个类型实例化一次。未被 `@cocoa`
+标记的类型会抛出 `TypeError`。
 
-每个解析出的依赖都必须是已注册的 Canary。依赖普通 class 会抛出 `DependencyError`。
-
-## 前向引用
-
-由于依赖在注册之后才解析，字符串前向引用可用 —— 前提是 Canary 类型定义在**模块级别**：
+依赖按具体类对象解析 —— 没有字符串、没有前向引用：
 
 ```python
-from __future__ import annotations
-
-
-@canary
-class Database:
-    def __init__(self, config: "Config") -> None:  # 前向引用
-        self.config = config
-
-
-@canary
-class Config:
-    pass
+@cocoa(deps=[Database])
+class UserService: ...
 ```
 
-前向引用相对于模块全局命名空间解析。定义在函数体内部的 Canary 无法可靠解析前向引用 —— 请改为模块级别定义。
+## 共享
 
-## 循环依赖
-
-循环依赖会被拒绝。依赖图在拓扑排序阶段检测到它并抛出 `CircularDependencyError`：
+每个类型在**单张图内只实例化一次**。当多个单元依赖同一类型时，它们共享同一个实例：
 
 ```python
-@canary
-class A:
-    def __init__(self, b: "B") -> None: ...
+@cocoa
+class Config: ...
 
 
-@canary
-class B:
-    def __init__(self, a: A) -> None: ...
+@cocoa(deps=[Config])
+class Database: ...
 
 
-flock = A.run()
-await flock.start()  # CircularDependencyError: Circular dependency detected: A -> B -> A
+@cocoa(deps=[Config])
+class Cache: ...
+
+
+@cocoa(deps=[Database, Cache])
+class Root: ...
+
+
+app = Canary(Root)
+await app.start()
+assert app[Database].config is app[Cache].config  # 同一个 Config
 ```
 
-## 作用域
+共享作用域限于单个 `Canary`。两个独立的 `Canary` 实例会构建两张独立的图。
 
-每个 Canary 类型在每个 `Flock` 图中**只实例化一次**。多个 Canary 依赖同一类型时共享同一实例：
+## 成环
+
+成环会在 `init()` 阶段被拒绝。拓扑排序检测到环时抛出 `CircularDependencyError`，并通过
+`.cycle` 暴露环上的类型：
 
 ```python
-@canary
-class Database:
-    def __init__(self, config: Config) -> None: ...
+@cocoa(deps=[B])
+class A: ...
 
 
-@canary
-class Cache:
-    def __init__(self, config: Config) -> None: ...
+@cocoa(deps=[A])
+class B: ...
 
 
-@canary
-class Root:
-    def __init__(self, database: Database, cache: Cache) -> None: ...
-
-
-flock = Root.run()
-await flock.start()
-assert flock[Database].config is flock[Cache].config
+app = Canary(A)
+await app.init()  # CircularDependencyError: circular dependency detected: A -> B -> A
 ```
+
+## 多根图
+
+给 `Canary` 传入多个根会合并它们的图。根之间共享的依赖仍只实例化一次：
+
+```python
+app = Canary(UserService, ReportService)
+await app.start()
+assert app[UserService].database is app[ReportService].database
+```
+
+## 命名边界情况
+
+注入属性名由依赖的类名转 snake_case 而来。缩写也能正确处理（`APIService` →
+`api_service`、`HTTPServer` → `http_server`）。若两个依赖会撞名，请重命名其中一个类 ——
+注入属性由类型派生，而非列表顺序。

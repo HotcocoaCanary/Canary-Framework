@@ -1,57 +1,64 @@
-<h1 align="center">Canary Framework 0.7</h1>
+<h1 align="center">Canary Framework</h1>
 
-<p align="center">A typed, decorator-driven async framework for lifecycle and dependency injection.</p>
+<p align="center">
+  A minimal, decorator-driven framework for <strong>dependency injection</strong>,
+  <strong>lifecycle</strong>, and <strong>ASGI web apps</strong> — in plain Python.
+</p>
 
-[中文](README_ZH.md) · [Documentation](docs/en/index.md) · [Changelog](CHANGELOG.md)
+<p align="center">
+  <a href="README_ZH.md">中文</a> ·
+  <a href="docs/en/index.md">Documentation</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
 
 ## Install
 
 ```bash
-pip install canary-framework
+pip install canary-framework            # core
+pip install "canary-framework[web]"     # + web extension (ASGI / OpenAPI)
 ```
 
 Requires Python 3.12+.
 
 ## The model
 
-- **Canary** is the smallest runnable unit — a plain Python class marked with `@canary`. Dependencies are declared through `__init__` type annotations; `@start` and `@stop` declare optional lifecycle behaviour.
-- **Flock** is the orchestrator returned by `Canary.run()`. It receives a root Canary, discovers its transitive dependencies, topologically sorts them, and drives their full lifecycle in dependency order.
+- **cocoa** is the smallest runnable unit — a plain Python class marked with `@cocoa`.
+  Dependencies are declared with `deps=[...]`; `@on_init` / `@on_start` / `@on_stop` declare
+  optional lifecycle behaviour.
+- **Canary** is the orchestrator. `Canary(*roots)` resolves the dependency graph, topologically
+  sorts it, and drives the full lifecycle — and is itself an ASGI application.
 
 ## Quick start
 
 ```python
 import asyncio
 
-from canary_framework import canary, start, stop
+from canary_framework import Canary, cocoa, on_start
 
 
-@canary
+@cocoa
 class Config:
     def __init__(self) -> None:
         self.database_url = "postgresql://localhost/dev"
 
 
-@canary
+@cocoa(deps=[Config])
 class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-
-    @start
-    async def connect(self) -> None: ...
-
-    @stop
-    async def disconnect(self) -> None: ...
+    @on_start
+    async def connect(self) -> None:
+        await self.pool.connect()  # self.config is injected
 
 
-@canary
-class UserService:
-    def __init__(self, database: Database) -> None:
-        self.database = database
+@cocoa(deps=[Database])
+class UserService: ...
 
 
 async def main() -> None:
-    async with UserService.run() as flock:
-        assert flock[Database] is flock[UserService].database
+    app = Canary(UserService)
+    await app.init()  # build the graph, run @on_init
+    await app.start()  # inject deps, run @on_start
+    assert app[Database].config is app[Config]
+    await app.stop()  # run @on_stop in reverse order
 
 
 asyncio.run(main())
@@ -59,35 +66,85 @@ asyncio.run(main())
 
 ## Dependency injection
 
-Canaries declare dependencies with constructor type annotations — no DSL:
+Cocoas declare dependencies with `deps=[...]` — no `__init__` plumbing, no DSL. Each dependency
+is injected lazily as `self.<snake_case_name>` at `start()`:
 
 ```python
-@canary
+@cocoa(deps=[Database, Cache])
 class UserService:
-    def __init__(self, database: Database, cache: Cache) -> None:
-        self.database = database
-        self.cache = cache
+    def __init__(self) -> None:
+        self._ready = False  # no dependency wiring here
 ```
 
-`Canary.run()` resolves the graph from the root, injects a single shared instance per Canary type, and drives initialization and startup in topological order.
+`Canary` resolves the graph from the roots, injects one shared instance per type, and drives
+initialization and startup in topological order.
 
 ## Lifecycle
 
-`@start` and `@stop` map onto Python's native async context-manager protocol (`__aenter__` / `__aexit__`), so a Canary runs both under a `Flock` and standalone:
+Three optional hooks — each sync or async, any number per stage:
+
+| Stage | Decorator | Runs |
+|---|---|---|
+| Init | `@on_init` | `init()`, topological order |
+| Start | `@on_start` | `start()`, topological order, deps injected |
+| Stop | `@on_stop` | `stop()`, reverse topological order |
 
 ```python
-database = Database(config)
-async with database:
-    ...  # running
+@cocoa(deps=[Config])
+class Database:
+    @on_init
+    def build_pool(self) -> None: ...
+
+    @on_start
+    async def connect(self) -> None: ...
+
+    @on_stop
+    async def disconnect(self) -> None: ...
+```
+
+## Web apps
+
+The `web` extension turns a `@cocoa` service into a FastAPI-style ASGI app with automatic
+OpenAPI docs:
+
+```python
+from pydantic import BaseModel
+from canary_framework import Canary
+from canary_framework.web import get, post, web_cocoa
+
+
+class BorrowRequest(BaseModel):
+    member_id: int
+
+
+@web_cocoa(deps=[BookRepository, LibraryService])
+class LibraryAPI:
+    @get("/books/{book_id}")
+    async def get_book(self, book_id: int) -> dict: ...
+
+    @post("/books/{book_id}/borrow")
+    async def borrow(self, book_id: int, body: BorrowRequest) -> dict: ...
+
+
+app = Canary(LibraryAPI)  # `app` is the ASGI application
+```
+
+```bash
+uvicorn examples.library.web:app --reload
+# GET /docs  ·  /redoc  ·  /openapi.json
 ```
 
 ## Examples
 
-Runnable examples are in [`examples/`](examples), from a minimal Canary through dependency injection, lifecycle hooks, standalone usage, and a layered application.
+Runnable examples live in [`examples/`](examples), from a minimal unit through dependency
+injection, lifecycle hooks, multi-root composition, and a layered library web app.
 
-## Breaking release
+## Documentation
 
-0.7.0 removes the Service / Router / Module web layer entirely. See [What's New](docs/en/whats-new.md) for migration notes.
+- [Quick Start](docs/en/quickstart.md)
+- [Cocoa Units](docs/en/cocoa.md) · [Runtime (Canary)](docs/en/canary.md)
+- [Lifecycle](docs/en/lifecycle.md) · [Dependency Injection](docs/en/dependency-injection.md)
+- [Web Apps](docs/en/web.md) · [Architecture](docs/en/architecture.md) · [API Reference](docs/en/api-reference.md)
 
 ## License
 

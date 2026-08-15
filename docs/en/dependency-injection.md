@@ -1,95 +1,110 @@
 # Dependency Injection
 
-Canaries express dependencies with constructor type annotations. There is no separate DSL — the dependency graph lives in the type definitions themselves.
+Cocoas declare dependencies with `@cocoa(deps=[...])`. There is no separate DSL and no
+`__init__` plumbing — the dependency graph lives in the decorators.
 
 ## The contract
 
-A `__init__` parameter is a dependency when it:
-
-- has a **class annotation** (or a **string forward reference**), and
-- has **no default value**.
-
 ```python
-@canary
-class UserService:
-    def __init__(self, database: Database, cache: Cache) -> None:
-        self.database = database
-        self.cache = cache
+@cocoa(deps=[Database, Cache])
+class UserService: ...
 ```
 
-Rules:
+`deps=[...]` is an ordered list of cocoa types. At `start()`, the runtime injects each
+dependency onto the instance as an attribute named after the class, in snake_case:
 
-- A parameter with a default value is never injected.
-- An unannotated parameter, or one annotated with a non-class type, must have a default — otherwise `RegistrationError` is raised at decoration time.
-- `*args` and `**kwargs` are rejected with `RegistrationError`.
+| Dependency type | Injected attribute |
+|---|---|
+| `Config` | `self.config` |
+| `Database` | `self.database` |
+| `UserService` | `self.user_service` |
+
+```python
+@cocoa(deps=[Database])
+class UserService:
+    @on_start
+    def warm_up(self) -> None:
+        self.database.ping()  # injected before @on_start runs
+```
+
+Because injection happens at `start()` — not in `__init__` — constructors stay empty and units
+are cheap to build. Do not read injected attributes in `__init__`; use `@on_init` or
+`@on_start`.
 
 ## Resolution
 
-The framework reads `inspect.signature` and `typing.get_type_hints` to resolve dependencies. Parameter names are classified at decoration time; concrete types are resolved at graph-build time, so forward references work.
+`init()` builds the graph by walking each root's `deps=[...]` transitively and instantiating
+every type once. A type that is not decorated with `@cocoa` raises `TypeError`.
 
-Every resolved dependency must itself be a registered Canary. Depending on a plain class raises `DependencyError`.
-
-## Forward references
-
-Because dependencies are resolved after registration, string forward references work — provided the Canary types are defined at **module level**:
+Dependencies are resolved by concrete class object — no strings, no forward references:
 
 ```python
-from __future__ import annotations
-
-
-@canary
-class Database:
-    def __init__(self, config: "Config") -> None:  # forward reference
-        self.config = config
-
-
-@canary
-class Config:
-    pass
+@cocoa(deps=[Database])
+class UserService: ...
 ```
 
-Forward references resolve against module globals. Canaries defined inside a function body cannot resolve forward references reliably — define them at module level instead.
+## Sharing
+
+Each type is instantiated **once per graph**. When several units depend on the same type, they
+share the same instance:
+
+```python
+@cocoa
+class Config: ...
+
+
+@cocoa(deps=[Config])
+class Database: ...
+
+
+@cocoa(deps=[Config])
+class Cache: ...
+
+
+@cocoa(deps=[Database, Cache])
+class Root: ...
+
+
+app = Canary(Root)
+await app.start()
+assert app[Database].config is app[Cache].config  # same Config
+```
+
+Sharing is scoped to a single `Canary`. Two separate `Canary` instances build two independent
+graphs.
 
 ## Cycles
 
-Cycles are rejected. The graph detects them during topological sorting and raises `CircularDependencyError`:
+Cycles are rejected during `init()`. The topological sort detects them and raises
+`CircularDependencyError`, which exposes the offending types on `.cycle`:
 
 ```python
-@canary
-class A:
-    def __init__(self, b: "B") -> None: ...
+@cocoa(deps=[B])
+class A: ...
 
 
-@canary
-class B:
-    def __init__(self, a: A) -> None: ...
+@cocoa(deps=[A])
+class B: ...
 
 
-flock = A.run()
-await flock.start()  # CircularDependencyError: Circular dependency detected: A -> B -> A
+app = Canary(A)
+await app.init()  # CircularDependencyError: circular dependency detected: A -> B -> A
 ```
 
-## Scoping
+## Multi-root graphs
 
-Each Canary type is instantiated **once per `Flock` graph**. When several Canaries depend on the same type, they share the same instance:
+Passing several roots to `Canary` unions their graphs. Dependencies shared between the roots
+are still instantiated once:
 
 ```python
-@canary
-class Database:
-    def __init__(self, config: Config) -> None: ...
-
-
-@canary
-class Cache:
-    def __init__(self, config: Config) -> None: ...
-
-
-@canary
-class Root:
-    def __init__(self, database: Database, cache: Cache) -> None: ...
-
-
-flock = Root.run()
-await flock.start()
-assert flock[Database].config is flock[Cache].config
+app = Canary(UserService, ReportService)
+await app.start()
+assert app[UserService].database is app[ReportService].database
 ```
+
+## Naming edge cases
+
+The injected attribute name comes from the dependency's class name, converted to snake_case.
+Acronyms are handled (`APIService` → `api_service`, `HTTPServer` → `http_server`). If two
+dependencies would collide on a name, rename one of the classes — the injected attribute is
+derived from the type, not from the list order.

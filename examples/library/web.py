@@ -40,7 +40,7 @@ class BorrowRequest(BaseModel):
 class LibraryAPI:
     @on_start
     async def banner(self) -> None:
-        print("系线")
+        print("  [LibraryAPI] 系统上线")
 
     @get("/books/{book_id}")
     async def get_book(self, book_id: int) -> dict:

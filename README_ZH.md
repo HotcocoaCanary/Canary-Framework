@@ -1,57 +1,63 @@
-<h1 align="center">Canary Framework 0.7</h1>
+<h1 align="center">Canary Framework</h1>
 
-<p align="center">一个强类型、装饰器驱动的异步生命周期与依赖注入框架。</p>
+<p align="center">
+  一个极简、装饰器驱动的 <strong>依赖注入</strong>、<strong>生命周期</strong> 与
+  <strong>ASGI Web 应用</strong> 框架 —— 纯 Python。
+</p>
 
-[English](README.md) · [中文文档](docs/zh/index.md) · [变更日志](CHANGELOG.md)
+<p align="center">
+  <a href="README.md">English</a> ·
+  <a href="docs/zh/index.md">中文文档</a> ·
+  <a href="CHANGELOG.md">变更日志</a>
+</p>
 
 ## 安装
 
 ```bash
-pip install canary-framework
+pip install canary-framework            # 核心
+pip install "canary-framework[web]"     # + web 扩展（ASGI / OpenAPI）
 ```
 
 需要 Python 3.12+。
 
 ## 核心模型
 
-- **Canary** 是最小运行单元 —— 一个被 `@canary` 标记的普通 Python class。依赖通过 `__init__` 的类型注解声明；`@start`、`@stop` 声明可选的生命周期行为。
-- **Flock** 是 `Canary.run()` 返回的编排器。它接收一个根 Canary，发现其传递依赖，进行拓扑排序，并按依赖顺序驱动完整生命周期。
+- **cocoa** 是最小运行单元 —— 一个被 `@cocoa` 标记的普通 Python class。依赖通过
+  `deps=[...]` 声明；`@on_init` / `@on_start` / `@on_stop` 声明可选的生命周期行为。
+- **Canary** 是编排器。`Canary(*roots)` 解析依赖图、拓扑排序、驱动完整生命周期 —— 它本身
+  也是一个 ASGI 应用。
 
 ## 快速开始
 
 ```python
 import asyncio
 
-from canary_framework import canary, start, stop
+from canary_framework import Canary, cocoa, on_start
 
 
-@canary
+@cocoa
 class Config:
     def __init__(self) -> None:
         self.database_url = "postgresql://localhost/dev"
 
 
-@canary
+@cocoa(deps=[Config])
 class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-
-    @start
-    async def connect(self) -> None: ...
-
-    @stop
-    async def disconnect(self) -> None: ...
+    @on_start
+    async def connect(self) -> None:
+        await self.pool.connect()  # self.config 已注入
 
 
-@canary
-class UserService:
-    def __init__(self, database: Database) -> None:
-        self.database = database
+@cocoa(deps=[Database])
+class UserService: ...
 
 
 async def main() -> None:
-    async with UserService.run() as flock:
-        assert flock[Database] is flock[UserService].database
+    app = Canary(UserService)
+    await app.init()  # 建图，执行 @on_init
+    await app.start()  # 注入依赖，执行 @on_start
+    assert app[Database].config is app[Config]
+    await app.stop()  # 逆序执行 @on_stop
 
 
 asyncio.run(main())
@@ -59,35 +65,83 @@ asyncio.run(main())
 
 ## 依赖注入
 
-Canary 通过构造函数类型注解声明依赖，无需额外 DSL：
+cocoa 通过 `deps=[...]` 声明依赖 —— 无需 `__init__` 装配，也无需额外 DSL。每个依赖在
+`start()` 阶段惰性注入为 `self.<snake_case 名>`：
 
 ```python
-@canary
+@cocoa(deps=[Database, Cache])
 class UserService:
-    def __init__(self, database: Database, cache: Cache) -> None:
-        self.database = database
-        self.cache = cache
+    def __init__(self) -> None:
+        self._ready = False  # 这里无需任何依赖装配
 ```
 
-`Canary.run()` 从根节点解析依赖图，为每个 Canary 类型注入一个共享实例，并按拓扑顺序驱动初始化与启动。
+`Canary` 从根解析依赖图，为每个类型注入一个共享实例，并按拓扑顺序驱动初始化与启动。
 
 ## 生命周期
 
-`@start` 与 `@stop` 映射到 Python 原生异步上下文管理协议（`__aenter__` / `__aexit__`），因此 Canary 既能在 `Flock` 下运行，也能独立运行：
+三个可选钩子 —— 各自同步或异步皆可，每个阶段可有任意多个：
+
+| 阶段 | 装饰器 | 执行时机 |
+|---|---|---|
+| 初始化 | `@on_init` | `init()` 时，拓扑序 |
+| 启动 | `@on_start` | `start()` 时，拓扑序，依赖已注入 |
+| 停止 | `@on_stop` | `stop()` 时，逆拓扑序 |
 
 ```python
-database = Database(config)
-async with database:
-    ...  # 运行中
+@cocoa(deps=[Config])
+class Database:
+    @on_init
+    def build_pool(self) -> None: ...
+
+    @on_start
+    async def connect(self) -> None: ...
+
+    @on_stop
+    async def disconnect(self) -> None: ...
+```
+
+## Web 应用
+
+`web` 扩展把 `@cocoa` 服务变成 FastAPI 风格的 ASGI 应用，并自动生成 OpenAPI 文档：
+
+```python
+from pydantic import BaseModel
+from canary_framework import Canary
+from canary_framework.web import get, post, web_cocoa
+
+
+class BorrowRequest(BaseModel):
+    member_id: int
+
+
+@web_cocoa(deps=[BookRepository, LibraryService])
+class LibraryAPI:
+    @get("/books/{book_id}")
+    async def get_book(self, book_id: int) -> dict: ...
+
+    @post("/books/{book_id}/borrow")
+    async def borrow(self, book_id: int, body: BorrowRequest) -> dict: ...
+
+
+app = Canary(LibraryAPI)  # app 本身就是 ASGI 应用
+```
+
+```bash
+uvicorn examples.library.web:app --reload
+# GET /docs  ·  /redoc  ·  /openapi.json
 ```
 
 ## 示例
 
-[`examples/`](examples) 中有多个可运行示例，从最小 Canary 逐步到依赖注入、生命周期 Hook、独立使用与分层应用。
+[`examples/`](examples) 下有多个可运行示例，从最小单元逐步到依赖注入、生命周期钩子、
+多根编排，以及一个分层的图书馆 web 应用。
 
-## 破坏性发布
+## 文档
 
-0.7.0 完全移除了 Service / Router / Module 的 web 层。迁移说明见[新特性](docs/zh/whats-new.md)。
+- [快速开始](docs/zh/quickstart.md)
+- [Cocoa 单元](docs/zh/cocoa.md) · [运行时（Canary）](docs/zh/canary.md)
+- [生命周期](docs/zh/lifecycle.md) · [依赖注入](docs/zh/dependency-injection.md)
+- [Web 应用](docs/zh/web.md) · [架构](docs/zh/architecture.md) · [API 参考](docs/zh/api-reference.md)
 
 ## 许可证
 

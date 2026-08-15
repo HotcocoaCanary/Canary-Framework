@@ -22,9 +22,39 @@ This project follows Keep a Changelog and Semantic Versioning.
 ### Changed
 
 - Extracted the runtime engine (`Canary`) out of `core` into a new `canary_framework.runtime`
-  package. `Canary` now implements the ASGI protocol directly: an `Extension` protocol lets
-  extensions (web now, more later) plug in without `Canary` importing them; `Canary` handles
-  the lifespan and dispatches other scopes to the matching extension.
+  package. `Canary` now implements the ASGI protocol directly: it drives the lifecycle on
+  `lifespan` and, for every other scope, delegates to a serving app that a unit exposed during
+  `start()` — found by duck typing on the shared `SERVE_ATTR` marker, without `Canary` importing
+  any concrete extension.
+- Centralised all metadata markers in `canary_framework.common.markers` (`COCOA_ATTR`,
+  `ON_INIT` / `ON_START` / `ON_STOP`, `SERVE_ATTR`, `ROUTE_ATTR`, `WEB_ATTR`), grouped by
+  subsystem, so every layer shares one contract with no magic-string drift.
+
+## [0.8.0] — 2026-08-15
+
+### Breaking: 从 `@canary`/`Flock` 迁移到 `@cocoa`/`Canary`
+
+0.8.0 replaces the 0.7.0 `@canary` / `Flock` model with `@cocoa` / `Canary`, an explicit
+async-native lifecycle, and lazy dependency injection.
+
+| 0.7.0 | 0.8.0 |
+|---|---|
+| `@canary` | `@cocoa(deps=[...])` |
+| `__init__(database: Database)` | `@cocoa(deps=[Database])` |
+| `@start` / `@stop` | `@on_start` / `@on_stop`（外加 `@on_init`） |
+| `Canary.run()` / `Flock` | `Canary(*roots)` |
+| `await flock.start()` | `await app.init(); await app.start()` |
+| `async with X.run() as flock` | `async with Canary(X) as app` |
+
+### Added
+
+- `@cocoa(deps=[...])` — 标记最小单元；依赖在 `start()` 阶段惰性注入为 snake_case 属性。
+- `@on_init` / `@on_start` / `@on_stop` 钩子，同步/异步皆可，每阶段可叠加多个。
+- `Canary(*roots)` 编排器：多根、显式 `init()` / `start()` / `stop()`、共享单例。
+
+### Removed
+
+- `Flock`、`Canary.run()`、`FlockState`，以及基于 `__init__` 注解的依赖声明。
 
 ## [0.7.0] — 2026-08-15
 

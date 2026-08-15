@@ -1,55 +1,55 @@
 # Canary Framework
 
-一个强类型、装饰器驱动的异步生命周期与依赖注入框架。
+一个极简、装饰器驱动的 **依赖注入**、**生命周期** 与 **ASGI Web 应用** 框架 —— 纯 Python。
 
-框架包含两个核心概念：
+框架只有两个概念：
 
-- **Canary** —— 最小运行单元。一个被 `@canary` 标记的普通 Python class，依赖来自 `__init__` 类型注解。
-- **Flock** —— `Canary.run()` 返回的编排器，驱动一个 Canary 的完整传递依赖图。
+- **cocoa** —— 最小单元。被 `@cocoa` 标记的普通 class；依赖由 `deps=[...]` 声明，行为由
+  `@on_init` / `@on_start` / `@on_stop` 钩子定义。
+- **Canary** —— 编排器。`Canary(*roots)` 解析依赖图、拓扑排序、驱动完整生命周期；它本身
+  也是一个 ASGI 应用。
 
 ## 亮点
 
-- 通过原生构造函数类型注解完成依赖注入 —— 无需 DSL。
-- `@start`、`@stop` 生命周期 Hook 映射到 Python 原生 `__aenter__` / `__aexit__` 协议。
-- 自动构建依赖图并拓扑排序。
-- 启动失败回滚与确定性的逆序关闭。
-- Canary 既可独立运行（`async with ...`），也可在 `Flock` 下运行（`Canary.run()`）。
+- **惰性依赖注入** —— 无需 `__init__` 装配；依赖在 `start()` 阶段注入为
+  `self.<snake_case 名>`。
+- **显式、异步原生生命周期** —— `init()` → `start()` → `stop()`；同步/异步钩子皆可。
+- **确定性排序** —— 卡恩拓扑排序；每个类型在图内共享同一个单例。
+- **多根编排** —— 嵌套、混入，或独立启动任意子图。
+- **可选 web 扩展** —— `@web_cocoa` + `@get`/`@post` 把单元变成 FastAPI 风格的 ASGI 应用，
+  并自动生成 OpenAPI 文档。
 
 ## 示例
 
 ```python
 import asyncio
 
-from canary_framework import canary, start, stop
+from canary_framework import Canary, cocoa, on_start
 
 
-@canary
+@cocoa
 class Config:
     def __init__(self) -> None:
         self.database_url = "postgresql://localhost/dev"
 
 
-@canary
+@cocoa(deps=[Config])
 class Database:
-    def __init__(self, config: Config) -> None:
-        self.config = config
-
-    @start
-    async def connect(self) -> None: ...
-
-    @stop
-    async def disconnect(self) -> None: ...
+    @on_start
+    async def connect(self) -> None:
+        await self.pool.connect()  # self.config 已注入
 
 
-@canary
-class UserService:
-    def __init__(self, database: Database) -> None:
-        self.database = database
+@cocoa(deps=[Database])
+class UserService: ...
 
 
 async def main() -> None:
-    async with UserService.run() as flock:
-        assert flock[Database] is flock[UserService].database
+    app = Canary(UserService)
+    await app.init()  # 建图，执行 @on_init
+    await app.start()  # 注入依赖，执行 @on_start
+    assert app[Database].config is app[Config]
+    await app.stop()  # 逆序执行 @on_stop
 
 
 asyncio.run(main())
@@ -58,9 +58,10 @@ asyncio.run(main())
 ## 导航
 
 - [快速开始](quickstart.md)
-- [Canary](canary.md)
+- [Cocoa 单元](cocoa.md)
+- [运行时（Canary）](canary.md)
 - [生命周期](lifecycle.md)
 - [依赖注入](dependency-injection.md)
-- [Flock](flock.md)
+- [Web 应用](web.md)
 - [架构](architecture.md)
 - [API 参考](api-reference.md)
