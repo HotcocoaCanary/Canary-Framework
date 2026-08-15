@@ -1,24 +1,24 @@
-name: ✨ 功能请求
-description: 建议新功能或改进
+name: ✨ 功能请求 / Feature Request
+description: 建议新功能或改进 / Suggest a new feature or improvement
 labels: [enhancement]
 body:
   - type: textarea
     attributes:
-      label: 使用场景
-      description: 描述你的使用场景，你想解决什么问题？
+      label: 使用场景 / Use case
+      description: 描述你的使用场景，你想解决什么问题？/ Describe your use case and the problem you want to solve
     validations:
       required: true
   - type: textarea
     attributes:
-      label: 期望方案
-      description: 你期望的 API 或行为是什么样的？
+      label: 期望方案 / Proposed solution
+      description: 你期望的 API 或行为是什么样的？/ What API or behavior do you expect?
     validations:
       required: true
   - type: textarea
     attributes:
-      label: 备选方案
-      description: 你考虑过哪些替代方案？
+      label: 备选方案 / Alternatives
+      description: 你考虑过哪些替代方案？/ What alternatives have you considered?
   - type: textarea
     attributes:
-      label: 补充信息
-      description: 其他相关内容
+      label: 补充信息 / Additional context
+      description: 其他相关内容 / Anything else

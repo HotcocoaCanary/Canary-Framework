@@ -6,6 +6,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/HotcocoaCanary/Canary-Framework/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/HotcocoaCanary/Canary-Framework/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://pypi.org/project/canary-framework/"><img alt="PyPI" src="https://img.shields.io/pypi/v/canary-framework.svg"></a>
+  <a href="https://pypi.org/project/canary-framework/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/canary-framework.svg"></a>
+  <a href="https://github.com/HotcocoaCanary/Canary-Framework/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/pypi/l/canary-framework.svg"></a>
+</p>
+
+<p align="center">
   <a href="README.md">English</a> ·
   <a href="docs/zh/index.md">中文文档</a> ·
   <a href="CHANGELOG.md">变更日志</a>
@@ -45,7 +52,7 @@ class Config:
 class Database:
     @on_start
     async def connect(self) -> None:
-        await self.pool.connect()  # self.config 已注入
+        print(f"连接 {self.config.database_url}")  # self.config 已注入
 
 
 @cocoa(deps=[Database])
