@@ -55,13 +55,16 @@ async def test_async_full_lifecycle_order_and_sharing() -> None:
             await asyncio.sleep(0)
             events.append("service.stop")
 
-    async with Canary(Service) as canary:
-        assert canary.state is LifecycleState.STARTED
-        # 全图共享同一批单例，依赖在异步钩子前注入。
-        assert canary[Service].repository is canary[Repository]
-        assert canary[Repository].database is canary[Database]
-        assert canary[Database].config is canary[Config]
+    canary = Canary(Service)
+    await canary.init()
+    await canary.start()
+    assert canary.state is LifecycleState.STARTED
+    # 全图共享同一批单例，依赖在异步钩子前注入。
+    assert canary[Service].repository is canary[Repository]
+    assert canary[Repository].database is canary[Database]
+    assert canary[Database].config is canary[Config]
 
+    await canary.stop()
     assert events == [
         "config.load",
         "db.connect",

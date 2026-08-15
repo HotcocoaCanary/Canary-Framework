@@ -130,7 +130,7 @@ async def test_nesting_standalone_and_composition() -> None:
     assert set(composed.order) == {Config, Database, Repo}
 
 
-async def test_context_manager_drives_full_lifecycle() -> None:
+async def test_start_stop_drives_full_lifecycle() -> None:
     @cocoa
     class Service:
         @on_start
@@ -141,12 +141,25 @@ async def test_context_manager_drives_full_lifecycle() -> None:
         def stop(self) -> None:
             self.running = False
 
-    async with Canary(Service) as canary:
-        assert canary.state is LifecycleState.STARTED
-        assert canary[Service].running is True
+    canary = Canary(Service)
+    await canary.init()
+    await canary.start()
+    assert canary.state is LifecycleState.STARTED
+    assert canary[Service].running is True
 
+    await canary.stop()
     assert canary.state is LifecycleState.STOPPED
     assert canary[Service].running is False
+
+
+async def test_start_requires_init() -> None:
+    @cocoa
+    class Service:
+        pass
+
+    canary = Canary(Service)
+    with pytest.raises(LifecycleError):
+        await canary.start()  # 未 init 直接 start → 非法跳转
 
 
 def test_non_cocoa_root_raises_type_error() -> None:

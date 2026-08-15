@@ -25,21 +25,27 @@ from examples.library.services import LibraryService
 
 async def main() -> None:
     print("一、组合 / 嵌套：以 LibraryApp 为根，整张图按拓扑序启动")
-    async with Canary(LibraryApp) as lib:
-        print("   启动顺序:", [t.__name__ for t in lib.order])
-        svc = lib[LibraryApp].library_service  # 懒注入
-        print("   单例共享:", lib[LibraryApp].library_service is lib[LibraryService])
+    lib = Canary(LibraryApp)
+    await lib.init()
+    await lib.start()  # 启动：start
+    print("   启动顺序:", [t.__name__ for t in lib.order])
+    svc = lib[LibraryApp].library_service  # 懒注入
+    print("   单例共享:", lib[LibraryApp].library_service is lib[LibraryService])
 
-        print("\n   检索「三体」:", svc.search("三体"))
-        print("   ", svc.borrow(1, 1))
-        print("   ", svc.borrow(1, 3))  # 无库存
-        print("   ", svc.return_book(1))
-        print("   《三体》剩余库存:", lib[BookRepository].get(1)["stock"])
+    print("\n   检索「三体」:", svc.search("三体"))
+    print("   ", svc.borrow(1, 1))
+    print("   ", svc.borrow(1, 3))  # 无库存
+    print("   ", svc.return_book(1))
+    print("   《三体》剩余库存:", lib[BookRepository].get(1)["stock"])
+    await lib.stop()
 
     print("\n二、单独启动：BookRepository 自己也能飞（连它的 Database + Config 子树）")
-    async with Canary(BookRepository) as books:
-        print("   启动顺序:", [t.__name__ for t in books.order])
-        print("   检索「活着」:", [b["title"] for b in books[BookRepository].search("活着")])
+    books = Canary(BookRepository)
+    await books.init()
+    await books.start()
+    print("   启动顺序:", [t.__name__ for t in books.order])
+    print("   检索「活着」:", [b["title"] for b in books[BookRepository].search("活着")])
+    await books.stop()
 
 
 if __name__ == "__main__":

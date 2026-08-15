@@ -64,11 +64,15 @@ def _build_library() -> type:
 async def test_full_library_lifecycle() -> None:
     app_type = _build_library()
 
-    async with Canary(app_type) as canary:
-        svc = canary[app_type].library_service
+    canary = Canary(app_type)
+    await canary.init()
+    await canary.start()
+    svc = canary[app_type].library_service
 
-        assert svc.borrow(1, 1) == "张三：借出《三体》"
-        assert svc.borrow(1, 2) == "张三：借阅失败：无库存"  # 无库存
+    assert svc.borrow(1, 1) == "张三：借出《三体》"
+    assert svc.borrow(1, 2) == "张三：借阅失败：无库存"  # 无库存
+
+    await canary.stop()
 
     # 依赖图按拓扑序：Config → Database → Repos → LibraryService → LibraryApp
     assert canary.order[0].__name__ == "Config"
@@ -78,10 +82,16 @@ async def test_full_library_lifecycle() -> None:
 
 async def test_repository_can_run_standalone() -> None:
     app_type = _build_library()
-    async with Canary(app_type) as canary:
-        book_repo = canary[app_type].library_service.book_repository
+    canary = Canary(app_type)
+    await canary.init()
+    await canary.start()
+    book_repo = canary[app_type].library_service.book_repository
+    await canary.stop()
 
     # 单独启动一个仓库，只拉起它自己的子树
     repo_type = type(book_repo)
-    async with Canary(repo_type) as solo:
-        assert [t.__name__ for t in solo.order] == ["Config", "Database", "BookRepository"]
+    solo = Canary(repo_type)
+    await solo.init()
+    await solo.start()
+    assert [t.__name__ for t in solo.order] == ["Config", "Database", "BookRepository"]
+    await solo.stop()

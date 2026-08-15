@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import inspect
 import types
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import LifecycleError
@@ -158,11 +158,12 @@ class Canary:
                 f"Canary: illegal transition from {self._state.name} (expected {expected.name})"
             )
 
-    async def _invoke_hook(self, hook: _Hook) -> None:
+    @staticmethod
+    async def _invoke_hook(hook: _Hook) -> None:
         """Run a hook, awaiting it if the result is awaitable.
 
         按返回值判断（而非函数声明）更稳健：既覆盖 ``async def``，也覆盖返回协程的同步函数。
         """
         result = hook()
         if inspect.isawaitable(result):
-            await cast(Awaitable[object], result)
+            await result

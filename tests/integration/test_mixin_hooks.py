@@ -21,8 +21,10 @@ async def test_mixin_hooks_run_before_the_class_hooks() -> None:
         def start(self) -> None:
             calls.append(f"{type(self).__name__}.start")
 
-    async with Canary(UserService):
-        pass
+    canary = Canary(UserService)
+    await canary.init()
+    await canary.start()
+    await canary.stop()
 
     # 混入的钩子先于本类的钩子执行，二者都保留（未被覆盖）。
     assert calls == ["UserService.audit", "UserService.start"]
@@ -48,8 +50,10 @@ async def test_one_mixin_composes_across_many_services() -> None:
         def start(self) -> None:
             calls.append(f"{type(self).__name__}.start")
 
-    async with Canary(UserService, OrderService):
-        pass
+    canary = Canary(UserService, OrderService)
+    await canary.init()
+    await canary.start()
+    await canary.stop()
 
     # 每个服务各自得到「混入钩子 + 本类钩子」，按拓扑序交错执行。
     assert calls == [

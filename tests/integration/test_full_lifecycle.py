@@ -64,16 +64,19 @@ async def test_full_lifecycle_order_and_singleton_sharing() -> None:
         def banner(self) -> None:
             events.append("app.banner")
 
-    async with Canary(App) as canary:
-        assert canary.state is LifecycleState.STARTED
-        assert canary.order == (Config, Database, Repository, Service, App)
+    canary = Canary(App)
+    await canary.init()
+    await canary.start()
+    assert canary.state is LifecycleState.STARTED
+    assert canary.order == (Config, Database, Repository, Service, App)
 
-        # 依赖在启动前注入，且全图共享同一单例。
-        assert canary[App].service is canary[Service]
-        assert canary[Service].repository is canary[Repository]
-        assert canary[Repository].database is canary[Database]
-        assert canary[Database].config is canary[Config]
+    # 依赖在启动前注入，且全图共享同一单例。
+    assert canary[App].service is canary[Service]
+    assert canary[Service].repository is canary[Repository]
+    assert canary[Repository].database is canary[Database]
+    assert canary[Database].config is canary[Config]
 
+    await canary.stop()
     assert canary.state is LifecycleState.STOPPED
     # 启动序按拓扑、停止序按逆拓扑，中间各层的钩子恰好对齐。
     assert events == [

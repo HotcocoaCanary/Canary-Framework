@@ -24,18 +24,23 @@ async def test_composed_roots_share_singletons() -> None:
     class OrderRepo:
         pass
 
-    async with Canary(UserRepo, OrderRepo) as canary:
-        assert set(canary.order) == {Config, Database, UserRepo, OrderRepo}
-        # 拓扑约束：Config → Database → {UserRepo, OrderRepo}
-        assert canary.order.index(Config) < canary.order.index(Database)
-        assert canary.order.index(Database) < canary.order.index(UserRepo)
-        assert canary.order.index(Database) < canary.order.index(OrderRepo)
+    canary = Canary(UserRepo, OrderRepo)
+    await canary.init()
+    await canary.start()
 
-        # 共享的依赖子图被实例化为同一批单例。
-        assert canary[UserRepo].database is canary[Database]
-        assert canary[OrderRepo].database is canary[Database]
-        assert canary[UserRepo].database.config is canary[Config]
-        assert canary[OrderRepo].database.config is canary[Config]
+    assert set(canary.order) == {Config, Database, UserRepo, OrderRepo}
+    # 拓扑约束：Config → Database → {UserRepo, OrderRepo}
+    assert canary.order.index(Config) < canary.order.index(Database)
+    assert canary.order.index(Database) < canary.order.index(UserRepo)
+    assert canary.order.index(Database) < canary.order.index(OrderRepo)
+
+    # 共享的依赖子图被实例化为同一批单例。
+    assert canary[UserRepo].database is canary[Database]
+    assert canary[OrderRepo].database is canary[Database]
+    assert canary[UserRepo].database.config is canary[Config]
+    assert canary[OrderRepo].database.config is canary[Config]
+
+    await canary.stop()
 
 
 async def test_standalone_leaf_runs_without_a_dependency_graph() -> None:
@@ -47,8 +52,11 @@ async def test_standalone_leaf_runs_without_a_dependency_graph() -> None:
         def start(self) -> None:
             events.append("leaf.start")
 
-    async with Canary(Leaf) as canary:
-        assert canary.order == (Leaf,)
-        assert canary.state.name == "STARTED"
+    canary = Canary(Leaf)
+    await canary.init()
+    await canary.start()
+    assert canary.order == (Leaf,)
+    assert canary.state.name == "STARTED"
+    await canary.stop()
 
     assert events == ["leaf.start"]

@@ -14,7 +14,7 @@ from canary_framework import (
 pytestmark = pytest.mark.unit
 
 
-async def test_async_context_awaits_all_phases_in_order() -> None:
+async def test_start_awaits_all_phases_in_order() -> None:
     events: list[str] = []
 
     @cocoa
@@ -31,10 +31,13 @@ async def test_async_context_awaits_all_phases_in_order() -> None:
         async def disconnect(self) -> None:
             events.append("disconnect")
 
-    async with Canary(Service) as canary:
-        assert canary.state is LifecycleState.STARTED
-        assert events == ["prepare", "connect"]
+    canary = Canary(Service)
+    await canary.init()
+    await canary.start()
+    assert canary.state is LifecycleState.STARTED
+    assert events == ["prepare", "connect"]
 
+    await canary.stop()
     assert canary.state is LifecycleState.STOPPED
     assert events == ["prepare", "connect", "disconnect"]
 
@@ -52,8 +55,10 @@ async def test_mixed_sync_and_async_hooks_run_in_order() -> None:
         def sync_hook(self) -> None:
             calls.append("sync")
 
-    async with Canary(Service):
-        pass
+    canary = Canary(Service)
+    await canary.init()
+    await canary.start()
+    await canary.stop()
 
     # 同一阶段里 sync 与 async 钩子按定义序都执行，互不干扰。
     assert calls == ["async", "sync"]
@@ -91,7 +96,7 @@ async def test_async_hook_failure_marks_failed_and_propagates() -> None:
     assert canary.state is LifecycleState.FAILED
 
 
-async def test_async_exit_runs_stop_and_propagates_body_exception() -> None:
+async def test_context_manager_runs_stop_and_propagates_body_exception() -> None:
     stopped: list[str] = []
 
     @cocoa
@@ -100,6 +105,7 @@ async def test_async_exit_runs_stop_and_propagates_body_exception() -> None:
         async def disconnect(self) -> None:
             stopped.append("disconnect")
 
+    # 上下文管理器仍是可选糖：body 抛异常时照样跑 stop，并把异常继续抛出。
     with pytest.raises(RuntimeError, match="boom"):
         async with Canary(Service):
             raise RuntimeError("boom")
@@ -120,5 +126,8 @@ async def test_deps_injected_before_async_start_hook() -> None:
         async def connect(self) -> None:
             seen.append(self.config)  # 依赖在钩子执行前已注入
 
-    async with Canary(Database) as canary:
-        assert seen == [canary[Config]]
+    canary = Canary(Database)
+    await canary.init()
+    await canary.start()
+    assert seen == [canary[Config]]
+    await canary.stop()
