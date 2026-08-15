@@ -1,44 +1,68 @@
-# Canary Framework 0.6
+# Canary Framework
 
-Canary is a typed async framework built around three explicit layers:
+A typed, decorator-driven async framework for lifecycle and dependency injection.
 
-1. **Service** — lifecycle, dependency injection, and domain logic; never ASGI.
-2. **Router** — a Service-like dependency consumer plus HTTP routes; the smallest runnable app.
-3. **Module** — an explicit child composition and dependency-scope boundary that aggregates Router descendants.
+The framework has two core concepts:
+
+- **Canary** — the smallest runnable unit. A plain Python class marked with `@canary`; its dependencies come from `__init__` type annotations.
+- **Flock** — the orchestrator returned by `Canary.run()` that drives a Canary's full transitive dependency graph.
+
+## Highlights
+
+- Dependency injection through native constructor type annotations — no DSL.
+- Lifecycle hooks `@start`, `@stop` mapped onto Python's native `__aenter__` / `__aexit__` protocol.
+- Automatic dependency-graph construction and topological sorting.
+- Startup rollback and deterministic reverse-order shutdown.
+- A Canary runs standalone (`async with ...`) or under a `Flock` (`Canary.run()`).
+
+## Example
 
 ```python
 import asyncio
 
-import uvicorn
-
-from canary_framework import get, router
-from canary_framework.core import RouterBase
+from canary_framework import canary, start, stop
 
 
-@router(prefix="/hello", tags=("Hello",))
-class HelloRouter(RouterBase):
-    @get("")
-    async def hello(self) -> dict[str, str]:
-        return {"message": "Hello, Canary!"}
+@canary
+class Config:
+    def __init__(self) -> None:
+        self.database_url = "postgresql://localhost/dev"
 
 
-async def setup() -> HelloRouter:
-    app = HelloRouter()
-    await app.init()
-    return app
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+    @start
+    async def connect(self) -> None:
+        ...
+
+    @stop
+    async def disconnect(self) -> None:
+        ...
 
 
-application = asyncio.run(setup())
-uvicorn.run(application, lifespan="on")
+@canary
+class UserService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+
+async def main() -> None:
+    async with UserService.run() as flock:
+        assert flock[Database] is flock[UserService].database
+
+
+asyncio.run(main())
 ```
 
-## Core guarantees
+## Navigation
 
-- Explicit async initialization; lifespan never initializes.
-- Annotation-based DI with direction validation and deterministic topological order.
-- Scoped parent reuse, sibling isolation, and explicit Service promotion.
-- Deterministic prefix, tag, and security propagation.
-- One route table and OpenAPI document per runtime root.
-- Compile-time checks for route, docs, operation-ID, security, and schema conflicts.
-
-Continue with the [Quick Start](quickstart.md), then read [Services](services.md), [Modules](modules.md), and [Routers](web.md).
+- [Quick Start](quickstart.md)
+- [Canary](canary.md)
+- [Lifecycle](lifecycle.md)
+- [Dependency Injection](dependency-injection.md)
+- [Flock](flock.md)
+- [Architecture](architecture.md)
+- [API Reference](api-reference.md)

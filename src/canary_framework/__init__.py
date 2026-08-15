@@ -1,53 +1,37 @@
-"""Canary Framework public API."""
+"""Canary — a minimal dependency-injection and lifecycle framework.
+
+``@cocoa`` marks a class as the minimum unit; a :class:`Canary` orchestrates a
+group of them.  It resolves the dependency graph (units nest via ``deps=[...]``),
+topologically sorts it to get the startup order, and drives the lifecycle::
+
+    @cocoa(deps=[Database])
+    class UserService: ...
+
+    with Canary(UserService) as canary:   # compose / nest
+        canary[Database]                 # shared singleton
+        canary.order                     # topological startup order
+
+中文版：``@cocoa`` 标记最小单元，:class:`Canary` 编排一组单元——解析依赖图、
+按拓扑序得到启动顺序，并驱动生命周期。
+"""
 
 from __future__ import annotations
 
-__version__ = "0.6.0"
+__version__ = "0.8.0"
 
-from canary_framework.common import (
-    ApplicationNotInitializedError,
-    CanaryConfig,
-    CanaryFrameworkError,
-    CircularDependencyError,
-    ConfigurationError,
-    DependencyDirectionError,
-    DependencyInjectionError,
-    LifecycleHookError,
-    LifecycleStateError,
-    RouteCompilationError,
-    ServiceNotFoundError,
-)
-from canary_framework.decorators import (
-    config,
-    delete,
-    get,
-    module,
-    patch,
-    post,
-    put,
-    router,
-    service,
-)
+from canary_framework.common.error import CanaryError, CircularDependencyError, LifecycleError
+from canary_framework.common.type import LifecycleState
+from canary_framework.core.core import Canary
+from canary_framework.core.decorator import cocoa, on_init, on_start, on_stop
 
 __all__ = [
-    "ApplicationNotInitializedError",
-    "CanaryConfig",
-    "CanaryFrameworkError",
+    "Canary",
+    "CanaryError",
     "CircularDependencyError",
-    "ConfigurationError",
-    "DependencyDirectionError",
-    "DependencyInjectionError",
-    "LifecycleHookError",
-    "LifecycleStateError",
-    "RouteCompilationError",
-    "ServiceNotFoundError",
-    "config",
-    "delete",
-    "get",
-    "module",
-    "patch",
-    "post",
-    "put",
-    "router",
-    "service",
+    "LifecycleError",
+    "LifecycleState",
+    "cocoa",
+    "on_init",
+    "on_start",
+    "on_stop",
 ]

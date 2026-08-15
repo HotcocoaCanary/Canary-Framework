@@ -1,70 +1,120 @@
 # 快速开始
 
-## 独立 Router
+安装框架：
 
-Router 是最小可运行 HTTP 应用。
+```bash
+pip install canary-framework
+```
+
+需要 Python 3.12+。
+
+## 声明 Canary
+
+用 `@canary` 标记任意普通 class：
+
+```python
+from canary_framework import canary
+
+
+@canary
+class Config:
+    def __init__(self) -> None:
+        self.database_url = "postgresql://localhost/dev"
+```
+
+依赖通过 `__init__` 签名声明：
+
+```python
+from canary_framework import canary
+
+
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+```
+
+## 添加生命周期行为
+
+使用 `@start`、`@stop` —— 两者可选，且同步 / 异步均可：
+
+```python
+from canary_framework import canary, start, stop
+
+
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.pool = ConnectionPool(self.config.database_url)
+
+    @start
+    async def connect(self) -> None:
+        await self.pool.connect()
+
+    @stop
+    async def disconnect(self) -> None:
+        await self.pool.close()
+```
+
+## 使用 Flock 运行
+
+`Canary.run()` 返回一个 `Flock`，从根 Canary 发现依赖图，进行拓扑排序，并驱动生命周期：
 
 ```python
 import asyncio
 
-import uvicorn
-
-from canary_framework import get, router
-from canary_framework.core import RouterBase
+from canary_framework import canary
 
 
-@router(prefix="/hello", tags=("Hello",))
-class HelloRouter(RouterBase):
-    @get("")
-    async def hello(self) -> dict[str, str]:
-        return {"message": "Hello, Canary!"}
+@canary
+class UserService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
 
 
-async def setup() -> HelloRouter:
-    app = HelloRouter()
-    await app.init()
-    return app
+async def main() -> None:
+    flock = UserService.run()
+    await flock.start()
+
+    try:
+        users = flock[UserService]
+        assert users.database is flock[Database]
+    finally:
+        await flock.stop()
 
 
-application = asyncio.run(setup())
-uvicorn.run(application, lifespan="on")
+asyncio.run(main())
 ```
 
-初始化是强制步骤；lifespan 只调用 startup/shutdown。
-
-## 加入领域逻辑
+或将其作为异步上下文管理器使用：
 
 ```python
-from canary_framework import get, module, router, service
-from canary_framework.core import ModuleBase, RouterBase, ServiceBase
+async def main() -> None:
+    async with UserService.run() as flock:
+        assert flock[Database] is flock[UserService].database
 
-@service()
-class Counter(ServiceBase):
-    def __init__(self) -> None:
-        super().__init__()
-        self.value = 0
 
-    async def increment(self) -> int:
-        self.value += 1
-        return self.value
-
-@router(prefix="/counter")
-class CounterRouter(RouterBase):
-    counter: Counter
-
-    @get("")
-    async def increment(self) -> dict[str, int]:
-        return {"value": await self.counter.increment()}
-
-@module(children=(CounterRouter,))
-class App(ModuleBase):
-    pass
+asyncio.run(main())
 ```
 
-Module 只列 Router；`Counter` 从注解传递发现。逻辑需要复用或独立测试时再提取为 Service。
+## 独立运行单个 Canary
 
-## 生命周期
+Canary 遵循 Python 异步上下文管理协议，因此可直接驱动：
 
-结构状态放在异步 `on_init`，事件循环资源放在 `on_startup`，清理放在 `on_shutdown`。不要覆盖公开的 `init`、`startup`、`shutdown`。
+```python
+async def main() -> None:
+    database = Database(Config())
+    async with database:
+        ...  # 运行中
 
-下一步可阅读可运行示例和 [API 参考](api-reference.md)。
+
+asyncio.run(main())
+```
+
+## 下一步
+
+- [Canary](canary.md) —— 声明与依赖契约。
+- [生命周期](lifecycle.md) —— 状态机与 Hook 顺序。
+- [依赖注入](dependency-injection.md) —— 前向引用、循环依赖、作用域。
+- [Flock](flock.md) —— 编排、回滚与关闭。

@@ -1,29 +1,64 @@
-# What's New in 0.6.0
+# What's New in 0.7.0
 
-0.6.0 is a breaking redesign with no compatibility layer. Service, Router, and Module are now distinct explicit layers.
+0.7.0 is a destructive refactor. The Service / Router / Module web layer is gone, replaced by a pure **Canary / Flock** lifecycle and dependency-injection engine.
 
-## Migration
+## Migration table
 
-| 0.5.x | 0.6.0 |
+| 0.6.0 | 0.7.0 |
 |---|---|
-| `@service(config=...)` | `@service()`; put config on runtime-root Router or Module |
-| `router = Router(prefix=...)` | `@router(prefix=...) class X(RouterBase)` |
-| `@router.get(...)` | top-level `@get(...)` |
-| `@module(services=[...])` | `@module(children=(...))` |
-| Module-owned endpoint | explicit Router child |
-| sync `app.init()` | `await app.init()` |
-| `@before_startup/@before_shutdown` | async `on_startup/on_shutdown` |
-| config class in services | config class passed to Router/Module decorator |
-| any Service is ASGI | only runtime-root Router/Module is ASGI |
-| pre-init empty OpenAPI | `ApplicationNotInitializedError` |
+| `@service()` / `ServiceBase` | `@canary` |
+| `@router()` / `RouterBase` | removed |
+| `@module()` / `ModuleBase` | removed |
+| `@get` / `@post` / … | removed |
+| `on_init` / `on_startup` / `on_shutdown` | `@start` / `@stop` |
+| `await app.init()` + ASGI lifespan | `Canary.run()` + `await flock.start()` |
+| config service | `@canary class Config` |
+| OpenAPI / docs endpoints | removed |
 
-## Highlights
+## Before
 
-- Router is the smallest runnable application.
-- Module composition is explicit and scoped.
-- Async initialization is separate from ASGI lifespan.
-- Routes, OpenAPI, and ASGI use one validated compilation pipeline.
-- Root-owned OpenAPI metadata avoids nested leakage.
-- Strict direction and scope rules make dependency identity predictable.
+```python
+from canary_framework import get, router
+from canary_framework.core import RouterBase
 
-See the [Quick Start](quickstart.md) and migrated runnable examples.
+
+@router(prefix="/hello", tags=("Hello",))
+class HelloRouter(RouterBase):
+    @get("")
+    async def hello(self) -> dict[str, str]:
+        return {"message": "Hello, Canary!"}
+```
+
+## After
+
+```python
+from canary_framework import canary
+
+
+@canary
+class Config:
+    def __init__(self) -> None:
+        self.database_url = "postgresql://localhost/dev"
+
+
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+
+async def main() -> None:
+    async with Database.run() as flock:
+        assert flock[Database].config is flock[Config]
+
+
+asyncio.run(main())
+```
+
+## Key changes
+
+- **Canaries replace Services.** A Canary is a plain class; dependencies come from `__init__` annotations.
+- **Lifecycle hooks replace lifecycle methods.** `@start`, `@stop` map onto `__aenter__` / `__aexit__`.
+- **`Flock` replaces the runtime root.** `Canary.run()` returns a `Flock` that discovers, sorts, and drives the dependency graph.
+- **No web layer.** Routing, OpenAPI, and configuration were removed; the framework is a pure engine.
+- **Standalone usage.** A Canary is directly an async context manager.

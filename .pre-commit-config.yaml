@@ -31,12 +31,5 @@ repos:
     hooks:
       - id: mypy
         args: [--strict]
-        # 仅列出 src/ 里实际 import 的第三方库，供 mypy 解析类型。
-        # Canary 基于 Starlette + Pydantic；uvicorn 是可选 [web] 依赖、
-        # 不在 src/ 内 import，因此不列入。
-        additional_dependencies:
-          - pydantic>=2.13
-          - pydantic-settings>=2.12
-          - starlette>=1.3
-          - pytest>=8.3
+        # 0.7.0 起框架仅依赖标准库，无需额外的第三方类型存根。
         files: ^src/

@@ -1,66 +1,20 @@
-"""Framework-wide shared infrastructure — types, errors, and markers."""
+"""Common — shared types and errors, with no framework logic.
 
-from canary_framework.common.config import CanaryConfig
-from canary_framework.common.errors import (
-    ApplicationNotInitializedError,
-    CanaryFrameworkError,
+共享层：仅含类型与异常，不掺入框架逻辑。核心包与扩展包（web / agent / …）
+都从这里继承基类，保证跨包的类型与错误可统一校验、统一捕获。
+"""
+
+from canary_framework.common.error import (
+    CanaryError,
     CircularDependencyError,
-    ConfigurationError,
-    DependencyDirectionError,
-    DependencyInjectionError,
-    LifecycleHookError,
-    LifecycleStateError,
-    RouteCompilationError,
-    ServiceNotFoundError,
+    LifecycleError,
 )
-from canary_framework.common.routing import ASGIApp, ResponseSpec, RouteContext, RouteSpec
-from canary_framework.common.types import (
-    CF_NAME_ATTR,
-    CF_SERVICE_MARKER,
-    CF_SERVICE_META,
-    LifecycleState,
-    ModuleMeta,
-    RouterMeta,
-    ServiceEntry,
-    ServiceMeta,
-    get_module_meta,
-    get_router_meta,
-    get_service_meta,
-    is_cf_module,
-    is_cf_router,
-    is_cf_service,
-    unwrap_optional,
-)
+from canary_framework.common.type import LifecycleState, State
 
 __all__ = [
-    "CF_NAME_ATTR",
-    "CF_SERVICE_MARKER",
-    "CF_SERVICE_META",
-    "ASGIApp",
-    "ApplicationNotInitializedError",
-    "CanaryConfig",
-    "CanaryFrameworkError",
+    "CanaryError",
     "CircularDependencyError",
-    "ConfigurationError",
-    "DependencyDirectionError",
-    "DependencyInjectionError",
-    "LifecycleHookError",
+    "LifecycleError",
     "LifecycleState",
-    "LifecycleStateError",
-    "ModuleMeta",
-    "ResponseSpec",
-    "RouteCompilationError",
-    "RouteContext",
-    "RouteSpec",
-    "RouterMeta",
-    "ServiceEntry",
-    "ServiceMeta",
-    "ServiceNotFoundError",
-    "get_module_meta",
-    "get_router_meta",
-    "get_service_meta",
-    "is_cf_module",
-    "is_cf_router",
-    "is_cf_service",
-    "unwrap_optional",
+    "State",
 ]

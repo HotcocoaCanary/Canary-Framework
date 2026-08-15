@@ -1,15 +1,3 @@
-"""Pytest configuration and fixtures for Canary Framework tests."""
+"""Shared pytest configuration for the Canary Framework test suite."""
 
-import pytest
-from pydantic import BaseModel
-
-
-@pytest.fixture
-def sample_pydantic_model() -> type[BaseModel]:
-    """Fixture for a sample Pydantic model."""
-
-    class SampleModel(BaseModel):
-        name: str
-        value: int
-
-    return SampleModel
+from __future__ import annotations

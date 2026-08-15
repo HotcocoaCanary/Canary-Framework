@@ -1,6 +1,6 @@
-<h1 align="center">Canary Framework 0.6</h1>
+<h1 align="center">Canary Framework 0.7</h1>
 
-<p align="center">A typed, decorator-driven async framework for Service, Router, and Module applications.</p>
+<p align="center">A typed, decorator-driven async framework for lifecycle and dependency injection.</p>
 
 [中文](README_ZH.md) · [Documentation](docs/en/index.md) · [Changelog](CHANGELOG.md)
 
@@ -14,85 +14,82 @@ Requires Python 3.12+.
 
 ## The model
 
-- **Service** owns lifecycle, dependency injection, and domain logic. It is not an ASGI app.
-- **Router** is the smallest runnable HTTP application. Keep small endpoint logic inline; extract reusable or non-HTTP-tested logic into Services.
-- **Module** explicitly composes `children`, creates dependency scopes, and recursively aggregates descendant Routers.
-- A runtime root must be initialized with `await app.init()` before it is served. ASGI lifespan performs startup and shutdown only; it never initializes.
-- `on_init` prepares structural state. Event-loop-bound long-lived resources belong in `on_startup`; release them in `on_shutdown`.
-- Configuration is root/Module context, not a dependency-injected Service. One root config owns OpenAPI metadata, security schemes, and documentation paths.
+- **Canary** is the smallest runnable unit — a plain Python class marked with `@canary`. Dependencies are declared through `__init__` type annotations; `@start` and `@stop` declare optional lifecycle behaviour.
+- **Flock** is the orchestrator returned by `Canary.run()`. It receives a root Canary, discovers its transitive dependencies, topologically sorts them, and drives their full lifecycle in dependency order.
 
 ## Quick start
 
 ```python
 import asyncio
 
-import uvicorn
-
-from canary_framework import get, router
-from canary_framework.core import RouterBase
+from canary_framework import canary, start, stop
 
 
-@router(prefix="/hello", tags=("Hello",))
-class HelloRouter(RouterBase):
-    @get("")
-    async def hello(self) -> dict[str, str]:
-        return {"message": "Hello, Canary!"}
+@canary
+class Config:
+    def __init__(self) -> None:
+        self.database_url = "postgresql://localhost/dev"
 
 
-async def setup() -> HelloRouter:
-    app = HelloRouter()
-    await app.init()
-    return app
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+    @start
+    async def connect(self) -> None:
+        ...
+
+    @stop
+    async def disconnect(self) -> None:
+        ...
 
 
-application = asyncio.run(setup())
-uvicorn.run(application, lifespan="on")
+@canary
+class UserService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+
+async def main() -> None:
+    async with UserService.run() as flock:
+        assert flock[Database] is flock[UserService].database
+
+
+asyncio.run(main())
 ```
 
-Open `http://127.0.0.1:8000/hello`, `/docs`, `/redoc`, or `/openapi.json`.
+## Dependency injection
 
-## Composition and transitive DI
+Canaries declare dependencies with constructor type annotations — no DSL:
 
 ```python
-from canary_framework import get, module, router, service
-from canary_framework.core import ModuleBase, RouterBase, ServiceBase
-
-
-@service()
-class Greeting(ServiceBase):
-    def message(self, name: str) -> str:
-        return f"Hello, {name}!"
-
-
-@router(prefix="/api")
-class ApiRouter(RouterBase):
-    greeting: Greeting
-
-    @get("/hello/{name}")
-    async def hello(self, name: str) -> dict[str, str]:
-        return {"message": self.greeting.message(name)}
-
-
-@module(children=(ApiRouter,))
-class App(ModuleBase):
-    pass
+@canary
+class UserService:
+    def __init__(self, database: Database, cache: Cache) -> None:
+        self.database = database
+        self.cache = cache
 ```
 
-`Greeting` is discovered transitively through `ApiRouter`; the Module lists only explicit composition nodes. Promote a shared Service to a common parent Module when sibling scopes must reuse one instance.
+`Canary.run()` resolves the graph from the root, injects a single shared instance per Canary type, and drives initialization and startup in topological order.
 
-## HTTP and OpenAPI
+## Lifecycle
 
-Use top-level `@get`, `@post`, `@put`, `@delete`, and `@patch`. Paths may contain path templates (`/{item_id}`) and query templates (`/search?q={query}`). Endpoint metadata supports request/response models, status codes, tags, summaries, descriptions, deprecation, operation IDs, and additional responses.
+`@start` and `@stop` map onto Python's native async context-manager protocol (`__aenter__` / `__aexit__`), so a Canary runs both under a `Flock` and standalone:
 
-Nested Module and Router prefixes, tags, and security requirements propagate deterministically. The runtime root compiles one route table and one OpenAPI document. Route, documentation-path, operation-ID, security-scheme, and schema-name conflicts fail during initialization.
+```python
+database = Database(config)
+async with database:
+    ...  # running
+```
 
 ## Examples
 
-Ten runnable examples are in [`examples/`](examples), progressing from a standalone Router through nested scopes, validation, OpenAPI, and a layered application. `04_module_aggregation.py` demonstrates recursive route aggregation.
+Runnable examples are in [`examples/`](examples), from a minimal Canary through dependency injection, lifecycle hooks, standalone usage, and a layered application.
 
 ## Breaking release
 
-0.6.0 has no 0.5.x compatibility layer. See [What's New](docs/en/whats-new.md) for the migration table.
+0.7.0 removes the Service / Router / Module web layer entirely. See [What's New](docs/en/whats-new.md) for migration notes.
 
 ## License
 

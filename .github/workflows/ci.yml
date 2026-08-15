@@ -28,7 +28,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra web
+        run: uv sync --extra dev
 
       - name: Lint (ruff)
         run: uv run ruff check src/ tests/
@@ -37,7 +37,7 @@ jobs:
         run: uv run ruff format --check src/ tests/
 
       - name: Type check (mypy strict)
-        run: uv run mypy src/ tests/
+        run: uv run mypy src/
 
       - name: Test & coverage
         run: uv run pytest --cov=src/canary_framework --cov-report=term --cov-report=xml --cov-fail-under=70

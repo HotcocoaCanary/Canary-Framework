@@ -1,44 +1,68 @@
-# Canary Framework 0.6
+# Canary Framework
 
-Canary 围绕三个显式层次构建：
+一个强类型、装饰器驱动的异步生命周期与依赖注入框架。
 
-1. **Service**：生命周期、依赖注入、领域逻辑；永远不是 ASGI。
-2. **Router**：可消费 Service 依赖并声明 HTTP 路由；最小可运行应用。
-3. **Module**：显式子节点组合与依赖作用域边界；递归聚合 Router 后代。
+框架包含两个核心概念：
+
+- **Canary** —— 最小运行单元。一个被 `@canary` 标记的普通 Python class，依赖来自 `__init__` 类型注解。
+- **Flock** —— `Canary.run()` 返回的编排器，驱动一个 Canary 的完整传递依赖图。
+
+## 亮点
+
+- 通过原生构造函数类型注解完成依赖注入 —— 无需 DSL。
+- `@start`、`@stop` 生命周期 Hook 映射到 Python 原生 `__aenter__` / `__aexit__` 协议。
+- 自动构建依赖图并拓扑排序。
+- 启动失败回滚与确定性的逆序关闭。
+- Canary 既可独立运行（`async with ...`），也可在 `Flock` 下运行（`Canary.run()`）。
+
+## 示例
 
 ```python
 import asyncio
 
-import uvicorn
-
-from canary_framework import get, router
-from canary_framework.core import RouterBase
+from canary_framework import canary, start, stop
 
 
-@router(prefix="/hello", tags=("Hello",))
-class HelloRouter(RouterBase):
-    @get("")
-    async def hello(self) -> dict[str, str]:
-        return {"message": "Hello, Canary!"}
+@canary
+class Config:
+    def __init__(self) -> None:
+        self.database_url = "postgresql://localhost/dev"
 
 
-async def setup() -> HelloRouter:
-    app = HelloRouter()
-    await app.init()
-    return app
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+    @start
+    async def connect(self) -> None:
+        ...
+
+    @stop
+    async def disconnect(self) -> None:
+        ...
 
 
-application = asyncio.run(setup())
-uvicorn.run(application, lifespan="on")
+@canary
+class UserService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+
+async def main() -> None:
+    async with UserService.run() as flock:
+        assert flock[Database] is flock[UserService].database
+
+
+asyncio.run(main())
 ```
 
-## 核心保证
+## 导航
 
-- 显式异步初始化；lifespan 绝不初始化。
-- 基于类型注解的 DI、方向校验与确定性拓扑顺序。
-- 父作用域复用、兄弟隔离、显式 Service 提升。
-- prefix、tags、security 确定性传播。
-- 每个运行根只有一张路由表与一份 OpenAPI。
-- 路由、文档路径、operation ID、安全方案、schema 冲突在编译期检查。
-
-继续阅读[快速开始](quickstart.md)、[服务](services.md)、[模块](modules.md)与[路由](web.md)。
+- [快速开始](quickstart.md)
+- [Canary](canary.md)
+- [生命周期](lifecycle.md)
+- [依赖注入](dependency-injection.md)
+- [Flock](flock.md)
+- [架构](architecture.md)
+- [API 参考](api-reference.md)

@@ -1,5 +1,5 @@
 site_name: Canary Framework
-site_description: Typed async Service, Router, and Module framework with dependency injection
+site_description: Typed async lifecycle and dependency-injection framework
 site_author: 张文博 (Canary)
 copyright: Copyright &copy; 2026 张文博 (Canary)
 
@@ -79,13 +79,11 @@ nav:
   - What's New: whats-new.md
   - Quick Start: quickstart.md
   - Core:
-      - Services: services.md
-      - Modules: modules.md
-      - Routers: web.md
-      - Configuration: configuration.md
+      - Canary: canary.md
       - Lifecycle: lifecycle.md
       - Dependency Injection: dependency-injection.md
-  - Architecture: core.md
+      - Flock: flock.md
+  - Architecture: architecture.md
   - API Reference: api-reference.md
 
 extra:

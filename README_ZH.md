@@ -1,6 +1,6 @@
-<h1 align="center">Canary Framework 0.6</h1>
+<h1 align="center">Canary Framework 0.7</h1>
 
-<p align="center">基于 Service、Router、Module 的强类型装饰器式 Python 异步框架。</p>
+<p align="center">一个强类型、装饰器驱动的异步生命周期与依赖注入框架。</p>
 
 [English](README.md) · [中文文档](docs/zh/index.md) · [变更日志](CHANGELOG.md)
 
@@ -14,82 +14,82 @@ pip install canary-framework
 
 ## 核心模型
 
-- **Service** 负责生命周期、依赖注入与领域逻辑，不是 ASGI 应用。
-- **Router** 是最小可运行 HTTP 应用。少量端点逻辑可以保留在 Router；需要复用或脱离 HTTP 测试时提取为 Service。
-- **Module** 通过 `children` 显式组合节点，形成依赖作用域，并递归聚合后代 Router。
-- 运行根必须先执行 `await app.init()`。ASGI lifespan 只负责 startup/shutdown，绝不负责初始化。
-- `on_init` 用于结构状态；依赖事件循环的长生命周期资源放在 `on_startup`，并在 `on_shutdown` 释放。
-- 配置属于运行根/Module 上下文，不是注入式 Service。根配置唯一拥有 OpenAPI 元数据、安全方案与文档路径。
+- **Canary** 是最小运行单元 —— 一个被 `@canary` 标记的普通 Python class。依赖通过 `__init__` 的类型注解声明；`@start`、`@stop` 声明可选的生命周期行为。
+- **Flock** 是 `Canary.run()` 返回的编排器。它接收一个根 Canary，发现其传递依赖，进行拓扑排序，并按依赖顺序驱动完整生命周期。
 
 ## 快速开始
 
 ```python
 import asyncio
 
-import uvicorn
-
-from canary_framework import get, router
-from canary_framework.core import RouterBase
+from canary_framework import canary, start, stop
 
 
-@router(prefix="/hello", tags=("Hello",))
-class HelloRouter(RouterBase):
-    @get("")
-    async def hello(self) -> dict[str, str]:
-        return {"message": "Hello, Canary!"}
+@canary
+class Config:
+    def __init__(self) -> None:
+        self.database_url = "postgresql://localhost/dev"
 
 
-async def setup() -> HelloRouter:
-    app = HelloRouter()
-    await app.init()
-    return app
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+    @start
+    async def connect(self) -> None:
+        ...
+
+    @stop
+    async def disconnect(self) -> None:
+        ...
 
 
-application = asyncio.run(setup())
-uvicorn.run(application, lifespan="on")
+@canary
+class UserService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
+
+
+async def main() -> None:
+    async with UserService.run() as flock:
+        assert flock[Database] is flock[UserService].database
+
+
+asyncio.run(main())
 ```
 
-访问 `http://127.0.0.1:8000/hello`、`/docs`、`/redoc` 或 `/openapi.json`。
+## 依赖注入
 
-## 组合与传递式 DI
+Canary 通过构造函数类型注解声明依赖，无需额外 DSL：
 
 ```python
-from canary_framework import get, module, router, service
-from canary_framework.core import ModuleBase, RouterBase, ServiceBase
-
-@service()
-class Greeting(ServiceBase):
-    def message(self, name: str) -> str:
-        return f"Hello, {name}!"
-
-@router(prefix="/api")
-class ApiRouter(RouterBase):
-    greeting: Greeting
-
-    @get("/hello/{name}")
-    async def hello(self, name: str) -> dict[str, str]:
-        return {"message": self.greeting.message(name)}
-
-@module(children=(ApiRouter,))
-class App(ModuleBase):
-    pass
+@canary
+class UserService:
+    def __init__(self, database: Database, cache: Cache) -> None:
+        self.database = database
+        self.cache = cache
 ```
 
-`Greeting` 由 Router 注解传递发现，Module 只列显式组合节点。多个兄弟作用域需要共享同一 Service 实例时，将该 Service 提升到最近的共同父 Module。
+`Canary.run()` 从根节点解析依赖图，为每个 Canary 类型注入一个共享实例，并按拓扑顺序驱动初始化与启动。
 
-## HTTP 与 OpenAPI
+## 生命周期
 
-使用顶层 `@get`、`@post`、`@put`、`@delete`、`@patch`。路径支持 path 模板（`/{item_id}`）与 query 模板（`/search?q={query}`）。端点支持请求/响应模型、状态码、标签、摘要、描述、废弃标记、operation ID 与额外响应。
+`@start` 与 `@stop` 映射到 Python 原生异步上下文管理协议（`__aenter__` / `__aexit__`），因此 Canary 既能在 `Flock` 下运行，也能独立运行：
 
-嵌套 Module/Router 的 prefix、tags、security 按确定顺序传播。运行根编译一张路由表与一份 OpenAPI。路由、文档路径、operation ID、安全方案与 schema 名冲突会在初始化时失败。
+```python
+database = Database(config)
+async with database:
+    ...  # 运行中
+```
 
 ## 示例
 
-[`examples/`](examples) 中有十个可运行示例，从独立 Router 逐步到嵌套作用域、校验、OpenAPI 与分层应用。`04_module_aggregation.py` 演示递归路由聚合。
+[`examples/`](examples) 中有多个可运行示例，从最小 Canary 逐步到依赖注入、生命周期 Hook、独立使用与分层应用。
 
 ## 破坏性发布
 
-0.6.0 不提供 0.5.x 兼容层。迁移表见[新特性](docs/zh/whats-new.md)。
+0.7.0 完全移除了 Service / Router / Module 的 web 层。迁移说明见[新特性](docs/zh/whats-new.md)。
 
 ## 许可证
 

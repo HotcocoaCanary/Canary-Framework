@@ -1,72 +1,120 @@
 # Quick Start
 
-## Standalone Router
+Install the framework:
 
-A Router is the smallest runnable HTTP application.
+```bash
+pip install canary-framework
+```
+
+Requires Python 3.12+.
+
+## Declare Canaries
+
+Mark any plain class with `@canary`:
+
+```python
+from canary_framework import canary
+
+
+@canary
+class Config:
+    def __init__(self) -> None:
+        self.database_url = "postgresql://localhost/dev"
+```
+
+Dependencies are declared through the `__init__` signature:
+
+```python
+from canary_framework import canary
+
+
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+```
+
+## Add lifecycle behaviour
+
+Use `@start` and `@stop` — both optional, and each may be sync or async:
+
+```python
+from canary_framework import canary, start, stop
+
+
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.pool = ConnectionPool(self.config.database_url)
+
+    @start
+    async def connect(self) -> None:
+        await self.pool.connect()
+
+    @stop
+    async def disconnect(self) -> None:
+        await self.pool.close()
+```
+
+## Run with a Flock
+
+`Canary.run()` returns a `Flock` that discovers the graph from the root Canary, topologically sorts it, and drives the lifecycle:
 
 ```python
 import asyncio
 
-import uvicorn
-
-from canary_framework import get, router
-from canary_framework.core import RouterBase
+from canary_framework import canary
 
 
-@router(prefix="/hello", tags=("Hello",))
-class HelloRouter(RouterBase):
-    @get("")
-    async def hello(self) -> dict[str, str]:
-        return {"message": "Hello, Canary!"}
+@canary
+class UserService:
+    def __init__(self, database: Database) -> None:
+        self.database = database
 
 
-async def setup() -> HelloRouter:
-    app = HelloRouter()
-    await app.init()
-    return app
+async def main() -> None:
+    flock = UserService.run()
+    await flock.start()
+
+    try:
+        users = flock[UserService]
+        assert users.database is flock[Database]
+    finally:
+        await flock.stop()
 
 
-application = asyncio.run(setup())
-uvicorn.run(application, lifespan="on")
+asyncio.run(main())
 ```
 
-Initialization is mandatory. Lifespan invokes startup and shutdown only.
-
-## Add domain logic
+Or use it as an async context manager:
 
 ```python
-from canary_framework import get, module, router, service
-from canary_framework.core import ModuleBase, RouterBase, ServiceBase
+async def main() -> None:
+    async with UserService.run() as flock:
+        assert flock[Database] is flock[UserService].database
 
-@service()
-class Counter(ServiceBase):
-    def __init__(self) -> None:
-        super().__init__()
-        self.value = 0
 
-    async def increment(self) -> int:
-        self.value += 1
-        return self.value
-
-@router(prefix="/counter")
-class CounterRouter(RouterBase):
-    counter: Counter
-
-    @get("")
-    async def increment(self) -> dict[str, int]:
-        return {"value": await self.counter.increment()}
-
-@module(children=(CounterRouter,))
-class App(ModuleBase):
-    pass
+asyncio.run(main())
 ```
 
-The Module lists only the Router. `Counter` is discovered transitively from the annotation. Extract endpoint logic into a Service when it needs reuse or non-HTTP testing.
+## Run a single Canary standalone
 
-## Lifecycle
+A Canary follows Python's async context-manager protocol, so you can drive it directly:
 
-Use async `on_init` for structural state, `on_startup` for event-loop-bound resources, and `on_shutdown` for cleanup. Do not override public `init`, `startup`, or `shutdown`.
+```python
+async def main() -> None:
+    database = Database(Config())
+    async with database:
+        ...  # running
 
-## Next
 
-Explore the runnable examples and the [API Reference](api-reference.md).
+asyncio.run(main())
+```
+
+## What's next
+
+- [Canary](canary.md) — declaration and the dependency contract.
+- [Lifecycle](lifecycle.md) — the state machine and hook ordering.
+- [Dependency Injection](dependency-injection.md) — forward references, cycles, scoping.
+- [Flock](flock.md) — orchestration, rollback, and shutdown.

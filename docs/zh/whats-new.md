@@ -1,29 +1,64 @@
-# 0.6.0 新特性
+# 0.7.0 新特性
 
-0.6.0 是无兼容层的破坏性重设计，Service、Router、Module 成为不同的显式层次。
+0.7.0 是一次破坏性重构。Service / Router / Module 的 web 层被移除，替换为纯 **Canary / Flock** 生命周期与依赖注入引擎。
 
-## 迁移表
+## 迁移对照表
 
-| 0.5.x | 0.6.0 |
+| 0.6.0 | 0.7.0 |
 |---|---|
-| `@service(config=...)` | `@service()`；配置放到运行根 Router 或 Module |
-| `router = Router(prefix=...)` | `@router(prefix=...) class X(RouterBase)` |
-| `@router.get(...)` | 顶层 `@get(...)` |
-| `@module(services=[...])` | `@module(children=(...))` |
-| Module 自有端点 | 显式 Router 子节点 |
-| 同步 `app.init()` | `await app.init()` |
-| `@before_startup/@before_shutdown` | async `on_startup/on_shutdown` |
-| services 中的配置类 | 传给 Router/Module 装饰器的配置类 |
-| 任意 Service 都是 ASGI | 只有运行根 Router/Module 是 ASGI |
-| 初始化前空 OpenAPI | `ApplicationNotInitializedError` |
+| `@service()` / `ServiceBase` | `@canary` |
+| `@router()` / `RouterBase` | 已移除 |
+| `@module()` / `ModuleBase` | 已移除 |
+| `@get` / `@post` / … | 已移除 |
+| `on_init` / `on_startup` / `on_shutdown` | `@start` / `@stop` |
+| `await app.init()` + ASGI lifespan | `Canary.run()` + `await flock.start()` |
+| config service | `@canary class Config` |
+| OpenAPI / 文档端点 | 已移除 |
 
-## 亮点
+## 之前
 
-- Router 成为最小可运行应用。
-- Module 组合显式且具有作用域。
-- 异步初始化与 ASGI lifespan 分离。
-- 路由、OpenAPI、ASGI 共用一条经过校验的编译流水线。
-- 根配置独占 OpenAPI 元数据，避免嵌套泄漏。
-- 严格方向与作用域规则让依赖实例身份可预测。
+```python
+from canary_framework import get, router
+from canary_framework.core import RouterBase
 
-请继续阅读[快速开始](quickstart.md)与迁移后的可运行示例。
+
+@router(prefix="/hello", tags=("Hello",))
+class HelloRouter(RouterBase):
+    @get("")
+    async def hello(self) -> dict[str, str]:
+        return {"message": "Hello, Canary!"}
+```
+
+## 之后
+
+```python
+from canary_framework import canary
+
+
+@canary
+class Config:
+    def __init__(self) -> None:
+        self.database_url = "postgresql://localhost/dev"
+
+
+@canary
+class Database:
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+
+async def main() -> None:
+    async with Database.run() as flock:
+        assert flock[Database].config is flock[Config]
+
+
+asyncio.run(main())
+```
+
+## 关键变化
+
+- **Canary 取代 Service。** Canary 是普通 class，依赖来自 `__init__` 注解。
+- **生命周期 Hook 取代生命周期方法。** `@start`、`@stop` 映射到 `__aenter__` / `__aexit__`。
+- **`Flock` 取代运行根。** `Canary.run()` 返回一个 `Flock`，它发现、排序并驱动依赖图。
+- **无 web 层。** 路由、OpenAPI 与配置系统被移除，框架是纯引擎。
+- **独立使用。** Canary 本身就是异步上下文管理器。

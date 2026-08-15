@@ -2,6 +2,37 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
+## [0.7.0] — 2026-08-15
+
+### Breaking: 移除 web 层，改为 Canary / Flock 引擎
+
+0.7.0 removes the Service / Router / Module web layer entirely and replaces it with a pure
+Canary / Flock lifecycle and dependency-injection engine. There is no 0.6.x compatibility layer.
+
+| 0.6.0 | 0.7.0 |
+|---|---|
+| `@service()` / `ServiceBase` | `@canary` |
+| `@router()` / `RouterBase` | removed |
+| `@module()` / `ModuleBase` | removed |
+| `@get` / `@post` / … | removed |
+| `on_init` / `on_startup` / `on_shutdown` | `@start` / `@stop` |
+| `await app.init()` + ASGI lifespan | `Canary.run()` + `await flock.start()` |
+| config service | `@canary class Config` |
+| OpenAPI / docs endpoints | removed |
+
+### Added
+
+- `@canary` decorator turning a plain Python class into a Canary.
+- Dependency injection through `__init__` type annotations — no DSL.
+- `@start`, `@stop` lifecycle hooks (0..1 per stage per Canary).
+- `Flock` orchestrator (via `Canary.run()`): dependency discovery, topological sort, singleton-per-graph instances, startup rollback, and reverse-order shutdown.
+- Standalone usage through the native async context-manager protocol (`async with canary`).
+- Explicit state machines: `LifecycleState` (per Canary) and `FlockState` (per Flock).
+
+### Removed
+
+- The entire web layer: `RouterBase`, `ModuleBase`, `ServiceBase`, routing decorators, OpenAPI generation, and the configuration system.
+
 ## [0.6.0] — 2026-07-30
 
 ### Breaking architecture / 破坏性架构变更
