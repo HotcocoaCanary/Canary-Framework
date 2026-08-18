@@ -97,6 +97,33 @@ Under uvicorn, the ASGI lifespan drives `start()` on startup and `stop()` on shu
 `@on_start` / `@on_stop` hooks and cocoa dependency injection (`self.<dep>`) work exactly
 as in the core engine. `@web_cocoa` only adds route collection on top.
 
+## Testing
+
+The optional `test` extra brings in `httpx2`, which Starlette 1.x's `TestClient` uses
+under the hood:
+
+```bash
+pip install "canary-framework[web,test]"
+```
+
+```python
+from starlette.testclient import TestClient
+from canary_framework import Canary
+from canary_framework.web import get, web_cocoa
+
+
+@web_cocoa
+class LibraryAPI:
+    @get("/books")
+    async def list_books(self) -> list[dict]:
+        return []
+
+
+def test_list_books() -> None:
+    with TestClient(Canary(LibraryAPI)) as client:
+        assert client.get("/books").json() == []
+```
+
 ## Reference
 
 | Decorator / class | Purpose |

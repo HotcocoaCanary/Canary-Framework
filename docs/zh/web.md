@@ -94,6 +94,32 @@ async def get_book(self, book_id: int) -> Book: ...
 lifespan 会在启动时驱动 `start()`、关闭时驱动 `stop()`；`@on_start` / `@on_stop` 钩子与
 cocoa 依赖注入（`self.<dep>`）与核心引擎完全一致。`@web_cocoa` 只是在其上叠加了路由收集。
 
+## 测试
+
+可选的 `test` 额外依赖会带上 `httpx2`——Starlette 1.x 的 `TestClient` 底层使用它：
+
+```bash
+pip install "canary-framework[web,test]"
+```
+
+```python
+from starlette.testclient import TestClient
+from canary_framework import Canary
+from canary_framework.web import get, web_cocoa
+
+
+@web_cocoa
+class LibraryAPI:
+    @get("/books")
+    async def list_books(self) -> list[dict]:
+        return []
+
+
+def test_list_books() -> None:
+    with TestClient(Canary(LibraryAPI)) as client:
+        assert client.get("/books").json() == []
+```
+
 ## 参考
 
 | 装饰器 / 类 | 用途 |
