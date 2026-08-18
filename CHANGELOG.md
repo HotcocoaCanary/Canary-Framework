@@ -2,6 +2,21 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
+## [0.9.1] — 2026-08-18
+
+### Fixed
+
+- Router / hook introspection no longer silently drops same-named methods across mixins.
+  `routes_of` / `hooks_of` now read each class's own `__dict__` entry and de-duplicate by
+  function identity (instead of method name), so `KB.create` / `File.create` / `Coll.create`
+  all keep their own routes. Scanning no longer triggers Pydantic instance-attribute
+  deprecation warnings either.
+
+### Added
+
+- New optional dependency `canary-framework[test]` (`httpx2>=2.10`) for Starlette 1.x's
+  `TestClient`, plus an in-process testing guide in the English and Chinese web docs.
+
 ## [0.9.0] — 2026-08-15
 
 ### Added

@@ -20,7 +20,7 @@ topologically sorts it to get the startup order, and drives the lifecycle::
 
 from __future__ import annotations
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 
 from canary_framework.common.error import CanaryError, CircularDependencyError, LifecycleError
 from canary_framework.common.type import LifecycleState
