@@ -77,13 +77,13 @@ def test_routes_of_does_not_touch_pydantic_instance_attributes() -> None:
         x: int
 
     class API(Model):
-        @get("/x")
-        def x(self) -> dict:
+        @get("/ping")
+        def ping(self) -> dict:
             return {"x": 1}
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        routes_of(API())
+        routes_of(API(x=1))
 
     assert [w for w in caught if "Pydantic" in w.category.__name__] == []
 
