@@ -35,15 +35,15 @@ def hooks_of(instance: object, marker: str) -> list[Callable[[], object]]:
     """
     cls = type(instance)
     hooks: list[Callable[[], object]] = []
-    seen: set[str] = set()
+    seen: set[Callable[..., object]] = set()
     for klass in reversed(cls.__mro__):  # 基类 → 派生类，保证混入的钩子先执行
-        for name in klass.__dict__:
-            if name in seen:
+        for raw in klass.__dict__.values():
+            if not callable(raw) or not getattr(raw, marker, False):
                 continue
-            seen.add(name)
-            fn = getattr(instance, name, None)
-            if callable(fn) and getattr(fn, marker, False):
-                hooks.append(fn)
+            if raw in seen:
+                continue
+            seen.add(raw)
+            hooks.append(raw.__get__(instance, klass))
     return hooks
 
 

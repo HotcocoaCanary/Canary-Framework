@@ -43,6 +43,32 @@ def test_path_param_and_cocoa_dep() -> None:
     assert r.json() == {"id": 42, "title": "三体"}  # 路径参数已按注解转型为 int
 
 
+def test_same_named_mixin_routes_are_all_served() -> None:
+    class KbMixin:
+        @get("/kb/create")
+        async def create(self) -> dict:
+            return {"kind": "kb"}
+
+    class FileMixin:
+        @get("/file/create")
+        async def create(self) -> dict:
+            return {"kind": "file"}
+
+    class CollMixin:
+        @get("/coll/create")
+        async def create(self) -> dict:
+            return {"kind": "coll"}
+
+    @web_cocoa
+    class API(KbMixin, FileMixin, CollMixin):
+        pass
+
+    with TestClient(Canary(API)) as client:
+        assert client.get("/kb/create").json() == {"kind": "kb"}
+        assert client.get("/file/create").json() == {"kind": "file"}
+        assert client.get("/coll/create").json() == {"kind": "coll"}
+
+
 def test_query_param_default_and_coercion() -> None:
     @web_cocoa
     class API:

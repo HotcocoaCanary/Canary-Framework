@@ -86,3 +86,27 @@ def test_hooks_run_mixins_before_the_class() -> None:
         def own_hook(self) -> None: ...
 
     assert [f.__name__ for f in start_hooks(Service())] == ["mixin_hook", "own_hook"]
+
+
+def test_hooks_accumulate_across_same_named_mixins() -> None:
+    calls: list[str] = []
+
+    class AMixin:
+        @on_start
+        def start(self) -> None:
+            calls.append("a")
+
+    class BMixin:
+        @on_start
+        def start(self) -> None:
+            calls.append("b")
+
+    @cocoa
+    class Service(AMixin, BMixin):
+        pass
+
+    hooks = start_hooks(Service())
+    assert [f.__name__ for f in hooks] == ["start", "start"]
+    for hook in hooks:
+        hook()
+    assert calls == ["b", "a"]

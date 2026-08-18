@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import warnings
 from typing import Annotated
 
 import pytest
@@ -37,6 +38,54 @@ def test_routes_of_scans_mro_base_first() -> None:
 
     routes = routes_of(Service())
     assert [path for (_method, path, _fn) in routes] == ["/mixin", "/own"]
+
+
+def test_routes_of_keeps_same_named_mixin_routes() -> None:
+    class KbMixin:
+        @get("/kb/create")
+        def create(self) -> str:
+            return "kb"
+
+    class FileMixin:
+        @get("/file/create")
+        def create(self) -> str:
+            return "file"
+
+    class CollMixin:
+        @get("/coll/create")
+        def create(self) -> str:
+            return "coll"
+
+    class Router(KbMixin, FileMixin, CollMixin):
+        pass
+
+    routes = routes_of(Router())
+    assert {(method, path) for method, path, _fn in routes} == {
+        ("GET", "/kb/create"),
+        ("GET", "/file/create"),
+        ("GET", "/coll/create"),
+    }
+    # 绑定到具体 mixin 的方法：调用返回各自实现，而不是 MRO 里第一个同名方法。
+    by_path = {path: fn for _method, path, fn in routes}
+    assert by_path["/kb/create"]() == "kb"
+    assert by_path["/file/create"]() == "file"
+    assert by_path["/coll/create"]() == "coll"
+
+
+def test_routes_of_does_not_touch_pydantic_instance_attributes() -> None:
+    class Model(BaseModel):
+        x: int
+
+    class API(Model):
+        @get("/x")
+        def x(self) -> dict:
+            return {"x": 1}
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        routes_of(API())
+
+    assert [w for w in caught if "Pydantic" in w.category.__name__] == []
 
 
 def test_resolve_meta_annotated_style() -> None:

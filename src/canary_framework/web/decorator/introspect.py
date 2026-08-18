@@ -18,14 +18,14 @@ def routes_of(instance: object) -> list[tuple[str, str, Callable[..., object]]]:
     """
     cls = type(instance)
     routes: list[tuple[str, str, Callable[..., object]]] = []
-    seen: set[str] = set()
+    seen: set[Callable[..., object]] = set()
     for klass in reversed(cls.__mro__):  # 基类 → 派生类
-        for name in klass.__dict__:
-            if name in seen:
+        for raw in klass.__dict__.values():
+            if not callable(raw) or not hasattr(raw, ROUTE_ATTR):
                 continue
-            seen.add(name)
-            fn = getattr(instance, name, None)
-            if callable(fn) and hasattr(fn, ROUTE_ATTR):
-                method, path = getattr(fn, ROUTE_ATTR)
-                routes.append((method, path, fn))
+            if raw in seen:
+                continue
+            seen.add(raw)
+            method, path = getattr(raw, ROUTE_ATTR)
+            routes.append((method, path, raw.__get__(instance, klass)))
     return routes
