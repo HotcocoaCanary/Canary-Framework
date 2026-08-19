@@ -2,7 +2,7 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
-## [Unreleased]
+## [0.9.2] — 2026-08-19
 
 ### Added
 
