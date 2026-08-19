@@ -2,6 +2,30 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- Nested routers — `@web_cocoa(prefix="/api", deps=[AdminRouter])` now mounts `AdminRouter`'s
+  routes *under* `/api`. Prefixes chain along the dependency edges (plain `@cocoa` units in
+  between are skipped), computed by the new pure `canary_framework.runtime.mounts` module.
+  A unit reached by several dependency paths keeps its single instance but mounts once per
+  path (`/a/c` and `/a/b/c` hit the same object); identical prefixes mount only once.
+- `prefix=` on `@web_cocoa` — a common path prefix for all of the unit's routes.
+
+### Changed
+
+- `Canary` now merges the routes of **all** `@web_cocoa` units into one Starlette app with a
+  single `/openapi.json` / `/docs` / `/redoc`, instead of serving the first unit that exposed
+  an app. `title` / `version` come from the outermost (root-most) web unit. With a single
+  `@web_cocoa`, behaviour is unchanged. Route collisions across units raise
+  `RouteRegistrationError` at startup — the message now names both colliding units.
+
+### Removed
+
+- `SERVE_ATTR` — no longer written or read. `Canary` merges route entries itself (importing
+  the web builder lazily, only when routes exist), so the marker had no reader left.
+
 ## [0.9.1] — 2026-08-18
 
 ### Fixed

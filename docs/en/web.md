@@ -90,6 +90,70 @@ annotation and serialized as JSON:
 async def get_book(self, book_id: int) -> Book: ...
 ```
 
+## Nested routers (`prefix`)
+
+`@web_cocoa(prefix="/api")` gives every route on that unit a common prefix — and the prefix
+**nests along the dependency edges**: a web unit that is depended upon is mounted underneath
+its dependent's prefix.
+
+```python
+@web_cocoa(prefix="/admin")
+class AdminRouter:
+    @get("/dashboard")
+    async def dashboard(self) -> dict: ...
+
+
+@web_cocoa(prefix="/api", deps=[AdminRouter])
+class ApiRouter:
+    @get("/users")
+    async def users(self) -> list[dict]: ...
+
+
+app = Canary(ApiRouter)  # the root only
+```
+
+```text
+GET /api/users            → ApiRouter.users
+GET /api/admin/dashboard  → AdminRouter.dashboard
+```
+
+Plain `@cocoa` units in between contribute no prefix and are simply skipped: `Api -> Repo ->
+Admin` mounts exactly like `Api -> Admin`.
+
+### One instance, many mount points
+
+Every type in the graph still has exactly one instance — but **routes hang off the dependency
+path**, so a unit reached by two paths is mounted twice, and both mounts hit the same object:
+
+```python
+@web_cocoa(prefix="/c")
+class C: ...
+
+
+@web_cocoa(prefix="/b", deps=[C])
+class B: ...
+
+
+@web_cocoa(prefix="/a", deps=[B, C])
+class A: ...
+```
+
+```text
+/a          A
+/a/b        B
+/a/b/c      C   ┐ one instance
+/a/c        C   ┘ two mount points
+```
+
+Service identity (one instance) and route mounts (several paths) are separate things. Two
+paths that produce the same prefix mount once, not twice.
+
+### Docs and conflicts
+
+Every `@web_cocoa`'s routes merge into a single app with a single `/openapi.json` / `/docs` /
+`/redoc`; `title` and `version` come from the outermost unit (the one closest to a root). If
+two mount paths produce the same `METHOD + path`, startup raises `RouteRegistrationError`.
+
 ## Lifecycle
 
 `Canary` drives the same explicit `init()` / `start()` / `stop()` lifecycle for web apps.
@@ -128,7 +192,7 @@ def test_list_books() -> None:
 
 | Decorator / class | Purpose |
 |---|---|
-| `@web_cocoa(deps=[...], title=..., version=...)` | mark a class as a route holder (a `@cocoa` + web extension) |
+| `@web_cocoa(deps=[...], prefix=..., title=..., version=...)` | mark a class as a route holder (a `@cocoa` + web extension); `prefix` nests along `deps` |
 | `@get(path)` / `@post(path)` / `@put(path)` / `@patch(path)` / `@delete(path)` / `@route(method, path)` | mark a method as a route handler |
 | `Query` / `Path` / `Header` / `Cookie` / `Body` | explicit parameter source + metadata |
 | `Canary(*roots)` | the ASGI app / orchestrator |

@@ -28,7 +28,7 @@ construction. Passing several roots composes their graphs into one shared graph.
 | Method | Transition | What it does |
 |---|---|---|
 | `await app.init()` | `NEW → INITIALIZED` | build the graph, topologically sort it, run `@on_init` in order |
-| `await app.start()` | `INITIALIZED → STARTED` | inject dependencies, run `@on_start` in order, collect the serving app |
+| `await app.start()` | `INITIALIZED → STARTED` | inject dependencies, run `@on_start` in order, merge route entries from all `@web_cocoa` units into one serving app |
 | `await app.stop()` | `STARTED → STOPPED` | run `@on_stop` in reverse order |
 
 The engine is async-native: hooks may be sync or async, and the runtime `await`s based on the
@@ -75,11 +75,13 @@ Dependencies are shared within a single graph but not across two separate `Canar
 
 `Canary` is itself an ASGI application. Its `__call__(scope, receive, send)` handles the
 `lifespan` scope to drive `init()` / `start()` / `stop()`, and delegates every other scope
-(`http`, `websocket`, …) to a **serving app** that one of its units exposed during `start()`.
+(`http`, `websocket`, …) to a **unified serving app** built from all `@web_cocoa` units.
 
-This is how the [web extension](web.md) works: `@web_cocoa` injects an `@on_start` hook that
-builds a Starlette app and exposes it under a marker; `Canary` finds it by duck typing and
-delegates to it — without importing any concrete extension:
+This is how the [web extension](web.md) works: each `@web_cocoa` unit stores its route
+entries during `@on_start`; `Canary` merges them into **one** Starlette app with a single
+`/openapi.json` / `/docs` / `/redoc`. The web extension is imported **lazily** — only when
+route entries actually exist, so a plain `@cocoa` composition does not need
+`canary-framework[web]` installed:
 
 ```python
 from canary_framework import Canary
@@ -89,4 +91,4 @@ app = Canary(LibraryAPI)  # app is the ASGI application
 # uvicorn examples.library.web:app
 ```
 
-See [Architecture](architecture.md) for how this duck-typing is wired.
+See [Architecture](architecture.md) for how the route merge and lazy loading are wired.

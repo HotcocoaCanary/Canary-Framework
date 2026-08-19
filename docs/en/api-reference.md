@@ -155,7 +155,7 @@ everything.
 
 | Name | Purpose |
 |---|---|
-| `@web_cocoa(deps=[...], title=..., version=...)` | mark a class as a `@cocoa` *and* an HTTP route holder |
+| `@web_cocoa(deps=[...], prefix=..., title=..., version=...)` | mark a class as a `@cocoa` *and* an HTTP route holder; `prefix` nests along `deps` |
 | `@get` / `@post` / `@put` / `@patch` / `@delete` / `@route(method, path)` | mark a method as a route handler |
 | `Query` / `Path` / `Header` / `Cookie` / `Body` | parameter source markers (as a default or via `Annotated`) |
 | `WebError` | base class for web-extension errors |

@@ -5,8 +5,7 @@
 同步函数，也可以是协程函数，运行时按返回值自动判断是否 ``await``。
 
 ``Canary`` 本身也是一个 ASGI 应用：``__call__`` 处理 lifespan 驱动生命周期，并把
-http/websocket 等 scope 委托给某个单元在 ``start()`` 阶段暴露的服务入口（鸭子类型，
-``Canary`` 不 import 任何具体扩展）。
+http/websocket 等 scope 委托给所有 ``@web_cocoa`` 单元合并后的统一服务入口。
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from collections.abc import Callable
 from typing import Any, Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import LifecycleError
-from canary_framework.common.markers import SERVE_ATTR
+from canary_framework.common.markers import ROUTE_ENTRIES_ATTR, WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
     deps_of,
@@ -28,12 +27,16 @@ from canary_framework.core.decorator.introspect import (
 )
 from canary_framework.core.infra.naming import to_snake
 from canary_framework.runtime.graph import build_graph, topological_sort
+from canary_framework.runtime.mounts import join_path, mount_prefixes
 
 _T = TypeVar("_T")
 
 # 一个钩子：同步时返回 None，异步时返回一个可等待对象（协程）。
 # ``Callable[[], object]`` 对二者都成立——协程也是 ``object`` 的子类型。
 _Hook = Callable[[], object]
+
+# 路由条目：(method, path, instance, handler)
+_RouteEntry = tuple[str, str, object, Callable[..., object]]
 
 
 class Canary:
@@ -104,7 +107,8 @@ class Canary:
     async def start(self) -> None:
         """``INITIALIZED -> STARTED``: inject deps, run ``@on_start``, collect serve app.
 
-        注入依赖（懒注入），按序执行 ``@on_start``，随后收集单元暴露的服务入口。
+        注入依赖（懒注入），按序执行 ``@on_start``，随后收集所有 ``@web_cocoa``
+        单元的路由并合并为统一的服务入口。
         """
         self._require(LifecycleState.INITIALIZED)
         self._state = LifecycleState.STARTING
@@ -141,7 +145,7 @@ class Canary:
         """Serve ASGI: lifespan drives the lifecycle, everything else delegates.
 
         ``lifespan`` 交给 :meth:`_lifespan`；其余 scope（http/websocket/…）在确保已
-        启动后委托给单元暴露的服务入口。
+        启动后委托给合并出的统一服务入口。
         """
         if scope["type"] == "lifespan":
             await self._lifespan(receive, send)
@@ -175,16 +179,39 @@ class Canary:
             await self.start()
 
     def _collect_serve_app(self) -> Any | None:
-        """Return the first serving app a unit exposed during ``start``, if any.
+        """Collect the units' route entries and merge them into one serving app.
 
-        扫描各单元暴露的服务入口（如 web 单元在 ``@on_start`` 里构建的 app）。
-        ``Canary`` 只按属性名鸭子类型查找，不 import 任何具体扩展。
+        每个 ``@web_cocoa`` 单元在 ``@on_start`` 里把自己的路由条目写到
+        ``ROUTE_ENTRIES_ATTR``；这里按 :func:`~canary_framework.runtime.mounts.mount_prefixes`
+        算出的挂载前缀拼出完整路径，再交给 web 扩展合并成一个统一的应用（含
+        ``/openapi.json``、``/docs``、``/redoc``）。
+
+        前缀沿依赖链嵌套——``prefix="/api"`` 的单元依赖 ``prefix="/admin"`` 的单元时，
+        后者的路由挂到 ``/api/admin`` 之下；被多条依赖路径引用时，实例仍只有一个，但
+        每条路径各挂一份。只有一个 ``@web_cocoa`` 时与旧版行为一致。
+
+        对 web 扩展的 import 是延迟的：没有路由条目就不会发生，纯 ``@cocoa`` 编排
+        因此无需安装 ``canary-framework[web]``。
         """
-        for instance in self.instances:
-            app = getattr(instance, SERVE_ATTR, None)
-            if app is not None:
-                return app
-        return None
+        all_entries: list[_RouteEntry] = []
+        meta: dict[str, str] = {}  # 文档元数据取最外层单元的
+
+        # mount_prefixes 按“根在前”的顺序返回，故最外层单元的 title/version 胜出
+        for cls, prefixes in mount_prefixes(self.roots, self._graph).items():
+            entries: list[_RouteEntry] | None = getattr(self._graph[cls], ROUTE_ENTRIES_ATTR, None)
+            if entries is None:
+                continue
+            for prefix in prefixes:
+                all_entries.extend(
+                    (m, join_path(prefix, p), inst, fn) for m, p, inst, fn in entries
+                )
+            meta = meta or getattr(cls, WEB_ATTR, {})
+
+        if not all_entries:
+            return None
+        from canary_framework.web.core.app import build_serve_app
+
+        return build_serve_app(meta, all_entries)
 
     # -- context manager ----------------------------------------------
     async def __aenter__(self) -> Self:

@@ -88,6 +88,69 @@ Header 参数名会自动把下划线换成连字符（`x_token` → `x-token` �
 async def get_book(self, book_id: int) -> Book: ...
 ```
 
+## 路由嵌套（`prefix`）
+
+`@web_cocoa(prefix="/api")` 给该单元的所有路由加上公共前缀，而且**前缀沿依赖关系逐级
+嵌套**——被依赖的 web 单元挂在依赖方的前缀之下：
+
+```python
+@web_cocoa(prefix="/admin")
+class AdminRouter:
+    @get("/dashboard")
+    async def dashboard(self) -> dict: ...
+
+
+@web_cocoa(prefix="/api", deps=[AdminRouter])
+class ApiRouter:
+    @get("/users")
+    async def users(self) -> list[dict]: ...
+
+
+app = Canary(ApiRouter)  # 只传根
+```
+
+```text
+GET /api/users            → ApiRouter.users
+GET /api/admin/dashboard  → AdminRouter.dashboard
+```
+
+链路中间的普通 `@cocoa`（非 web 单元）不贡献前缀，直接跳过：`Api -> Repo -> Admin` 与
+`Api -> Admin` 挂载结果相同。
+
+### 实例共享，挂载不共享
+
+依赖图上每个类型依然只有一个实例，但**路由挂在依赖路径上**——同一个单元被两条路径依赖，
+就在两个位置各挂一份，两处命中的是同一个对象：
+
+```python
+@web_cocoa(prefix="/c")
+class C: ...
+
+
+@web_cocoa(prefix="/b", deps=[C])
+class B: ...
+
+
+@web_cocoa(prefix="/a", deps=[B, C])
+class A: ...
+```
+
+```text
+/a          A
+/a/b        B
+/a/b/c      C   ┐ 同一个实例
+/a/c        C   ┘ 两个挂载点
+```
+
+也就是说，服务身份（一个实例）和挂载位置（若干条路径）是分开的。两条路径拼出同一个前缀
+时只挂一次，不会重复注册。
+
+### 文档与冲突
+
+所有 `@web_cocoa` 的路由合并进同一个应用，`/openapi.json` / `/docs` / `/redoc` 也只有一
+份；`title` 与 `version` 取最外层（离根最近）的那个单元。若两条挂载路径拼出同一个
+`METHOD + 路径`，启动时抛 `RouteRegistrationError`。
+
 ## 生命周期
 
 `Canary` 对 web 应用同样走显式的 `init()` / `start()` / `stop()`。在 uvicorn 下，ASGI
@@ -124,7 +187,7 @@ def test_list_books() -> None:
 
 | 装饰器 / 类 | 用途 |
 |---|---|
-| `@web_cocoa(deps=[...], title=..., version=...)` | 把类标记为路由持有者（`@cocoa` + web 扩展） |
+| `@web_cocoa(deps=[...], prefix=..., title=..., version=...)` | 把类标记为路由持有者（`@cocoa` + web 扩展）；`prefix` 沿依赖关系嵌套 |
 | `@get(path)` / `@post(path)` / `@put(path)` / `@patch(path)` / `@delete(path)` / `@route(method, path)` | 把方法标记为路由处理器 |
 | `Query` / `Path` / `Header` / `Cookie` / `Body` | 显式指定参数来源与元数据 |
 | `Canary(*roots)` | ASGI 应用 / 编排器 |

@@ -28,7 +28,7 @@ app = Canary(*roots)
 | 方法 | 状态迁移 | 作用 |
 |---|---|---|
 | `await app.init()` | `NEW → INITIALIZED` | 建图、拓扑排序、按序执行 `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | 注入依赖、按序执行 `@on_start`、收集服务入口 |
+| `await app.start()` | `INITIALIZED → STARTED` | 注入依赖、按序执行 `@on_start`、合并所有 `@web_cocoa` 单元的路由为统一服务入口 |
 | `await app.stop()` | `STARTED → STOPPED` | 逆序执行 `@on_stop` |
 
 引擎是异步原生的：钩子可同步可异步，运行时按返回值判断是否 `await`。状态机与错误处理见
@@ -73,11 +73,12 @@ await books.start()
 
 `Canary` 本身就是一个 ASGI 应用。它的 `__call__(scope, receive, send)` 处理 `lifespan`
 scope 以驱动 `init()` / `start()` / `stop()`，并把其余 scope（`http`、`websocket`、…）委托
-给某个单元在 `start()` 阶段暴露的**服务入口**。
+给所有 `@web_cocoa` 单元合并出的**统一服务入口**。
 
-这正是 [web 扩展](web.md) 的工作方式：`@web_cocoa` 注入一个 `@on_start` 钩子，在启动阶段
-构建 Starlette 应用并打上标记暴露出来；`Canary` 按鸭子类型找到它并委托给它 —— 而不 import
-任何具体扩展：
+这正是 [web 扩展](web.md) 的工作方式：每个 `@web_cocoa` 单元在 `@on_start` 阶段存储路由
+条目；`Canary` 把它们合并成**一个** Starlette 应用，只挂一份 `/openapi.json` / `/docs` /
+`/redoc`。web 扩展的 import 是**延迟**的 —— 只有真的存在路由条目时才会发生，所以纯
+`@cocoa` 编排无需安装 `canary-framework[web]`：
 
 ```python
 from canary_framework import Canary
@@ -87,4 +88,4 @@ app = Canary(LibraryAPI)  # app 本身就是 ASGI 应用
 # uvicorn examples.library.web:app
 ```
 
-这种鸭子类型的接线方式见 [架构](architecture.md)。
+路由合并与延迟加载的接线方式见 [架构](architecture.md)。

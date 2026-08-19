@@ -1,5 +1,8 @@
 """Unit tests for the Canary runtime."""
 
+import subprocess
+import sys
+
 import pytest
 
 from canary_framework import Canary, LifecycleState, cocoa, on_init, on_start, on_stop
@@ -199,3 +202,21 @@ async def test_illegal_transition_raises() -> None:
     await canary.init()
     with pytest.raises(LifecycleError):
         await canary.init()  # 不能重复初始化
+
+
+def test_plain_cocoa_composition_does_not_import_the_web_extension() -> None:
+    """web 是可选额外依赖：不带路由的编排不该把 web 扩展（及 starlette）拉进来。"""
+    code = (
+        "import asyncio, sys\n"
+        "from canary_framework import Canary, cocoa\n"
+        "@cocoa\n"
+        "class Unit: ...\n"
+        "async def main():\n"
+        "    async with Canary(Unit):\n"
+        "        pass\n"
+        "asyncio.run(main())\n"
+        "assert 'canary_framework.web' not in sys.modules, 'web extension imported'\n"
+        "assert 'starlette' not in sys.modules, 'starlette imported'\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

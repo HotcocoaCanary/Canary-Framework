@@ -28,7 +28,7 @@ and methods by decorators, and read back by the runtime. All markers are central
 |---|---|---|
 | `COCOA_ATTR` | `@cocoa` | runtime (is it a unit? what are its deps?) |
 | `ON_INIT` / `ON_START` / `ON_STOP` | the hook decorators | runtime (which hooks to run) |
-| `SERVE_ATTR` | a unit's `@on_start` | `Canary` (the serving app to delegate to) |
+| `ROUTE_ENTRIES_ATTR` | `@web_cocoa`'s `@on_start` | `Canary` (route entries to merge) |
 | `ROUTE_ATTR` / `WEB_ATTR` | `@get`/… and `@web_cocoa` | the web extension |
 
 Decorators only `setattr` a marker; they never rewrite the class. This keeps units as plain
@@ -48,15 +48,23 @@ topological sort over `deps=[...]` and executes `@on_init` in order; `start()` i
 dependencies then runs `@on_start`; `stop()` runs `@on_stop` in reverse order. The sorting is
 deterministic, and a cycle surfaces as `CircularDependencyError`.
 
-## Serving: duck typing, not coupling
+## Serving: one merged app
 
-`Canary` is an ASGI application without knowing any concrete extension. During `start()`, it
-sweeps its instances for the `SERVE_ATTR` marker; if a unit exposed a serving app (a Starlette
-app, in the web extension's case), `Canary` keeps it and delegates every non-`lifespan` scope
-to it.
+`Canary` is an ASGI application. During `start()` every `@web_cocoa` unit writes its route
+entries (`METHOD`, path, instance, handler) under `ROUTE_ENTRIES_ATTR`; `Canary` merges them
+into **one** app, so a whole composition has a single `/openapi.json` / `/docs` / `/redoc`,
+and every non-`lifespan` scope is delegated to it.
 
-This is the whole extension story: an extension needs only to (1) use the shared markers and
-(2) expose an app under `SERVE_ATTR` during `start()`. `Canary` itself never imports it.
+Where each unit mounts is decided by the dependency graph (`runtime/mounts.py` — a pure,
+independently testable algorithm): a depth-first walk from every root chains the `prefix` of
+each web unit it passes, skipping non-web units transparently. The rule is just **one
+instance, many mounts** — a type is still a singleton, but a unit reached by two dependency
+paths mounts at both. Each `(type, prefix)` pair is walked once, which both de-duplicates and
+keeps diamond-shaped graphs from exploding.
+
+The merge itself is the web extension's job (`build_serve_app`), and `Canary` imports it
+**lazily** — never when there are no route entries, so a plain `@cocoa` composition does not
+need `canary-framework[web]` installed.
 
 ## Design principles
 
@@ -67,5 +75,5 @@ This is the whole extension story: an extension needs only to (1) use the shared
    lifespan — there is no hidden magic.
 4. **All hooks are optional.** A dependency-only unit is complete.
 5. **Markers are centralised.** One place defines the contract; no magic strings drift.
-6. **The runtime is duck-typed over extensions.** `Canary` delegates to a serving app by
-   marker, never by importing it.
+6. **Extensions load on demand.** They publish metadata through the shared markers, and
+   `Canary` imports one only when it actually has to.

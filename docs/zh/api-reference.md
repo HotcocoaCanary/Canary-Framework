@@ -151,7 +151,7 @@ async def __call__(self, scope, receive, send) -> None
 
 | 名称 | 作用 |
 |---|---|
-| `@web_cocoa(deps=[...], title=..., version=...)` | 把类同时标记为 `@cocoa` 与 HTTP 路由持有者 |
+| `@web_cocoa(deps=[...], prefix=..., title=..., version=...)` | 把类同时标记为 `@cocoa` 与 HTTP 路由持有者；`prefix` 沿依赖关系嵌套 |
 | `@get` / `@post` / `@put` / `@patch` / `@delete` / `@route(method, path)` | 把方法标记为路由处理器 |
 | `Query` / `Path` / `Header` / `Cookie` / `Body` | 参数来源标记（作默认值或经 `Annotated`） |
 | `WebError` | web 扩展错误的根基类 |
