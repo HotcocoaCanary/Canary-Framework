@@ -24,6 +24,7 @@ from canary_framework.web.decorator.params import _UNDEFINED, Param
 
 _EMPTY = inspect.Parameter.empty
 _PATH_PARAM = re.compile(r"\{([A-Za-z_]\w*)")
+_PATH_PLACEHOLDER = re.compile(r"\{([A-Za-z_]\w*)(?::[^}]+)?\}")
 
 # 能无歧义地从一个字符串还原出来的类型——URL 的查询串与路径段只装得下字符串，
 # 所以「是不是标量」就是「能不能走 query / path」的判据，不是一份特例清单。
@@ -119,3 +120,12 @@ def location_of(type_: Any, marker: Param | None, name: str, path_params: set[st
 def path_param_names(path: str) -> set[str]:
     """Extract ``{name}`` placeholders (ignoring an optional ``:converter``)."""
     return {m.group(1) for m in _PATH_PARAM.finditer(path)}
+
+
+def documented_path(path: str) -> str:
+    """Strip Starlette's ``:converter`` suffixes — OpenAPI only knows ``{name}``.
+
+    ``/files/{name:path}`` → ``/files/{name}``。转换器是 Starlette 的路由语法，
+    不是 OpenAPI 的；泄漏进文档会让 Swagger UI 把它当成参数名的一部分。
+    """
+    return _PATH_PLACEHOLDER.sub(r"{\1}", path)

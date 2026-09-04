@@ -7,18 +7,23 @@ UI）与 ``/redoc``（Redoc）用 CDN 静态 HTML 渲染，供浏览器直接打
 from __future__ import annotations
 
 import inspect
+import logging
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import TypeAdapter
+from pydantic import PydanticSchemaGenerationError, TypeAdapter
+from starlette.responses import Response
 
 from canary_framework.web.decorator.resolve import (
+    documented_path,
     hints_of,
     location_of,
     path_param_names,
     resolve_meta,
 )
 from canary_framework.web.infra.naming import header_name
+
+_log = logging.getLogger("canary.web.openapi")
 
 _EMPTY = inspect.Parameter.empty
 _REF_TEMPLATE = "#/components/schemas/{model}"
@@ -65,7 +70,8 @@ def build_openapi(
     schemas: dict[str, Any] = {}
     paths: dict[str, Any] = {}
     for method, path, _instance, fn in routes:
-        paths.setdefault(path, {})[method.lower()] = _operation(fn, path, schemas)
+        # 文档的 key 用归一化后的路径：Starlette 的 ``:converter`` 不属于 OpenAPI。
+        paths.setdefault(documented_path(path), {})[method.lower()] = _operation(fn, path, schemas)
     doc: dict[str, Any] = {
         "openapi": "3.1.0",
         "info": {"title": title, "version": version},
@@ -92,7 +98,7 @@ def _operation(fn: Callable[..., object], path: str, schemas: dict[str, Any]) ->
         if location == "request":
             continue
         required = default is _EMPTY
-        schema = _schema(type_, schemas)
+        schema = _schema(type_, schemas, fn)
         if location == "body":
             request_body = {
                 "required": required,
@@ -112,16 +118,7 @@ def _operation(fn: Callable[..., object], path: str, schemas: dict[str, Any]) ->
             param_obj["description"] = marker.description
         parameters.append(param_obj)
 
-    operation: dict[str, Any] = {
-        "responses": {
-            "200": {
-                "description": "Successful Response",
-                "content": {
-                    "application/json": {"schema": _schema(hints.get("return", _EMPTY), schemas)}
-                },
-            }
-        }
-    }
+    operation: dict[str, Any] = {"responses": {"200": _response_doc(hints, fn, schemas)}}
     if parameters:
         operation["parameters"] = parameters
     if request_body:
@@ -129,11 +126,42 @@ def _operation(fn: Callable[..., object], path: str, schemas: dict[str, Any]) ->
     return operation
 
 
-def _schema(annotation: Any, schemas: dict[str, Any]) -> dict[str, Any]:
+def _response_doc(
+    hints: dict[str, Any], fn: Callable[..., object], schemas: dict[str, Any]
+) -> dict[str, Any]:
+    """Describe the 200 response; handlers returning a ``Response`` declare no JSON schema."""
+    annotation = hints.get("return", _EMPTY)
+    if inspect.isclass(annotation) and issubclass(annotation, Response):
+        # handler 自己造响应（SSE / 文件 / 自定义状态码），媒体类型由它决定，文档不猜。
+        return {"description": "Successful Response"}
+    return {
+        "description": "Successful Response",
+        "content": {"application/json": {"schema": _schema(annotation, schemas, fn)}},
+    }
+
+
+def _schema(
+    annotation: Any, schemas: dict[str, Any], fn: Callable[..., object] | None = None
+) -> dict[str, Any]:
+    """Build the JSON schema for *annotation*, degrading to ``{}`` when it has none.
+
+    一个无法生成 schema 的类型（``TextIO``、``Callable``、自定义容器……）不该让整份
+    文档 500——那会连累其余几十个端点。这里退化成"未约束"，并记一条 WARNING 指明
+    是哪个 handler 的哪个类型，让问题可见而不是可致命。
+    """
     if annotation is _EMPTY or annotation is Any or annotation is type(None):
         return {}
-    adapter = TypeAdapter(annotation)
-    schema = adapter.json_schema(ref_template=_REF_TEMPLATE)
+    try:
+        schema = TypeAdapter(annotation).json_schema(ref_template=_REF_TEMPLATE)
+    except (PydanticSchemaGenerationError, ValueError) as exc:
+        where = getattr(fn, "__qualname__", "<unknown handler>") if fn else "<unknown handler>"
+        _log.warning(
+            "OpenAPI: no schema for %r in %s (%s); documenting it as unconstrained",
+            annotation,
+            where,
+            type(exc).__name__,
+        )
+        return {}
     defs = schema.pop("$defs", None)
     if defs:
         schemas.update(defs)
