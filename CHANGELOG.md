@@ -2,6 +2,82 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
+## [0.9.3] — 2026-09-04
+
+修复两条失败路径上的全部已知问题，并给单元补上「配置」与「日志」两个协作者。
+This release closes the framework's failure paths — request handling and lifecycle — and
+gives every unit its logger and its settings.
+
+### Added
+
+- `@on_request_error(ExcType, ...)` — map an exception to a response, once, for the whole
+  app. Structurally identical to `@get` (a method marker read at assembly), looked up by
+  `type(exc).__mro__`. Registering the same type twice raises `RouteRegistrationError`.
+- `HTTPError(status_code, detail, headers=)` — for errors that already *are* HTTP concepts;
+  no registration needed. Domain errors should stay domain errors and be mapped instead.
+- `RequestValidationError` — 422 is now *raised* rather than returned, so it can be replaced
+  with the house error envelope via `@on_request_error(RequestValidationError)`.
+- Built-in handlers for `RequestValidationError` (422), `HTTPError`, and `Exception`
+  (a JSON 500). All three are overridable.
+- `Canary(*roots, overrides={Type: substitute})` — replace a unit (or a config class) with a
+  ready-made instance. Substitution happens at *construction*, so an overridden unit's own
+  dependencies are never instantiated. An override that never applies raises `OverrideError`.
+- Class-level annotations are declarations the runtime fills: `log: logging.Logger` gets a
+  logger named `module.QualName`; `config: SomeSettings` gets the shared instance of that
+  settings class. Two sources claiming the same attribute name raise `InjectionError`.
+- `canary_framework.common.config` — `Config` (a `BaseSettings` that also reads `.env`) and
+  `CanaryConfig` (`CANARY_*`; `log_level` applies to the `canary` logger tree only).
+- Assembly summary on the `canary.runtime` logger at DEBUG: start order, dependencies,
+  substitutions, mounted routes, error handlers — plus a note when multiple roots mean there
+  is no "after everything started" position.
+
+### Fixed
+
+- **Start failure leaked started units.** `start()` now keeps an explicit ledger and unwinds
+  it in reverse (including the unit that failed), then re-raises the original exception with
+  rollback failures attached as notes.
+- **A failing `@on_stop` aborted shutdown.** Stop now collects errors and keeps going,
+  raising an `ExceptionGroup` at the end.
+- **`stop()` was illegal after a failure.** It is now callable from any settled state and is
+  idempotent — one reclamation path for both normal and failed termination.
+- **Lifespan startup failure hung the process.** `_lifespan` returned to `await receive()`
+  after sending `lifespan.startup.failed`, where no further message ever arrives.
+- **A validator raising `ValueError` crashed its own 422** into a 500 (the live exception
+  object sat in `ctx` and could not be serialised).
+- **Handlers could not return a `Response`.** SSE, file downloads, custom status codes and
+  background tasks all work now.
+- **Non-scalar parameters were read from the query string.** Inference is now one rule:
+  scalars come from the query (or the path when the name matches a placeholder), everything
+  else from the body.
+- **One undescribable type took down the whole OpenAPI document.** It degrades to an
+  unconstrained schema with a WARNING naming the handler.
+- **`{name:path}` converters leaked into the OpenAPI document.**
+
+### Changed
+
+- **Handlers must be `async def`.** A synchronous handler runs on the event loop and stalls
+  the entire process, not just its own request; Canary refuses to route it at declaration
+  time rather than silently offloading it to a thread pool. Wrap blocking calls with
+  `await asyncio.to_thread(...)` — one rule, and it works in handlers, repositories and
+  lifecycle hooks alike. `@on_request_error` handlers follow the same rule.
+- `stop()` raises `ExceptionGroup` instead of the first exception.
+- Unhandled exceptions produce a JSON 500 body instead of Starlette's `text/plain`.
+- `pydantic` and `pydantic-settings` are now core dependencies (`dependencies` is no longer
+  empty). Configuration is not an optional concern the way `web` is — every application has
+  it — so making it an extra would have meant a core feature that sometimes isn't there.
+  The `web` extra drops its own `pydantic` entry.
+
+### Notes
+
+- **Multiple roots have no "after everything started" position.** With a single root, that
+  root is always last in topological order, so its `@on_start` *is* the after-all hook and
+  its `@on_stop` runs before anything else tears down. Declare a composition root when you
+  need it; no new lifecycle hook was added.
+- Acquire resources in `@on_start`, not `@on_init` — dependencies are not injected yet at
+  init time, so an `@on_stop` written against them has nothing to release.
+- `@on_stop` must tolerate a unit whose `@on_start` only got halfway; that is the price of
+  rolling back the failed unit too.
+
 ## [0.9.2] — 2026-08-19
 
 ### Added

@@ -20,7 +20,7 @@ topologically sorts it to get the startup order, and drives the lifecycle::
 
 from __future__ import annotations
 
-__version__ = "0.9.2"
+__version__ = "0.9.3"
 
 from canary_framework.common.config import CanaryConfig, Config
 from canary_framework.common.error import (
