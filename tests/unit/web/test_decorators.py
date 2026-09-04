@@ -12,21 +12,21 @@ pytestmark = pytest.mark.unit
 
 def test_get_sets_route_marker() -> None:
     @get("/books")
-    def handler() -> None: ...
+    async def handler() -> None: ...
 
     assert getattr(handler, ROUTE_ATTR) == ("GET", "/books")
 
 
 def test_method_is_upper_cased() -> None:
     @route("get", "/x")
-    def handler() -> None: ...
+    async def handler() -> None: ...
 
     assert getattr(handler, ROUTE_ATTR) == ("GET", "/x")
 
 
 def test_path_gets_leading_slash() -> None:
     @post("books")
-    def handler() -> None: ...
+    async def handler() -> None: ...
 
     assert getattr(handler, ROUTE_ATTR) == ("POST", "/books")
 
@@ -41,6 +41,6 @@ def test_all_verbs() -> None:
     ]:
 
         @deco("/x")
-        def handler() -> None: ...
+        async def handler() -> None: ...
 
         assert getattr(handler, ROUTE_ATTR) == (verb, "/x")

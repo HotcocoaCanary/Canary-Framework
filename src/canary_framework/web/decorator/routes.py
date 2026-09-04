@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from canary_framework.common.markers import ROUTE_ATTR
+from canary_framework.web.infra.checks import require_async
 
 _T = TypeVar("_T", bound=Callable[..., object])
 
@@ -25,6 +26,7 @@ def route(method: str, path: str) -> Callable[[_T], _T]:
     path_ = path if path.startswith("/") else "/" + path
 
     def mark(fn: _T) -> _T:
+        require_async(fn, f"the handler for '{method_} {path_}'")
         setattr(fn, ROUTE_ATTR, (method_, path_))
         return fn
 

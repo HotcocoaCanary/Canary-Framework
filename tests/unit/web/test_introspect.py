@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import inspect
 import warnings
-from typing import Annotated
+from collections.abc import Awaitable
+from typing import Annotated, cast
 
 import pytest
 from pydantic import BaseModel
@@ -30,30 +31,30 @@ def test_header_name_converts_underscore() -> None:
 def test_routes_of_scans_mro_base_first() -> None:
     class Mixin:
         @get("/mixin")
-        def mixin_route(self) -> None: ...
+        async def mixin_route(self) -> None: ...
 
     class Service(Mixin):
         @get("/own")
-        def own_route(self) -> None: ...
+        async def own_route(self) -> None: ...
 
     routes = routes_of(Service())
     assert [path for (_method, path, _fn) in routes] == ["/mixin", "/own"]
 
 
-def test_routes_of_keeps_same_named_mixin_routes() -> None:
+async def test_routes_of_keeps_same_named_mixin_routes() -> None:
     class KbMixin:
         @get("/kb/create")
-        def create(self) -> str:
+        async def create(self) -> str:
             return "kb"
 
     class FileMixin:
         @get("/file/create")
-        def create(self) -> str:
+        async def create(self) -> str:
             return "file"
 
     class CollMixin:
         @get("/coll/create")
-        def create(self) -> str:
+        async def create(self) -> str:
             return "coll"
 
     class Router(KbMixin, FileMixin, CollMixin):
@@ -67,9 +68,9 @@ def test_routes_of_keeps_same_named_mixin_routes() -> None:
     }
     # 绑定到具体 mixin 的方法：调用返回各自实现，而不是 MRO 里第一个同名方法。
     by_path = {path: fn for _method, path, fn in routes}
-    assert by_path["/kb/create"]() == "kb"
-    assert by_path["/file/create"]() == "file"
-    assert by_path["/coll/create"]() == "coll"
+    assert await cast(Awaitable[str], by_path["/kb/create"]()) == "kb"
+    assert await cast(Awaitable[str], by_path["/file/create"]()) == "file"
+    assert await cast(Awaitable[str], by_path["/coll/create"]()) == "coll"
 
 
 def test_routes_of_does_not_touch_pydantic_instance_attributes() -> None:
@@ -78,7 +79,7 @@ def test_routes_of_does_not_touch_pydantic_instance_attributes() -> None:
 
     class API(Model):
         @get("/ping")
-        def ping(self) -> dict:
+        async def ping(self) -> dict:
             return {"x": 1}
 
     with warnings.catch_warnings(record=True) as caught:

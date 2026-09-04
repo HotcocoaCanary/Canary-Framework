@@ -1,14 +1,14 @@
 """Request dispatch — bind handler parameters and build a JSON response.
 
 请求分发：把一次请求的路径 / 查询 / 请求头 / 请求体按 handler 签名绑定为关键字参数，
-调用 handler（同步 / 异步自动判断），再把返回值校验后序列化为 JSON 响应。
+调用 handler（必为 ``async def``），再把返回值校验后序列化为 JSON 响应。
 """
 
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
-from typing import Any, get_origin
+from collections.abc import Awaitable, Callable
+from typing import Any, cast, get_origin
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from starlette.requests import Request
@@ -32,9 +32,8 @@ async def dispatch(instance: object, fn: Callable[..., object], request: Request
         kwargs = await _solve(fn, request, hints)
     except (ValidationError, MissingParameterError) as exc:
         return JSONResponse({"detail": _detail(exc)}, status_code=422)
-    result = fn(**kwargs)
-    if inspect.isawaitable(result):
-        result = await result
+    # handler 必为 async（由 @get/@post 在装配期把关），这里没有第二条同步路径。
+    result = await cast(Awaitable[Any], fn(**kwargs))
     return _to_response(result, hints.get("return", _EMPTY))
 
 
