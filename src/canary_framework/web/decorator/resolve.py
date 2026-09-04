@@ -7,18 +7,41 @@
 
 from __future__ import annotations
 
+import datetime
+import decimal
+import enum
 import inspect
+import pathlib
 import re
+import types
+import uuid
 from collections.abc import Callable
-from typing import Annotated, Any, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Literal, Union, get_args, get_origin, get_type_hints
 
-from pydantic import BaseModel
 from starlette.requests import Request
 
 from canary_framework.web.decorator.params import _UNDEFINED, Param
 
 _EMPTY = inspect.Parameter.empty
 _PATH_PARAM = re.compile(r"\{([A-Za-z_]\w*)")
+
+# 能无歧义地从一个字符串还原出来的类型——URL 的查询串与路径段只装得下字符串，
+# 所以「是不是标量」就是「能不能走 query / path」的判据，不是一份特例清单。
+_SCALARS = (
+    str,
+    bytes,
+    bool,
+    int,
+    float,
+    complex,
+    uuid.UUID,
+    decimal.Decimal,
+    datetime.date,
+    datetime.datetime,
+    datetime.time,
+    datetime.timedelta,
+    pathlib.PurePath,
+)
 
 
 def hints_of(fn: Callable[..., object]) -> dict[str, Any]:
@@ -58,17 +81,39 @@ def resolve_meta(annotation: Any, param_default: Any) -> tuple[Any, Param | None
     return type_, None, param_default
 
 
+def is_scalar(type_: Any) -> bool:
+    """Whether *type_* can be reconstructed from a single string (recursively).
+
+    标量判定：容器与联合按元素递归；未注解 / ``Any`` 视为标量（保持旧行为）。
+    """
+    if type_ is _EMPTY or type_ is Any or type_ is None or type_ is type(None):
+        return True
+    origin = get_origin(type_)
+    if origin is Literal:
+        return True
+    if origin in (Union, types.UnionType):
+        return all(is_scalar(arg) for arg in get_args(type_))
+    if origin in (list, set, frozenset, tuple):
+        args = [a for a in get_args(type_) if a is not Ellipsis]
+        return bool(args) and all(is_scalar(a) for a in args)
+    if inspect.isclass(type_):
+        return issubclass(type_, enum.Enum) or issubclass(type_, _SCALARS)
+    return False
+
+
 def location_of(type_: Any, marker: Param | None, name: str, path_params: set[str]) -> str:
-    """Decide a parameter's source. Explicit marker wins; otherwise infer."""
+    """Decide a parameter's source. Explicit marker wins; otherwise infer.
+
+    推断规则一句话：**标量走 query（名字命中路径占位符则走 path），其余走 body。**
+    模型、``dict``、``list[Model]`` 都属于「其余」，不再被误当成查询参数。
+    """
     if marker is not None:
         return marker.location
     if type_ is Request:
         return "request"
-    if inspect.isclass(type_) and issubclass(type_, BaseModel):
-        return "body"
     if name in path_params:
         return "path"
-    return "query"
+    return "query" if is_scalar(type_) else "body"
 
 
 def path_param_names(path: str) -> set[str]:

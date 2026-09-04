@@ -107,7 +107,10 @@ def _coerce(type_: Any, raw: Any) -> Any:
     return TypeAdapter(type_).validate_python(raw)
 
 
-def _to_response(result: Any, return_ann: Any) -> JSONResponse:
+def _to_response(result: Any, return_ann: Any) -> Response:
+    # handler 自己造好的响应原样放行——SSE、文件下载、自定义状态码、后台任务都走这里。
+    if isinstance(result, Response):
+        return result
     if isinstance(result, BaseModel):
         return JSONResponse(result.model_dump(mode="json"))
     if return_ann is _EMPTY or return_ann is Any or return_ann is type(None):
