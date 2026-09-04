@@ -38,6 +38,13 @@ _Hook = Callable[[], object]
 # 路由条目：(method, path, instance, handler)
 _RouteEntry = tuple[str, str, object, Callable[..., object]]
 
+# 进行中的状态：只可能被并发调用者观察到，此时再驱动生命周期一定是误用。
+_TRANSIENT = (
+    LifecycleState.INITIALIZING,
+    LifecycleState.STARTING,
+    LifecycleState.STOPPING,
+)
+
 
 class Canary:
     """A runtime that owns a graph of cocoas and drives their lifecycle.
@@ -56,6 +63,9 @@ class Canary:
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
         self._serve_app: Any | None = None
+        # 已进入 ``@on_start`` 的单元，按进入顺序；回收时逆序消费。
+        # 记录的是“进入”而非“完成”——启动到一半失败的单元同样要被回收。
+        self._started: list[type] = []
 
     # -- read access --------------------------------------------------
     @property
@@ -109,6 +119,10 @@ class Canary:
 
         注入依赖（懒注入），按序执行 ``@on_start``，随后收集所有 ``@web_cocoa``
         单元的路由并合并为统一的服务入口。
+
+        不变式：**要么全部启动，要么什么都没启动。** 任一环节抛出时，已进入
+        ``@on_start`` 的单元（含失败的那一个）会按逆序执行 ``@on_stop`` 回收，
+        随后原样抛出最初的异常；回收过程中的异常作为 note 附在其上，不改变异常类型。
         """
         self._require(LifecycleState.INITIALIZED)
         self._state = LifecycleState.STARTING
@@ -116,28 +130,38 @@ class Canary:
             for t in self._order:
                 node = self._graph[t]
                 self._inject(node)
+                self._started.append(t)
                 for hook in start_hooks(node):
                     await self._invoke_hook(hook)
             self._serve_app = self._collect_serve_app()
-        except Exception:
+        except Exception as exc:
             self._state = LifecycleState.FAILED
+            for err in await self._unwind():
+                exc.add_note(f"during rollback: {err!r}")
             raise
         self._state = LifecycleState.STARTED
 
     async def stop(self) -> None:
-        """``STARTED -> STOPPED``: run ``@on_stop`` in reverse topological order.
+        """Reclaim everything that was started, in reverse order.
 
-        按逆拓扑序执行 ``@on_stop``。
+        按台账逆序执行 ``@on_stop``。它是**唯一的回收路径**，同时承接正常结束与失败
+        结束：从 ``STARTED`` 可调，从 ``FAILED`` 也可调，重复调用是幂等的。
+
+        单个 ``@on_stop`` 抛出不会中断回收——异常被逐一收集，其余单元照常回收，
+        最后合并成一个 :exc:`ExceptionGroup` 抛出（哪怕只有一个）。
         """
-        self._require(LifecycleState.STARTED)
+        if self._state in _TRANSIENT:
+            raise LifecycleError(f"Canary: stop() is illegal while {self._state.name}")
+        if not self._started:
+            # 没起来过、或已经收干净了：空转，但不抹掉先前的失败。
+            if self._state is not LifecycleState.FAILED:
+                self._state = LifecycleState.STOPPED
+            return
         self._state = LifecycleState.STOPPING
-        try:
-            for t in reversed(self._order):
-                for hook in stop_hooks(self._graph[t]):
-                    await self._invoke_hook(hook)
-        except Exception:
+        errors = await self._unwind()
+        if errors:
             self._state = LifecycleState.FAILED
-            raise
+            raise ExceptionGroup(f"Canary: {len(errors)} error(s) while stopping", errors)
         self._state = LifecycleState.STOPPED
 
     # -- ASGI ---------------------------------------------------------
@@ -164,11 +188,13 @@ class Canary:
                     await self._ensure_started()
                     await send({"type": "lifespan.startup.complete"})
                 except Exception as exc:
+                    # 启动失败即宣告 lifespan 结束：服务器不会再发 shutdown，
+                    # 继续 await receive() 会让调用方（如 TestClient）一直挂着。
                     await send({"type": "lifespan.startup.failed", "message": str(exc)})
+                    return
             elif message["type"] == "lifespan.shutdown":
                 try:
-                    if self.state is LifecycleState.STARTED:
-                        await self.stop()
+                    await self.stop()
                 finally:
                     await send({"type": "lifespan.shutdown.complete"})
                 return
@@ -236,6 +262,23 @@ class Canary:
         """
         for dep in deps_of(type(node)):
             setattr(node, to_snake(dep.__name__), self._graph[dep])
+
+    async def _unwind(self) -> list[Exception]:
+        """Drain the ledger in reverse, running every ``@on_stop``, collecting failures.
+
+        逆序消费台账并执行 ``@on_stop``，不因单个失败中断；返回收集到的异常。
+        无论成败，台账都会被清空——回收只做一次。
+        """
+        errors: list[Exception] = []
+        while self._started:
+            t = self._started.pop()
+            for hook in stop_hooks(self._graph[t]):
+                try:
+                    await self._invoke_hook(hook)
+                except Exception as exc:
+                    exc.add_note(f"raised by {t.__name__}.{getattr(hook, '__name__', '<hook>')}")
+                    errors.append(exc)
+        return errors
 
     def _require(self, expected: LifecycleState) -> None:
         if self._state is not expected:

@@ -197,7 +197,7 @@ async def test_illegal_transition_raises() -> None:
 
     canary = Canary(Service)
     with pytest.raises(LifecycleError):
-        await canary.stop()  # 不能从未启动直接停止
+        await canary.start()  # 不能跳过 init 直接启动
 
     await canary.init()
     with pytest.raises(LifecycleError):
