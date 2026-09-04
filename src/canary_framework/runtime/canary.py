@@ -82,12 +82,14 @@ class Canary:
         # 依赖替身：类型 -> 现成实例。测试里把仓储/模型换成假的，无需在业务代码里
         # 留配置开关。见 :func:`~canary_framework.runtime.graph.build_graph`。
         self._overrides: Mapping[type, object] = overrides or {}
-        # 配置实例按类型共享：同一份配置类被多个单元声明时只构造一次。
-        self._configs: dict[type, object] = {}
         self._state = LifecycleState.NEW
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
         self._serve_app: Any | None = None
+        # 配置实例按类型共享：同一份配置类被多个单元声明时只构造一次。
+        self._configs: dict[type, object] = {}
+        self._route_entries: list[_RouteEntry] = []
+        self._error_entries: list[_ErrorEntry] = []
         # 已进入 ``@on_start`` 的单元，按进入顺序；回收时逆序消费。
         # 记录的是“进入”而非“完成”——启动到一半失败的单元同样要被回收。
         self._started: list[type] = []
@@ -167,6 +169,12 @@ class Canary:
                 exc.add_note(f"during rollback: {err!r}")
             raise
         self._state = LifecycleState.STARTED
+        if _log.isEnabledFor(logging.DEBUG):
+            # 诊断绝不能反过来弄坏应用：摘要出问题就只报摘要出了问题。
+            try:
+                _log.debug("%s", self._assembly_summary())
+            except Exception:  # pragma: no cover - 仅防御
+                _log.debug("assembly summary unavailable", exc_info=True)
 
     async def stop(self) -> None:
         """Reclaim everything that was started, in reverse order.
@@ -264,6 +272,8 @@ class Canary:
                 )
             meta = meta or getattr(cls, WEB_ATTR, {})
 
+        self._route_entries = all_entries
+        self._error_entries = all_error_entries
         if not all_entries:
             return None
         from canary_framework.web.core.app import build_serve_app
@@ -320,6 +330,14 @@ class Canary:
         for name, (_claimant, value) in plan.items():
             setattr(node, name, value)
 
+    def _require_overrides_applied(self) -> None:
+        """Every override must have replaced something; a typo must not pass silently."""
+        unused = [
+            t.__name__ for t in self._overrides if t not in self._graph and t not in self._configs
+        ]
+        if unused:
+            raise OverrideError(unused)
+
     def _config_for(self, config_type: type) -> object:
         """Return the shared instance of *config_type*, honouring ``overrides``.
 
@@ -332,13 +350,38 @@ class Canary:
                 self._configs[config_type] = config_type()
         return self._configs[config_type]
 
-    def _require_overrides_applied(self) -> None:
-        """Every override must have replaced something; a typo must not pass silently."""
-        unused = [
-            t.__name__ for t in self._overrides if t not in self._graph and t not in self._configs
-        ]
-        if unused:
-            raise OverrideError(unused)
+    def _assembly_summary(self) -> str:
+        """Render what the runtime actually assembled — the graph knows, so it should say.
+
+        装配摘要：框架掌握着全部事实（顺序、依赖、替身、挂载、路由、异常映射），
+        却一直零输出。这里在 DEBUG 级别一次性说清楚，排查"为什么这条路由不在"
+        或"为什么这个单元先启动"时不必再去读框架源码。
+        """
+        lines = [f"Canary assembled {len(self._order)} unit(s)"]
+        lines.append("  roots: " + ", ".join(r.__name__ for r in self.roots))
+        if len(self.roots) > 1:
+            lines.append(
+                "  note: with multiple roots no unit starts last, so there is no "
+                "'after everything started' position; declare one composition root if you need it"
+            )
+        lines.append("  start order (stop runs in reverse):")
+        for i, t in enumerate(self._order, 1):
+            # 用实例的类型而非声明类型取依赖——替身没有依赖，展示要和实际注入一致。
+            deps = ", ".join(d.__name__ for d in deps_of(type(self._graph[t])))
+            substituted = " [overridden]" if t in self._overrides else ""
+            lines.append(f"    {i}. {t.__name__}{substituted}" + (f"  <- {deps}" if deps else ""))
+        if self._route_entries:
+            lines.append("  routes:")
+            for method, path, instance, fn in self._route_entries:
+                lines.append(
+                    f"    {method:<6} {path}  -> {type(instance).__name__}."
+                    f"{getattr(fn, '__name__', fn)}"
+                )
+        if self._error_entries:
+            lines.append("  error handlers:")
+            for exc_type, fn in self._error_entries:
+                lines.append(f"    {exc_type.__name__} -> {getattr(fn, '__qualname__', fn)}")
+        return "\n".join(lines)
 
     async def _unwind(self) -> list[Exception]:
         """Drain the ledger in reverse, running every ``@on_stop``, collecting failures.
