@@ -30,3 +30,17 @@ class LifecycleError(CanaryError):
 
     生命周期非法跳转时抛出（例如未初始化就 ``stop``）。
     """
+
+
+class OverrideError(CanaryError):
+    """Raised when a substitution passed to ``Canary(overrides=...)`` never applies.
+
+    ``overrides`` 里的某个类型不在依赖图上时抛出。沉默地忽略一个写错的替身，会让
+    测试"通过"却根本没替换成功——这类错误必须响。
+    """
+
+    def __init__(self, unused: list[str]) -> None:
+        self.unused = unused
+        super().__init__(
+            "overrides never applied (not reachable from the roots): " + ", ".join(unused)
+        )

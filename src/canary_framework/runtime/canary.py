@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import inspect
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Self, TypeVar, cast
 
-from canary_framework.common.error import LifecycleError
+from canary_framework.common.error import LifecycleError, OverrideError
 from canary_framework.common.markers import ERROR_ENTRIES_ATTR, ROUTE_ENTRIES_ATTR, WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
@@ -57,11 +57,14 @@ class Canary:
     自身就是 ASGI 应用，可直接 ``uvicorn app:app``。
     """
 
-    def __init__(self, *roots: type) -> None:
+    def __init__(self, *roots: type, overrides: Mapping[type, object] | None = None) -> None:
         for root in roots:
             if not is_cocoa(root):
                 raise TypeError(f"'{root.__name__}' is not decorated with @cocoa")
         self.roots = roots
+        # 依赖替身：类型 -> 现成实例。测试里把仓储/模型换成假的，无需在业务代码里
+        # 留配置开关。见 :func:`~canary_framework.runtime.graph.build_graph`。
+        self._overrides: Mapping[type, object] = overrides or {}
         self._state = LifecycleState.NEW
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
@@ -107,7 +110,7 @@ class Canary:
         self._require(LifecycleState.NEW)
         self._state = LifecycleState.INITIALIZING
         try:
-            self._graph = build_graph(list(self.roots))
+            self._graph = build_graph(list(self.roots), self._overrides)
             self._order = topological_sort(self._graph)
             for t in self._order:
                 for hook in init_hooks(self._graph[t]):
@@ -136,6 +139,7 @@ class Canary:
                 self._started.append(t)
                 for hook in start_hooks(node):
                     await self._invoke_hook(hook)
+            self._require_overrides_applied()
             self._serve_app = self._collect_serve_app()
         except Exception as exc:
             self._state = LifecycleState.FAILED
@@ -269,6 +273,12 @@ class Canary:
         """
         for dep in deps_of(type(node)):
             setattr(node, to_snake(dep.__name__), self._graph[dep])
+
+    def _require_overrides_applied(self) -> None:
+        """Every override must have replaced something; a typo must not pass silently."""
+        unused = [t.__name__ for t in self._overrides if t not in self._graph]
+        if unused:
+            raise OverrideError(unused)
 
     async def _unwind(self) -> list[Exception]:
         """Drain the ledger in reverse, running every ``@on_stop``, collecting failures.

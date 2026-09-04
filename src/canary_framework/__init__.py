@@ -22,7 +22,12 @@ from __future__ import annotations
 
 __version__ = "0.9.2"
 
-from canary_framework.common.error import CanaryError, CircularDependencyError, LifecycleError
+from canary_framework.common.error import (
+    CanaryError,
+    CircularDependencyError,
+    LifecycleError,
+    OverrideError,
+)
 from canary_framework.common.type import LifecycleState
 from canary_framework.core.decorator import cocoa, on_init, on_start, on_stop
 from canary_framework.runtime import Canary
@@ -33,6 +38,7 @@ __all__ = [
     "CircularDependencyError",
     "LifecycleError",
     "LifecycleState",
+    "OverrideError",
     "cocoa",
     "on_init",
     "on_start",
