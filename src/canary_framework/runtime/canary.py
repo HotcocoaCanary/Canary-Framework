@@ -11,14 +11,17 @@ http/websocket 等 scope 委托给所有 ``@web_cocoa`` 单元合并后的统一
 from __future__ import annotations
 
 import inspect
+import logging
 import types
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, Self, TypeVar, cast
 
-from canary_framework.common.error import LifecycleError, OverrideError
+from canary_framework.common.config import CanaryConfig, is_config
+from canary_framework.common.error import InjectionError, LifecycleError, OverrideError
 from canary_framework.common.markers import ERROR_ENTRIES_ATTR, ROUTE_ENTRIES_ATTR, WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
+    annotations_of,
     deps_of,
     init_hooks,
     is_cocoa,
@@ -28,6 +31,20 @@ from canary_framework.core.decorator.introspect import (
 from canary_framework.core.infra.naming import to_snake
 from canary_framework.runtime.graph import build_graph, topological_sort
 from canary_framework.runtime.mounts import join_path, mount_prefixes
+
+_log = logging.getLogger("canary.runtime")
+
+
+def _apply_framework_config() -> None:
+    """Apply ``CANARY_*`` settings — currently just the level of the ``canary`` logger tree.
+
+    只动 ``canary`` 这一棵 logger 的级别：不装 handler、不设 format、不碰 root。
+    未设置 ``CANARY_LOG_LEVEL`` 时框架完全不干预，行为与标准库一致。
+    """
+    level = CanaryConfig().log_level
+    if level:
+        logging.getLogger("canary").setLevel(level.upper())
+
 
 _T = TypeVar("_T")
 
@@ -65,6 +82,8 @@ class Canary:
         # 依赖替身：类型 -> 现成实例。测试里把仓储/模型换成假的，无需在业务代码里
         # 留配置开关。见 :func:`~canary_framework.runtime.graph.build_graph`。
         self._overrides: Mapping[type, object] = overrides or {}
+        # 配置实例按类型共享：同一份配置类被多个单元声明时只构造一次。
+        self._configs: dict[type, object] = {}
         self._state = LifecycleState.NEW
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
@@ -110,6 +129,7 @@ class Canary:
         self._require(LifecycleState.NEW)
         self._state = LifecycleState.INITIALIZING
         try:
+            _apply_framework_config()
             self._graph = build_graph(list(self.roots), self._overrides)
             self._order = topological_sort(self._graph)
             for t in self._order:
@@ -267,16 +287,56 @@ class Canary:
 
     # -- internals ----------------------------------------------------
     def _inject(self, node: object) -> None:
-        """Inject each declared dependency into *node* by snake_case attribute.
+        """Fill a unit's declared collaborators: dependencies, its logger, its config.
 
-        按依赖类名的 snake_case 注入属性（``Database`` → ``node.database``）。
+        三个来源，同一条规则——**声明什么就填什么**：
+
+        - ``@cocoa(deps=[Database])`` → ``node.database``（类名的 snake_case）；
+        - 类级注解 ``log: Logger`` → 以 ``模块.类名`` 命名的 logger；
+        - 类级注解 ``config: RepoConfig`` → 该配置类的共享实例。
+
+        两个来源抢同一个属性名时抛 :class:`InjectionError`，不再"后写的赢"。
         """
-        for dep in deps_of(type(node)):
-            setattr(node, to_snake(dep.__name__), self._graph[dep])
+        cls = type(node)
+        plan: dict[str, tuple[str, object]] = {}
+
+        def claim(name: str, claimant: str, value: object) -> None:
+            if name in plan:
+                raise InjectionError(cls.__name__, name, [plan[name][0], claimant])
+            plan[name] = (claimant, value)
+
+        for dep in deps_of(cls):
+            claim(to_snake(dep.__name__), f"dependency {dep.__name__}", self._graph[dep])
+        for name, annotation in annotations_of(cls).items():
+            if annotation is logging.Logger:
+                claim(
+                    name,
+                    "annotation Logger",
+                    logging.getLogger(f"{cls.__module__}.{cls.__qualname__}"),
+                )
+            elif is_config(annotation):
+                claim(name, f"annotation {annotation.__name__}", self._config_for(annotation))
+
+        for name, (_claimant, value) in plan.items():
+            setattr(node, name, value)
+
+    def _config_for(self, config_type: type) -> object:
+        """Return the shared instance of *config_type*, honouring ``overrides``.
+
+        配置实例走和依赖单元同一套替换机制：``overrides={RepoConfig: RepoConfig(...)}``。
+        """
+        if config_type not in self._configs:
+            if config_type in self._overrides:
+                self._configs[config_type] = self._overrides[config_type]
+            else:
+                self._configs[config_type] = config_type()
+        return self._configs[config_type]
 
     def _require_overrides_applied(self) -> None:
         """Every override must have replaced something; a typo must not pass silently."""
-        unused = [t.__name__ for t in self._overrides if t not in self._graph]
+        unused = [
+            t.__name__ for t in self._overrides if t not in self._graph and t not in self._configs
+        ]
         if unused:
             raise OverrideError(unused)
 

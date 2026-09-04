@@ -32,6 +32,23 @@ class LifecycleError(CanaryError):
     """
 
 
+class InjectionError(CanaryError):
+    """Raised when two things claim the same attribute name on one unit.
+
+    两个来源抢同一个属性名时抛出（例如 ``KBFileRepository`` 与 ``KbFileRepository``
+    的 snake_case 同名，或依赖名撞上配置/日志的注解名）。旧版是"后写的赢"，
+    静默覆盖掉一个依赖——这类错误必须响。
+    """
+
+    def __init__(self, unit: str, attribute: str, claimants: list[str]) -> None:
+        self.unit = unit
+        self.attribute = attribute
+        self.claimants = claimants
+        super().__init__(
+            f"{unit}.{attribute} is claimed by more than one source: " + ", ".join(claimants)
+        )
+
+
 class OverrideError(CanaryError):
     """Raised when a substitution passed to ``Canary(overrides=...)`` never applies.
 
