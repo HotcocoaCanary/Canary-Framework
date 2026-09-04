@@ -15,7 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from canary_framework.web.decorator.resolve import hints_of, location_of, resolve_meta
-from canary_framework.web.error.web import MissingParameterError
+from canary_framework.web.error.web import MissingParameterError, RequestValidationError
 from canary_framework.web.infra.naming import header_name
 
 _EMPTY = inspect.Parameter.empty
@@ -24,14 +24,14 @@ _EMPTY = inspect.Parameter.empty
 async def dispatch(instance: object, fn: Callable[..., object], request: Request) -> Response:
     """Solve *fn*'s parameters from *request*, invoke it, and return a JSON response.
 
-    绑定失败（缺参 / 校验失败）映射为 422；handler 抛出的其它异常继续向上传播，
-    由上层（如 uvicorn / TestClient）处理。
+    绑定失败（缺参 / 校验失败）抛出 :class:`RequestValidationError`；它和 handler 抛出的
+    其它异常一样，交给统一的异常映射处理——422 因此也是可被使用者覆盖的。
     """
     hints = hints_of(fn)
     try:
         kwargs = await _solve(fn, request, hints)
     except (ValidationError, MissingParameterError) as exc:
-        return JSONResponse({"detail": _detail(exc)}, status_code=422)
+        raise RequestValidationError(exc) from exc
     # handler 必为 async（由 @get/@post 在装配期把关），这里没有第二条同步路径。
     result = await cast(Awaitable[Any], fn(**kwargs))
     return _to_response(result, hints.get("return", _EMPTY))
@@ -116,9 +116,3 @@ def _to_response(result: Any, return_ann: Any) -> Response:
     if return_ann is _EMPTY or return_ann is Any or return_ann is type(None):
         return JSONResponse(result)
     return JSONResponse(TypeAdapter(return_ann).dump_python(result, mode="json"))
-
-
-def _detail(exc: ValidationError | MissingParameterError) -> Any:
-    if isinstance(exc, ValidationError):
-        return exc.errors(include_url=False)
-    return str(exc)

@@ -10,10 +10,13 @@ web 扩展：基于 Starlette + Pydantic，把 ``@cocoa`` 服务暴露为 ASGI �
 from __future__ import annotations
 
 from canary_framework.web.core.extension import web_cocoa
+from canary_framework.web.decorator.errors import on_request_error
 from canary_framework.web.decorator.params import Body, Cookie, Header, Path, Query
 from canary_framework.web.decorator.routes import delete, get, patch, post, put, route
 from canary_framework.web.error.web import (
+    HTTPError,
     MissingParameterError,
+    RequestValidationError,
     RouteRegistrationError,
     WebError,
 )
@@ -21,14 +24,17 @@ from canary_framework.web.error.web import (
 __all__ = [
     "Body",
     "Cookie",
+    "HTTPError",
     "Header",
     "MissingParameterError",
     "Path",
     "Query",
+    "RequestValidationError",
     "RouteRegistrationError",
     "WebError",
     "delete",
     "get",
+    "on_request_error",
     "patch",
     "post",
     "put",

@@ -10,9 +10,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TypeVar, overload
 
-from canary_framework.common.markers import ROUTE_ENTRIES_ATTR, WEB_ATTR
+from canary_framework.common.markers import ERROR_ENTRIES_ATTR, ROUTE_ENTRIES_ATTR, WEB_ATTR
 from canary_framework.core.decorator import cocoa, on_start
-from canary_framework.web.core.app import _DEFAULT_TITLE, _DEFAULT_VERSION, collect_routes
+from canary_framework.web.core.app import (
+    _DEFAULT_TITLE,
+    _DEFAULT_VERSION,
+    collect_error_handlers,
+    collect_routes,
+)
 
 _T = TypeVar("_T")
 
@@ -67,9 +72,10 @@ def web_cocoa[T](
             {"title": title, "version": version, "prefix": prefix},
         )
 
-        @on_start  # 注入启动钩子：收集路由条目，供 Canary 合并
+        @on_start  # 注入启动钩子：收集路由条目与异常映射，供 Canary 合并
         async def _canary_collect_routes(self: object) -> None:
             setattr(self, ROUTE_ENTRIES_ATTR, collect_routes(self))
+            setattr(self, ERROR_ENTRIES_ATTR, collect_error_handlers(self))
 
         setattr(c, _HOOK_NAME, _canary_collect_routes)
         return c

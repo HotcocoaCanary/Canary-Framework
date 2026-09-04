@@ -16,7 +16,7 @@ from collections.abc import Callable
 from typing import Any, Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import LifecycleError
-from canary_framework.common.markers import ROUTE_ENTRIES_ATTR, WEB_ATTR
+from canary_framework.common.markers import ERROR_ENTRIES_ATTR, ROUTE_ENTRIES_ATTR, WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
     deps_of,
@@ -37,6 +37,9 @@ _Hook = Callable[[], object]
 
 # 路由条目：(method, path, instance, handler)
 _RouteEntry = tuple[str, str, object, Callable[..., object]]
+
+# 异常映射条目：(exception type, handler)
+_ErrorEntry = tuple[type[Exception], Callable[..., object]]
 
 # 进行中的状态：只可能被并发调用者观察到，此时再驱动生命周期一定是误用。
 _TRANSIENT = (
@@ -220,11 +223,15 @@ class Canary:
         因此无需安装 ``canary-framework[web]``。
         """
         all_entries: list[_RouteEntry] = []
+        all_error_entries: list[_ErrorEntry] = []
         meta: dict[str, str] = {}  # 文档元数据取最外层单元的
 
         # mount_prefixes 按“根在前”的顺序返回，故最外层单元的 title/version 胜出
         for cls, prefixes in mount_prefixes(self.roots, self._graph).items():
-            entries: list[_RouteEntry] | None = getattr(self._graph[cls], ROUTE_ENTRIES_ATTR, None)
+            node = self._graph[cls]
+            # 异常映射的作用域是全应用，与挂载点无关，因此每个单元只收一次。
+            all_error_entries.extend(getattr(node, ERROR_ENTRIES_ATTR, None) or [])
+            entries: list[_RouteEntry] | None = getattr(node, ROUTE_ENTRIES_ATTR, None)
             if entries is None:
                 continue
             for prefix in prefixes:
@@ -237,7 +244,7 @@ class Canary:
             return None
         from canary_framework.web.core.app import build_serve_app
 
-        return build_serve_app(meta, all_entries)
+        return build_serve_app(meta, all_entries, all_error_entries)
 
     # -- context manager ----------------------------------------------
     async def __aenter__(self) -> Self:
