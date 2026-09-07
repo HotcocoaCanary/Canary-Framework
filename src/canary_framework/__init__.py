@@ -27,7 +27,7 @@ from canary_framework.common.error import (
     CircularDependencyError,
     InjectionError,
     LifecycleError,
-    OverrideError,
+    ProvisionError,
 )
 from canary_framework.common.type import LifecycleState
 from canary_framework.core.decorator import cocoa, on_init, on_start, on_stop
@@ -40,7 +40,7 @@ __all__ = [
     "InjectionError",
     "LifecycleError",
     "LifecycleState",
-    "OverrideError",
+    "ProvisionError",
     "cocoa",
     "on_init",
     "on_start",

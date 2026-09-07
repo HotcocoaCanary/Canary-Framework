@@ -1,13 +1,14 @@
-"""Integration — substituting units at assembly time.
+"""Integration — handing the runtime a ready-made instance for a node.
 
-依赖替换：测试里把仓储 / 模型换成替身，业务代码里不留配置开关。
+``provide`` 的两种用途共用同一个入口：生产接线（这个节点需要构造参数，我造好了）
+与测试替换（用假的顶掉真的）。
 """
 
 from __future__ import annotations
 
 import pytest
 
-from canary_framework import Canary, OverrideError, cocoa, on_start
+from canary_framework import Canary, ProvisionError, cocoa, on_start
 
 pytestmark = pytest.mark.integration
 
@@ -32,12 +33,12 @@ class Service:
         return await self.repository.find(book_id)
 
 
-async def test_override_replaces_a_unit_and_skips_its_dependencies() -> None:
+async def test_a_provided_instance_replaces_a_unit_and_skips_its_dependencies() -> None:
     class FakeRepository:
         async def find(self, book_id: int) -> str:
             return f"fake-{book_id}"
 
-    canary = Canary(Service, overrides={Repository: FakeRepository()})
+    canary = Canary(Service, provide={Repository: FakeRepository()})
     async with canary:
         assert await canary[Service].title_of(7) == "fake-7"
 
@@ -56,20 +57,20 @@ async def test_substitute_lifecycle_hooks_still_run() -> None:
         async def find(self, book_id: int) -> str:
             return "fake"
 
-    async with Canary(Service, overrides={Repository: FakeRepository()}):
+    async with Canary(Service, provide={Repository: FakeRepository()}):
         pass
 
     assert log == ["fake.start"]
 
 
-async def test_an_override_that_never_applies_is_an_error() -> None:
+async def test_a_provided_type_that_never_applies_is_an_error() -> None:
     """写错类型时静默忽略，会让测试「通过」却根本没替换成功。"""
 
     @cocoa
     class Lonely:
         pass
 
-    canary = Canary(Lonely, overrides={Repository: object()})
+    canary = Canary(Lonely, provide={Repository: object()})
     await canary.init()
-    with pytest.raises(OverrideError, match="Repository"):
+    with pytest.raises(ProvisionError, match="Repository"):
         await canary.start()

@@ -17,7 +17,7 @@ import types
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, Self, TypeVar, cast
 
-from canary_framework.common.error import InjectionError, LifecycleError, OverrideError
+from canary_framework.common.error import InjectionError, LifecycleError, ProvisionError
 from canary_framework.common.markers import ERROR_ENTRIES_ATTR, ROUTE_ENTRIES_ATTR, WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
@@ -73,14 +73,14 @@ class Canary:
     自身就是 ASGI 应用，可直接 ``uvicorn app:app``。
     """
 
-    def __init__(self, *roots: type, overrides: Mapping[type, object] | None = None) -> None:
+    def __init__(self, *roots: type, provide: Mapping[type, object] | None = None) -> None:
         for root in roots:
             if not is_cocoa(root):
                 raise TypeError(f"'{root.__name__}' is not decorated with @cocoa")
         self.roots = roots
-        # 依赖替身：类型 -> 现成实例。测试里把仓储/模型换成假的，无需在业务代码里
-        # 留配置开关。见 :func:`~canary_framework.runtime.graph.build_graph`。
-        self._overrides: Mapping[type, object] = overrides or {}
+        # 现成实例：类型 -> 实例。生产接线（需要构造参数的节点）与测试替换共用它。
+        # 见 :func:`~canary_framework.runtime.graph.build_graph`。
+        self._provided: Mapping[type, object] = provide or {}
         self._state = LifecycleState.NEW
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
@@ -133,7 +133,7 @@ class Canary:
         self._state = LifecycleState.INITIALIZING
         try:
             _apply_framework_config()
-            self._graph = build_graph(list(self.roots), self._overrides)
+            self._graph = build_graph(list(self.roots), self._provided)
             self._order = topological_sort(self._graph)
             for t in self._order:
                 node = self._graph[t]
@@ -163,7 +163,7 @@ class Canary:
                 self._started.append(t)
                 for hook in start_hooks(node):
                     await self._invoke_hook(hook)
-            self._require_overrides_applied()
+            self._require_everything_provided_was_used()
             self._serve_app = self._collect_serve_app()
         except Exception as exc:
             self._state = LifecycleState.FAILED
@@ -314,11 +314,11 @@ class Canary:
         for name, (_declared_by, value) in plan.items():
             setattr(node, name, value)
 
-    def _require_overrides_applied(self) -> None:
-        """Every override must have replaced something; a typo must not pass silently."""
-        unused = [t.__name__ for t in self._overrides if t not in self._graph]
+    def _require_everything_provided_was_used(self) -> None:
+        """Every provided type must be on the graph; a typo must not pass silently."""
+        unused = [t.__name__ for t in self._provided if t not in self._graph]
         if unused:
-            raise OverrideError(unused)
+            raise ProvisionError(unused)
 
     def _assembly_summary(self) -> str:
         """Render what the runtime actually assembled — the graph knows, so it should say.
@@ -338,7 +338,7 @@ class Canary:
         for i, t in enumerate(self._order, 1):
             # 用实例的类型而非声明类型取依赖——替身没有依赖，展示要和实际注入一致。
             deps = ", ".join(d.__name__ for d in deps_of(type(self._graph[t])))
-            substituted = " [overridden]" if t in self._overrides else ""
+            substituted = " [provided]" if t in self._provided else ""
             lines.append(f"    {i}. {t.__name__}{substituted}" + (f"  <- {deps}" if deps else ""))
         if self._route_entries:
             lines.append("  routes:")

@@ -49,15 +49,15 @@ class InjectionError(CanaryError):
         )
 
 
-class OverrideError(CanaryError):
-    """Raised when a substitution passed to ``Canary(overrides=...)`` never applies.
+class ProvisionError(CanaryError):
+    """Raised when an entry passed to ``Canary(provide=...)`` never applies.
 
-    ``overrides`` 里的某个类型不在依赖图上时抛出。沉默地忽略一个写错的替身，会让
-    测试"通过"却根本没替换成功——这类错误必须响。
+    ``provide`` 里的某个类型不在依赖图上时抛出。沉默地忽略一个写错的类型，会让测试
+    "通过"却根本没替换成功，也会让生产接线以为自己接上了——这类错误必须响。
     """
 
     def __init__(self, unused: list[str]) -> None:
         self.unused = unused
         super().__init__(
-            "overrides never applied (not reachable from the roots): " + ", ".join(unused)
+            "provided types never applied (not reachable from the roots): " + ", ".join(unused)
         )
