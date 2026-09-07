@@ -60,21 +60,25 @@ async def test_hooks_run_in_topological_order() -> None:
     assert calls == ["A.init", "A.start", "B.start", "A.stop"]
 
 
-async def test_dependency_injection_is_lazy() -> None:
+async def test_dependencies_are_injected_during_init() -> None:
+    """注入属于装配：``init()`` 结束时单元已接好线，``@on_init`` 因此能用依赖。"""
+    seen: list[object] = []
+
     @cocoa
     class Dep:
         pass
 
     @cocoa(deps=[Dep])
     class Service:
-        pass
+        @on_init
+        def check(self) -> None:
+            seen.append(self.dep)
 
     canary = Canary(Service)
     await canary.init()
-    assert not hasattr(canary[Service], "dep")  # 未注入
 
-    await canary.start()
-    assert isinstance(canary[Service].dep, Dep)  # start 阶段注入
+    assert isinstance(canary[Service].dep, Dep)
+    assert seen == [canary[Dep]]  # @on_init 看得到依赖，且拿到的是图上的那个实例
 
 
 async def test_singleton_is_shared_across_the_graph() -> None:

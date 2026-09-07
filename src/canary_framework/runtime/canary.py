@@ -121,9 +121,13 @@ class Canary:
 
     # -- lifecycle ----------------------------------------------------
     async def init(self) -> None:
-        """``NEW -> INITIALIZED``: build the graph and run ``@on_init`` in order.
+        """``NEW -> INITIALIZED``: build the graph, inject, and run ``@on_init`` in order.
 
-        建图 + 拓扑排序，按序执行 ``@on_init``。
+        建图 + 拓扑排序，按拓扑序**注入依赖**并执行 ``@on_init``。注入属于装配而非启动，
+        所以放在这里：``@on_init`` 因此能看到自己的依赖，装配类错误（撞名、缺依赖）也
+        在装配阶段就暴露，不必等到 ``start()``。
+
+        失败时不回滚——此时还没有任何 ``@on_start`` 跑过，也就没有资源需要回收。
         """
         self._require(LifecycleState.NEW)
         self._state = LifecycleState.INITIALIZING
@@ -132,7 +136,9 @@ class Canary:
             self._graph = build_graph(list(self.roots), self._overrides)
             self._order = topological_sort(self._graph)
             for t in self._order:
-                for hook in init_hooks(self._graph[t]):
+                node = self._graph[t]
+                self._inject(node)
+                for hook in init_hooks(node):
                     await self._invoke_hook(hook)
         except Exception:
             self._state = LifecycleState.FAILED
@@ -142,8 +148,8 @@ class Canary:
     async def start(self) -> None:
         """``INITIALIZED -> STARTED``: inject deps, run ``@on_start``, collect serve app.
 
-        注入依赖（懒注入），按序执行 ``@on_start``，随后收集所有 ``@web_cocoa``
-        单元的路由并合并为统一的服务入口。
+        按拓扑序执行 ``@on_start``（依赖已在 ``init()`` 注入完毕），随后收集所有
+        ``@web_cocoa`` 单元的路由并合并为统一的服务入口。
 
         不变式：**要么全部启动，要么什么都没启动。** 任一环节抛出时，已进入
         ``@on_start`` 的单元（含失败的那一个）会按逆序执行 ``@on_stop`` 回收，
@@ -154,7 +160,6 @@ class Canary:
         try:
             for t in self._order:
                 node = self._graph[t]
-                self._inject(node)
                 self._started.append(t)
                 for hook in start_hooks(node):
                     await self._invoke_hook(hook)
