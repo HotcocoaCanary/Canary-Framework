@@ -71,6 +71,5 @@ async def test_a_provided_type_that_never_applies_is_an_error() -> None:
         pass
 
     canary = Canary(Lonely, provide={Repository: object()})
-    await canary.init()
     with pytest.raises(ProvisionError, match="Repository"):
-        await canary.start()
+        await canary.init()  # 装配类的检查落在装配阶段

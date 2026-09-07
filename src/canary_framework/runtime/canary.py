@@ -126,6 +126,7 @@ class Canary:
         try:
             self._apply_framework_config()
             self._graph = build_graph(list(self.roots), self._provided)
+            self._require_everything_provided_was_used()
             self._order = topological_sort(self._graph)
             for t in self._order:
                 node = self._graph[t]
@@ -155,7 +156,6 @@ class Canary:
                 self._started.append(t)
                 for hook in start_hooks(node):
                     await self._invoke_hook(hook)
-            self._require_everything_provided_was_used()
             self._serve_app = self._collect_serve_app()
         except Exception as exc:
             self._state = LifecycleState.FAILED
@@ -356,7 +356,11 @@ class Canary:
         self._loop_probe = None
 
     def _require_everything_provided_was_used(self) -> None:
-        """Every provided type must be on the graph; a typo must not pass silently."""
+        """Every provided type must be on the graph; a typo must not pass silently.
+
+        紧跟在建图之后：``provide`` 的条目全部由 ``build_graph`` 消费，所以那一步结束
+        时就已经知道哪些没用上——装配类的检查都该落在装配阶段。
+        """
         unused = [t.__name__ for t in self._provided if t not in self._graph]
         if unused:
             raise ProvisionError(unused)
