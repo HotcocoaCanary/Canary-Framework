@@ -12,16 +12,15 @@ from __future__ import annotations
 
 import inspect
 import logging
+import os
 import types
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, Self, TypeVar, cast
 
-from canary_framework.common.config import CanaryConfig, is_config
 from canary_framework.common.error import InjectionError, LifecycleError, OverrideError
 from canary_framework.common.markers import ERROR_ENTRIES_ATTR, ROUTE_ENTRIES_ATTR, WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
-    annotations_of,
     deps_of,
     init_hooks,
     is_cocoa,
@@ -41,7 +40,7 @@ def _apply_framework_config() -> None:
     只动 ``canary`` 这一棵 logger 的级别：不装 handler、不设 format、不碰 root。
     未设置 ``CANARY_LOG_LEVEL`` 时框架完全不干预，行为与标准库一致。
     """
-    level = CanaryConfig().log_level
+    level = os.environ.get("CANARY_LOG_LEVEL")
     if level:
         logging.getLogger("canary").setLevel(level.upper())
 
@@ -86,8 +85,6 @@ class Canary:
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
         self._serve_app: Any | None = None
-        # 配置实例按类型共享：同一份配置类被多个单元声明时只构造一次。
-        self._configs: dict[type, object] = {}
         self._route_entries: list[_RouteEntry] = []
         self._error_entries: list[_ErrorEntry] = []
         # 已进入 ``@on_start`` 的单元，按进入顺序；回收时逆序消费。
@@ -297,58 +294,26 @@ class Canary:
 
     # -- internals ----------------------------------------------------
     def _inject(self, node: object) -> None:
-        """Fill a unit's declared collaborators: dependencies, its logger, its config.
+        """Inject each declared dependency by its snake_case attribute name.
 
-        三个来源，同一条规则——**声明什么就填什么**：
-
-        - ``@cocoa(deps=[Database])`` → ``node.database``（类名的 snake_case）；
-        - 类级注解 ``log: Logger`` → 以 ``模块.类名`` 命名的 logger；
-        - 类级注解 ``config: RepoConfig`` → 该配置类的共享实例。
-
-        两个来源抢同一个属性名时抛 :class:`InjectionError`，不再"后写的赢"。
+        按依赖类名的 snake_case 注入属性（``Database`` → ``node.database``）。
+        两个依赖的 snake_case 撞名时抛 :class:`InjectionError`，不再"后写的赢"。
         """
         cls = type(node)
         plan: dict[str, tuple[str, object]] = {}
-
-        def claim(name: str, claimant: str, value: object) -> None:
-            if name in plan:
-                raise InjectionError(cls.__name__, name, [plan[name][0], claimant])
-            plan[name] = (claimant, value)
-
         for dep in deps_of(cls):
-            claim(to_snake(dep.__name__), f"dependency {dep.__name__}", self._graph[dep])
-        for name, annotation in annotations_of(cls).items():
-            if annotation is logging.Logger:
-                claim(
-                    name,
-                    "annotation Logger",
-                    logging.getLogger(f"{cls.__module__}.{cls.__qualname__}"),
-                )
-            elif is_config(annotation):
-                claim(name, f"annotation {annotation.__name__}", self._config_for(annotation))
-
-        for name, (_claimant, value) in plan.items():
+            name = to_snake(dep.__name__)
+            if name in plan:
+                raise InjectionError(cls.__name__, name, [plan[name][0], dep.__name__])
+            plan[name] = (dep.__name__, self._graph[dep])
+        for name, (_declared_by, value) in plan.items():
             setattr(node, name, value)
 
     def _require_overrides_applied(self) -> None:
         """Every override must have replaced something; a typo must not pass silently."""
-        unused = [
-            t.__name__ for t in self._overrides if t not in self._graph and t not in self._configs
-        ]
+        unused = [t.__name__ for t in self._overrides if t not in self._graph]
         if unused:
             raise OverrideError(unused)
-
-    def _config_for(self, config_type: type) -> object:
-        """Return the shared instance of *config_type*, honouring ``overrides``.
-
-        配置实例走和依赖单元同一套替换机制：``overrides={RepoConfig: RepoConfig(...)}``。
-        """
-        if config_type not in self._configs:
-            if config_type in self._overrides:
-                self._configs[config_type] = self._overrides[config_type]
-            else:
-                self._configs[config_type] = config_type()
-        return self._configs[config_type]
 
     def _assembly_summary(self) -> str:
         """Render what the runtime actually assembled — the graph knows, so it should say.

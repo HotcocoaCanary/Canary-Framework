@@ -22,7 +22,6 @@ from __future__ import annotations
 
 __version__ = "0.9.3"
 
-from canary_framework.common.config import CanaryConfig, Config
 from canary_framework.common.error import (
     CanaryError,
     CircularDependencyError,
@@ -36,10 +35,8 @@ from canary_framework.runtime import Canary
 
 __all__ = [
     "Canary",
-    "CanaryConfig",
     "CanaryError",
     "CircularDependencyError",
-    "Config",
     "InjectionError",
     "LifecycleError",
     "LifecycleState",

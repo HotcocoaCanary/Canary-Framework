@@ -5,13 +5,10 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
-from typing import Any, cast, get_type_hints
+from typing import cast
 
 from canary_framework.common.markers import COCOA_ATTR, ON_INIT, ON_START, ON_STOP
-
-_log = logging.getLogger("canary.core.introspect")
 
 
 def is_cocoa(cls: type) -> bool:
@@ -28,22 +25,6 @@ def deps_of(cls: type) -> list[type]:
     返回 ``@cocoa(deps=[...])`` 声明的依赖列表。
     """
     return cast(list[type], list(getattr(cls, COCOA_ATTR, ())))
-
-
-def annotations_of(cls: type) -> dict[str, Any]:
-    """Return *cls*'s resolved class-level annotations (including inherited ones).
-
-    类级注解就是另一种标记：``log: Logger`` / ``config: RepoConfig`` 是单元在说
-    "我需要什么"，运行时据此填值。解析失败（前向引用指向不存在的名字等）时退化为
-    空表并记一条 WARNING——注解解析不该让应用起不来。
-    """
-    try:
-        return get_type_hints(cls)
-    except Exception:  # NameError / TypeError / 第三方注解的各种意外
-        _log.warning(
-            "cannot resolve annotations of %s; skipping annotation injection", cls.__name__
-        )
-        return {}
 
 
 def hooks_of(instance: object, marker: str) -> list[Callable[[], object]]:
