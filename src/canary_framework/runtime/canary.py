@@ -225,15 +225,20 @@ class Canary:
                     await self._ensure_started()
                     await send({"type": "lifespan.startup.complete"})
                 except Exception as exc:
-                    # 启动失败即宣告 lifespan 结束：服务器不会再发 shutdown，
-                    # 继续 await receive() 会让调用方（如 TestClient）一直挂着。
+                    # 先如实汇报，再把异常抛出去。只 return 会让 lifespan 任务正常结束，
+                    # 而完整实现了 lifespan 协议的调用方（Starlette 的 TestClient）靠
+                    # task.result() 传播失败——那样它会认为一个根本没启动的应用启动成功，
+                    # 并在关停时永久挂起。参照 Starlette 自己的 Router.lifespan：发完再抛。
                     await send({"type": "lifespan.startup.failed", "message": str(exc)})
-                    return
+                    raise
             elif message["type"] == "lifespan.shutdown":
                 try:
                     await self.stop()
-                finally:
-                    await send({"type": "lifespan.shutdown.complete"})
+                except Exception as exc:
+                    # 同理：关停失败要如实汇报再抛出，否则回收失败会被完全隐藏。
+                    await send({"type": "lifespan.shutdown.failed", "message": str(exc)})
+                    raise
+                await send({"type": "lifespan.shutdown.complete"})
                 return
 
     async def _ensure_started(self) -> None:
