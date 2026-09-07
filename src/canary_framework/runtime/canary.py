@@ -10,6 +10,7 @@ http/websocket 等 scope 委托给所有 ``@web_cocoa`` 单元合并后的统一
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import os
@@ -32,17 +33,6 @@ from canary_framework.runtime.graph import build_graph, topological_sort
 from canary_framework.runtime.mounts import join_path, mount_prefixes
 
 _log = logging.getLogger("canary.runtime")
-
-
-def _apply_framework_config() -> None:
-    """Apply ``CANARY_*`` settings — currently just the level of the ``canary`` logger tree.
-
-    只动 ``canary`` 这一棵 logger 的级别：不装 handler、不设 format、不碰 root。
-    未设置 ``CANARY_LOG_LEVEL`` 时框架完全不干预，行为与标准库一致。
-    """
-    level = os.environ.get("CANARY_LOG_LEVEL")
-    if level:
-        logging.getLogger("canary").setLevel(level.upper())
 
 
 _T = TypeVar("_T")
@@ -90,6 +80,8 @@ class Canary:
         # 已进入 ``@on_start`` 的单元，按进入顺序；回收时逆序消费。
         # 记录的是“进入”而非“完成”——启动到一半失败的单元同样要被回收。
         self._started: list[type] = []
+        # 事件循环探针改动前的旧值，停止时还原；未开启探针时为 None。
+        self._loop_probe: tuple[asyncio.AbstractEventLoop, bool, float] | None = None
 
     # -- read access --------------------------------------------------
     @property
@@ -132,7 +124,7 @@ class Canary:
         self._require(LifecycleState.NEW)
         self._state = LifecycleState.INITIALIZING
         try:
-            _apply_framework_config()
+            self._apply_framework_config()
             self._graph = build_graph(list(self.roots), self._provided)
             self._order = topological_sort(self._graph)
             for t in self._order:
@@ -189,6 +181,7 @@ class Canary:
         """
         if self._state in _TRANSIENT:
             raise LifecycleError(f"Canary: stop() is illegal while {self._state.name}")
+        self._restore_loop_probe()
         if not self._started:
             # 没起来过、或已经收干净了：空转，但不抹掉先前的失败。
             if self._state is not LifecycleState.FAILED:
@@ -318,6 +311,49 @@ class Canary:
             plan[name] = (dep.__name__, self._graph[dep])
         for name, (_declared_by, value) in plan.items():
             setattr(node, name, value)
+
+    def _apply_framework_config(self) -> None:
+        """Apply the ``CANARY_*`` settings. Read from the environment, nothing more.
+
+        框架自有的两个开关，直接读环境变量——框架不提供配置机制，也就不该为自己的
+        两个字段引进一个。
+
+        ``CANARY_LOG_LEVEL`` 只动 ``canary`` 这一棵 logger 的级别：不装 handler、
+        不设 format、不碰 root。未设置时框架完全不干预。
+
+        ``CANARY_SLOW_CALLBACK_SECONDS`` 打开事件循环延迟探针：任何一次占用事件循环
+        超过该秒数的回调都会被 asyncio 记一条 WARNING。拒绝同步 handler 是声明期检查、
+        只看得见签名；这条是运行期检查，抓的是实际发生的阻塞——``async def`` 的函数体
+        里调同步驱动同样会被抓到，两者互补。默认关闭：它会打开 asyncio 的调试模式，
+        有额外开销，属于开发期工具。
+        """
+        level = os.environ.get("CANARY_LOG_LEVEL")
+        if level:
+            logging.getLogger("canary").setLevel(level.upper())
+
+        raw = os.environ.get("CANARY_SLOW_CALLBACK_SECONDS")
+        if not raw:
+            return
+        try:
+            seconds = float(raw)
+        except ValueError as exc:
+            raise LifecycleError(
+                f"CANARY_SLOW_CALLBACK_SECONDS must be a number of seconds, got {raw!r}"
+            ) from exc
+        loop = asyncio.get_running_loop()
+        # 调试模式是整个事件循环的全局状态，停止时必须还原——否则一个开了探针的
+        # 应用会污染同进程后续所有代码。
+        self._loop_probe = (loop, loop.get_debug(), loop.slow_callback_duration)
+        loop.set_debug(True)
+        loop.slow_callback_duration = seconds
+
+    def _restore_loop_probe(self) -> None:
+        if self._loop_probe is None:
+            return
+        loop, debug, duration = self._loop_probe
+        loop.set_debug(debug)
+        loop.slow_callback_duration = duration
+        self._loop_probe = None
 
     def _require_everything_provided_was_used(self) -> None:
         """Every provided type must be on the graph; a typo must not pass silently."""
