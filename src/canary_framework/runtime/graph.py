@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
+import inspect
 from collections import defaultdict, deque
 from collections.abc import Mapping
 
-from canary_framework.common.error import CircularDependencyError
+from canary_framework.common.error import CircularDependencyError, ConstructionError
 from canary_framework.core.decorator.introspect import deps_of, is_cocoa
 
 
@@ -39,13 +40,31 @@ def build_graph(
             return
         if not is_cocoa(t):
             raise TypeError(f"'{t.__name__}' is not decorated with @cocoa")
-        graph[t] = t()
+        graph[t] = _construct(t)
         for dep in deps_of(t):
             visit(dep)
 
     for root in roots:
         visit(root)
     return graph
+
+
+def _construct(t: type) -> object:
+    """Instantiate *t* with no arguments, turning an arity mismatch into a real error.
+
+    先看签名再调用：签名对不上说明它需要构造参数，那是框架的一条硬约束，报
+    :class:`ConstructionError` 并给出两条出路；签名对得上就照常调用，构造器自己抛的
+    异常原样传播——那是使用者的代码出错，不该被框架的错误盖住。
+    """
+    try:
+        signature = inspect.signature(t)
+    except (TypeError, ValueError):  # 内建 / C 扩展类型拿不到签名，直接试
+        return t()
+    try:
+        signature.bind()
+    except TypeError as exc:
+        raise ConstructionError(t.__name__, str(exc)) from exc
+    return t()
 
 
 def topological_sort(graph: dict[type, object]) -> list[type]:

@@ -49,6 +49,23 @@ class InjectionError(CanaryError):
         )
 
 
+class ConstructionError(CanaryError):
+    """Raised when the runtime cannot construct a unit because it needs arguments.
+
+    单元由框架**无参构造**（``build_graph`` 里的 ``t()``），所以带必填参数的类不能
+    直接进图。这条约束一直存在，只是从前失败时抛的是构造器自己的 ``TypeError``，
+    既不指向这条规则、也兜不进 ``except CanaryError``。
+    """
+
+    def __init__(self, unit: str, detail: str) -> None:
+        self.unit = unit
+        super().__init__(
+            f"cannot construct {unit}: {detail}. Units are constructed with no arguments — "
+            f"either take the value from a dependency in @on_init/@on_start, or build it "
+            f"yourself and hand it over: Canary(root, provide={{{unit}: {unit}(...)}})."
+        )
+
+
 class ProvisionError(CanaryError):
     """Raised when an entry passed to ``Canary(provide=...)`` never applies.
 

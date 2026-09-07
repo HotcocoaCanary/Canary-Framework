@@ -25,6 +25,7 @@ __version__ = "0.9.3"
 from canary_framework.common.error import (
     CanaryError,
     CircularDependencyError,
+    ConstructionError,
     InjectionError,
     LifecycleError,
     ProvisionError,
@@ -37,6 +38,7 @@ __all__ = [
     "Canary",
     "CanaryError",
     "CircularDependencyError",
+    "ConstructionError",
     "InjectionError",
     "LifecycleError",
     "LifecycleState",
