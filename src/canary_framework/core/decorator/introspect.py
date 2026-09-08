@@ -83,6 +83,10 @@ def _scan(cls: type) -> dict[str, list[tuple[Any, type, Callable[..., object]]]]
     found: dict[str, list[tuple[Any, type, Callable[..., object]]]] = {}
     seen: dict[str, set[Callable[..., object]]] = {}
     for owner in reversed(cls.__mro__):
+        if owner is object:
+            # object 有二十多个可调用成员，一个都不可能带我们的标记。不跳过的话，光它
+            # 一个类就要做上百次 getattr——而每个类的 MRO 末端都是它。
+            continue
         for raw in owner.__dict__.values():
             if not callable(raw):
                 continue

@@ -72,3 +72,30 @@ async def test_an_error_inside_a_constructor_is_not_disguised() -> None:
 
     with pytest.raises(RuntimeError, match="boom"):
         await Canary(Explodes).init()
+
+
+async def test_a_type_error_from_inside_the_constructor_is_not_relabelled() -> None:
+    """签名对得上时构造器自己抛的 TypeError 必须原样传播。
+
+    这条是 _construct 的顺序（先构造、出错再回头看签名）的保险：两种 TypeError 长得一样，
+    只能靠签名分辨——签名压根对不上才是框架的约束，其余都是使用者的代码。
+    """
+
+    @cocoa
+    class Explodes:
+        def __init__(self) -> None:
+            raise TypeError("raised by my own body")
+
+    with pytest.raises(TypeError, match="raised by my own body") as caught:
+        await Canary(Explodes).init()
+    assert not isinstance(caught.value, ConstructionError)
+
+
+async def test_default_and_variadic_arguments_construct_fine() -> None:
+    @cocoa
+    class Flexible:
+        def __init__(self, *args: object, dsn: str = "sqlite://", **kwargs: object) -> None:
+            self.dsn = dsn
+
+    async with Canary(Flexible) as app:
+        assert app[Flexible].dsn == "sqlite://"
