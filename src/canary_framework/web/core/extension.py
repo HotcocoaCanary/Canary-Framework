@@ -59,9 +59,8 @@ def web_cocoa[T](
         @web_cocoa(deps=[Repo], prefix="/api", title="Library API", version="0.1.0")
         class API: ...
 
-    ``prefix`` 会沿依赖关系逐级嵌套：``@web_cocoa(prefix="/api", deps=[AdminRouter])``
-    时，``AdminRouter`` 的路由挂在 ``/api`` 之下（见
-    :func:`canary_framework.runtime.mounts.mount_prefixes`）。
+    ``prefix`` 是这个单元的**绝对**前缀，与它被谁依赖无关——想要 ``/api/admin`` 就写
+    ``prefix="/api/admin"``。依赖关系决定启动顺序，不决定 URL 长什么样。
     """
 
     def mark(c: type[T]) -> type[T]:

@@ -30,7 +30,6 @@ from canary_framework.core.decorator.introspect import (
 )
 from canary_framework.core.infra.naming import to_snake
 from canary_framework.runtime.graph import build_graph, topological_sort
-from canary_framework.runtime.mounts import join_path, mount_prefixes
 
 _log = logging.getLogger("canary.runtime")
 
@@ -242,14 +241,12 @@ class Canary:
     def _collect_serve_app(self) -> Any | None:
         """Collect the units' route entries and merge them into one serving app.
 
-        每个 ``@web_cocoa`` 单元在 ``@on_start`` 里把自己的路由条目写到
-        ``ROUTE_ENTRIES_ATTR``；这里按 :func:`~canary_framework.runtime.mounts.mount_prefixes`
-        算出的挂载前缀拼出完整路径，再交给 web 扩展合并成一个统一的应用（含
-        ``/openapi.json``、``/docs``、``/redoc``）。
+        每个 ``@web_cocoa`` 单元在 ``@on_start`` 里把自己的路由条目（路径已含它自己的
+        ``prefix``）写到 ``ROUTE_ENTRIES_ATTR``；这里只是把它们并起来，交给 web 扩展合并
+        成一个统一的应用（含 ``/openapi.json`` 与 ``/docs``）。**运行时不做任何路径运算**
+        ——URL 长什么样是 web 的事，运行时只管有哪些单元。
 
-        前缀沿依赖链嵌套——``prefix="/api"`` 的单元依赖 ``prefix="/admin"`` 的单元时，
-        后者的路由挂到 ``/api/admin`` 之下；被多条依赖路径引用时，实例仍只有一个，但
-        每条路径各挂一份。只有一个 ``@web_cocoa`` 时与旧版行为一致。
+        逆拓扑序遍历（依赖者在前），所以文档元数据取的是最外层那个 web 单元的。
 
         对 web 扩展的 import 是延迟的：没有路由条目就不会发生，纯 ``@cocoa`` 编排
         因此无需安装 ``canary-framework[web]``。
@@ -258,19 +255,15 @@ class Canary:
         all_error_entries: list[_ErrorEntry] = []
         meta: dict[str, str] = {}  # 文档元数据取最外层单元的
 
-        # mount_prefixes 按“根在前”的顺序返回，故最外层单元的 title/version 胜出
-        for cls, prefixes in mount_prefixes(self.roots, self._graph).items():
-            node = self._graph[cls]
-            # 异常映射的作用域是全应用，与挂载点无关，因此每个单元只收一次。
+        for t in reversed(self._order):
+            node = self._graph[t]
+            # 异常映射的作用域是全应用，因此每个单元只收一次。
             all_error_entries.extend(getattr(node, ERROR_ENTRIES_ATTR, None) or [])
             entries: list[_RouteEntry] | None = getattr(node, ROUTE_ENTRIES_ATTR, None)
             if entries is None:
                 continue
-            for prefix in prefixes:
-                all_entries.extend(
-                    (m, join_path(prefix, p), inst, fn) for m, p, inst, fn in entries
-                )
-            meta = meta or getattr(cls, WEB_ATTR, {})
+            all_entries.extend(entries)
+            meta = meta or getattr(t, WEB_ATTR, {})
 
         self._route_entries = all_entries
         self._error_entries = all_error_entries

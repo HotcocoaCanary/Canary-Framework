@@ -1,7 +1,7 @@
-"""OpenAPI document generation and the ``/docs`` / ``/redoc`` / ``/openapi.json`` pages.
+"""OpenAPI document generation and the ``/docs`` / ``/openapi.json`` pages.
 
 文档生成：从路由 + 参数注解 + Pydantic 模型生成 OpenAPI 3.1 文档；``/docs``（Swagger
-UI）与 ``/redoc``（Redoc）用 CDN 静态 HTML 渲染，供浏览器直接打开。
+UI）用 CDN 静态 HTML 渲染，供浏览器直接打开。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from canary_framework.web.decorator.resolve import (
     hints_of,
     location_of,
     path_param_names,
-    resolve_meta,
+    unwrap,
 )
 from canary_framework.web.infra.naming import header_name
 
@@ -43,19 +43,6 @@ SWAGGER_UI_HTML = """<!DOCTYPE html>
       SwaggerUIBundle({ url: "/openapi.json", dom_id: "#swagger-ui" });
     };
   </script>
-</body>
-</html>
-"""
-
-REDOC_HTML = """<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Canary API</title>
-</head>
-<body>
-  <redoc spec-url="/openapi.json"></redoc>
-  <script src="https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js"></script>
 </body>
 </html>
 """
@@ -93,11 +80,11 @@ def _operation(fn: Callable[..., object], path: str, schemas: dict[str, Any]) ->
             continue
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
-        type_, marker, default = resolve_meta(hints.get(name, param.annotation), param.default)
+        type_, marker = unwrap(hints.get(name, param.annotation))
         location = location_of(type_, marker, name, path_params)
         if location == "request":
             continue
-        required = default is _EMPTY
+        required = param.default is _EMPTY
         schema = _schema(type_, schemas, fn)
         if location == "body":
             request_body = {

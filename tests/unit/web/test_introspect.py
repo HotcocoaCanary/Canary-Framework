@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import warnings
 from collections.abc import Awaitable
 from typing import Annotated, cast
@@ -13,8 +12,8 @@ from starlette.requests import Request
 
 from canary_framework.web import get
 from canary_framework.web.decorator.introspect import routes_of
-from canary_framework.web.decorator.params import Query
-from canary_framework.web.decorator.resolve import location_of, path_param_names, resolve_meta
+from canary_framework.web.decorator.params import Header
+from canary_framework.web.decorator.resolve import location_of, path_param_names, unwrap
 from canary_framework.web.infra.naming import header_name
 
 pytestmark = pytest.mark.unit
@@ -89,26 +88,17 @@ def test_routes_of_does_not_touch_pydantic_instance_attributes() -> None:
     assert [w for w in caught if "Pydantic" in w.category.__name__] == []
 
 
-def test_resolve_meta_annotated_style() -> None:
-    type_, marker, default = resolve_meta(
-        Annotated[int, Query(default=10)], inspect.Parameter.empty
-    )
+def test_unwrap_splits_the_annotated_marker() -> None:
+    type_, marker = unwrap(Annotated[str, Header(alias="x-token")])
+    assert type_ is str
+    assert isinstance(marker, Header)
+    assert marker.alias == "x-token"
+
+
+def test_unwrap_passes_a_bare_annotation_through() -> None:
+    type_, marker = unwrap(int)
     assert type_ is int
-    assert isinstance(marker, Query)
-    assert default == 10
-
-
-def test_resolve_meta_classic_default_style() -> None:
-    type_, marker, default = resolve_meta(int, Query(default=5))
-    assert type_ is int
-    assert isinstance(marker, Query)
-    assert default == 5
-
-
-def test_resolve_meta_required_when_no_default() -> None:
-    _type, marker, default = resolve_meta(int, inspect.Parameter.empty)
     assert marker is None
-    assert default is inspect.Parameter.empty
 
 
 def test_location_of_pydantic_model_is_body() -> None:

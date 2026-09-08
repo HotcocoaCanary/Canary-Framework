@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from canary_framework.web.core.extension import web_cocoa
 from canary_framework.web.decorator.errors import on_request_error
-from canary_framework.web.decorator.params import Body, Cookie, Header, Path, Query
+from canary_framework.web.decorator.params import Cookie, Header
 from canary_framework.web.decorator.routes import delete, get, patch, post, put, route
 from canary_framework.web.error.web import (
     HTTPError,
@@ -22,13 +22,10 @@ from canary_framework.web.error.web import (
 )
 
 __all__ = [
-    "Body",
     "Cookie",
     "HTTPError",
     "Header",
     "MissingParameterError",
-    "Path",
-    "Query",
     "RequestValidationError",
     "RouteRegistrationError",
     "WebError",

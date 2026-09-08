@@ -10,7 +10,7 @@ from starlette.requests import Request
 from starlette.testclient import TestClient
 
 from canary_framework import Canary, cocoa, on_start, on_stop
-from canary_framework.web import Header, Query, RouteRegistrationError, get, post, web_cocoa
+from canary_framework.web import Header, RouteRegistrationError, get, post, web_cocoa
 
 pytestmark = pytest.mark.integration
 
@@ -127,7 +127,7 @@ def test_header_injection_underscore_to_hyphen() -> None:
     @web_cocoa
     class API:
         @get("/whoami")
-        async def whoami(self, x_token: str = Header(default="")) -> dict:
+        async def whoami(self, x_token: Annotated[str, Header()] = "") -> dict:
             return {"token": x_token}
 
     with TestClient(Canary(API)) as client:
@@ -149,11 +149,12 @@ def test_request_injection() -> None:
     assert r.json() == {"path": "/echo", "method": "GET"}
 
 
-def test_annotated_query_under_future_annotations() -> None:
+def test_inferred_query_under_future_annotations() -> None:
     @web_cocoa
     class API:
         @get("/items")
-        async def items(self, limit: Annotated[int, Query(default=3)]) -> list[int]:
+        async def items(self, limit: int = 3) -> list[int]:
+            # 标量 + 名字不在路径里 = 查询参数，无需标记；默认值就是 Python 的默认值。
             return [1] * limit
 
     with TestClient(Canary(API)) as client:
@@ -186,7 +187,7 @@ def test_docs_pages_served() -> None:
 
     with TestClient(Canary(API)) as client:
         assert "SwaggerUIBundle" in client.get("/docs").text
-        assert "redoc" in client.get("/redoc").text
+        assert client.get("/redoc").status_code == 404  # 两个文档 UI 留一个
 
 
 def test_lifespan_drives_start_and_stop() -> None:
@@ -226,3 +227,15 @@ async def test_duplicate_route_raises() -> None:
     with pytest.raises(RouteRegistrationError):
         await app.init()
         await app.start()
+
+
+def test_a_marker_used_as_a_default_value_is_refused() -> None:
+    """写法只有一种：标记在注解里，默认值在默认值的位置。"""
+    with pytest.raises(RouteRegistrationError) as excinfo:
+
+        @get("/whoami")
+        async def whoami(self: object, x_token: str = Header()) -> dict:
+            return {}
+
+    message = str(excinfo.value)
+    assert "x_token" in message and "Annotated[T, Header(...)]" in message

@@ -8,7 +8,6 @@
 
 启动后访问：
     GET  /docs                    Swagger UI（交互式文档）
-    GET  /redoc                   Redoc
     GET  /openapi.json            自动生成的 OpenAPI 文档
     GET  /books?q=三体            检索
     GET  /books/1                 单本详情

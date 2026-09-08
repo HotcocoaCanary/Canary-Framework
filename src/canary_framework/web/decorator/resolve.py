@@ -1,6 +1,6 @@
 """Parameter resolution — turn a handler signature into (type, source, default).
 
-参数求解：把 handler 的签名参数解析为「类型 + 来源标记 + 默认值」，供请求分发
+参数求解：把 handler 的签名参数解析为「类型 + 来源」，供请求分发
 （:mod:`canary_framework.web.core.routing`）与文档生成
 （:mod:`canary_framework.web.core.openapi`）共用，避免两处漂移。
 """
@@ -20,7 +20,7 @@ from typing import Annotated, Any, Literal, Union, get_args, get_origin, get_typ
 
 from starlette.requests import Request
 
-from canary_framework.web.decorator.params import _UNDEFINED, Param
+from canary_framework.web.decorator.params import Param
 
 _EMPTY = inspect.Parameter.empty
 _PATH_PARAM = re.compile(r"\{([A-Za-z_]\w*)")
@@ -54,7 +54,12 @@ def hints_of(fn: Callable[..., object]) -> dict[str, Any]:
 
 
 def unwrap(annotation: Any) -> tuple[Any, Param | None]:
-    """Split ``Annotated[T, Param(...)]`` into ``(T, marker)``; pass others through."""
+    """Split ``Annotated[T, Header()]`` into ``(T, marker)``; pass others through.
+
+    标记只能出现在 ``Annotated`` 里——把它写成默认值（FastAPI 的经典写法）会在装配期
+    被 :func:`~canary_framework.web.infra.checks.require_annotated_sources` 拒绝，
+    因为那让"默认值"这个位置同时表示两件事。
+    """
     if get_origin(annotation) is Annotated:
         args = get_args(annotation)
         for meta in args[1:]:
@@ -62,24 +67,6 @@ def unwrap(annotation: Any) -> tuple[Any, Param | None]:
                 return args[0], meta
         return args[0], None
     return annotation, None
-
-
-def resolve_meta(annotation: Any, param_default: Any) -> tuple[Any, Param | None, Any]:
-    """Return ``(type, marker, default)``; ``default`` is :data:`_EMPTY` when required.
-
-    兼容两种写法：
-    - ``Annotated[int, Query(...)]``（标记在注解里）；
-    - ``int = Query(...)``（标记作为默认值，FastAPI 经典写法）。
-    """
-    type_, marker = unwrap(annotation)
-    if marker is not None:
-        default = marker.default if marker.default is not _UNDEFINED else param_default
-        return type_, marker, default
-    if isinstance(param_default, Param):
-        marker = param_default
-        default = marker.default if marker.default is not _UNDEFINED else _EMPTY
-        return type_, marker, default
-    return type_, None, param_default
 
 
 def is_scalar(type_: Any) -> bool:

@@ -14,7 +14,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from canary_framework.web.decorator.resolve import hints_of, location_of, resolve_meta
+from canary_framework.web.decorator.resolve import hints_of, location_of, unwrap
 from canary_framework.web.error.web import MissingParameterError, RequestValidationError
 from canary_framework.web.infra.naming import header_name
 
@@ -48,9 +48,9 @@ async def _solve(
             continue
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
-        type_, marker, default = resolve_meta(hints.get(name, param.annotation), param.default)
+        type_, marker = unwrap(hints.get(name, param.annotation))
         location = location_of(type_, marker, name, path_params)
-        values[name] = await _resolve_one(name, type_, marker, location, request, default)
+        values[name] = await _resolve_one(name, type_, marker, location, request, param.default)
     return values
 
 

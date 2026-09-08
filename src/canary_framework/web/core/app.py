@@ -1,8 +1,8 @@
 """Web app builder — assemble route entries into a Starlette app.
 
 app 构建：从单个或多个 ``@web_cocoa`` 单元收集 ``@get``/``@post`` 路由与
-``@on_request_error`` 异常映射，组装成 Starlette 应用，并挂载 ``/openapi.json``、
-``/docs``、``/redoc``。
+``@on_request_error`` 异常映射，组装成 Starlette 应用，并挂载 ``/openapi.json``
+与 ``/docs``。
 
 :func:`build_serve_app` 是 web 扩展交给运行时的**工厂**：``@web_cocoa`` 把它挂到
 ``SERVE_ATTR`` 标记下，``Canary`` 只按标记取出并调用，从不 import 本模块。
@@ -19,8 +19,7 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from canary_framework.common.markers import WEB_ATTR
-from canary_framework.runtime.mounts import join_path
-from canary_framework.web.core.openapi import REDOC_HTML, SWAGGER_UI_HTML, build_openapi
+from canary_framework.web.core.openapi import SWAGGER_UI_HTML, build_openapi
 from canary_framework.web.core.routing import dispatch
 from canary_framework.web.decorator.introspect import error_handlers_of, routes_of
 from canary_framework.web.error.web import (
@@ -33,18 +32,6 @@ _ErrorEntry = tuple[type[Exception], Callable[..., object]]
 
 _DEFAULT_TITLE = "Canary API"
 _DEFAULT_VERSION = "0.1.0"
-
-
-def build_web_app(instance: object) -> Starlette:
-    """Collect *instance*'s routes and build a Starlette app plus its OpenAPI doc.
-
-    单元自建应用的快捷方式（不含嵌套）：只挂 *instance* 自己的路由，前缀取它的
-    ``prefix``。整图合并由 ``Canary`` 通过 :func:`build_serve_app` 完成。
-    """
-    meta: dict[str, str] = getattr(type(instance), WEB_ATTR, {})
-    prefix = meta.get("prefix", "")
-    routes = [(m, join_path(prefix, p), inst, fn) for m, p, inst, fn in collect_routes(instance)]
-    return build_serve_app(meta, routes, collect_error_handlers(instance))
 
 
 def build_serve_app(
@@ -82,13 +69,9 @@ def build_serve_app(
     async def docs_endpoint(request: Request) -> HTMLResponse:
         return HTMLResponse(SWAGGER_UI_HTML)
 
-    async def redoc_endpoint(request: Request) -> HTMLResponse:
-        return HTMLResponse(REDOC_HTML)
-
     app_routes: list[Route] = [
         Route("/openapi.json", openapi_endpoint, methods=["GET"]),
         Route("/docs", docs_endpoint, methods=["GET"]),
-        Route("/redoc", redoc_endpoint, methods=["GET"]),
     ]
     for method, path, instance, fn in deduped:
         app_routes.append(Route(path, _make_endpoint(instance, fn), methods=[method]))
@@ -149,20 +132,31 @@ async def _handle_server_error(request: Request, exc: Exception) -> Response:
 def collect_routes(
     instance: object,
 ) -> list[tuple[str, str, object, Callable[..., object]]]:
-    """Collect ``(method, path, instance, fn)`` tuples for *instance*'s route-marked methods.
+    """Collect ``(method, full path, instance, fn)`` for *instance*'s route-marked methods.
 
-    供 ``@web_cocoa`` 的 ``@on_start`` 钩子调用，也供 ``_collect_serve_app``
-    在多单元合并时使用。
+    路径在这里就拼完整：``prefix`` 是这个单元的**绝对**前缀，与它被谁依赖无关。依赖
+    关系说的是启动顺序和谁能调用谁，URL 说的是对外的资源命名——两件事，不该互相决定。
+    想要 ``/api/admin`` 就写 ``prefix="/api/admin"``。
     """
+    prefix: str = getattr(type(instance), WEB_ATTR, {}).get("prefix", "")
     seen: set[tuple[str, str]] = set()
     routes: list[tuple[str, str, object, Callable[..., object]]] = []
     for method, path, fn in routes_of(instance):
-        key = (method, path)
+        full = _join_path(prefix, path)
+        key = (method, full)
         if key in seen:
-            raise RouteRegistrationError(f"duplicate route: {method} {path}")
+            raise RouteRegistrationError(f"duplicate route: {method} {full}")
         seen.add(key)
-        routes.append((method, path, instance, fn))
+        routes.append((method, full, instance, fn))
     return routes
+
+
+def _join_path(prefix: str, path: str) -> str:
+    """Join a unit's *prefix* with a route-level *path*.
+
+    路由自身的 ``/`` 要保留——``prefix="/api"`` 加上 ``@get("/")`` 得到 ``/api/``。
+    """
+    return prefix.rstrip("/") + path if prefix else path
 
 
 def collect_error_handlers(instance: object) -> list[_ErrorEntry]:
