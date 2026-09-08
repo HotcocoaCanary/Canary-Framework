@@ -7,7 +7,7 @@ web 单元：``@web_cocoa`` 把 ``@cocoa`` 单元标记为「带 HTTP 路由」�
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TypeVar, overload
 
 from canary_framework.common.markers import WEB_ATTR
@@ -31,6 +31,7 @@ def web_cocoa[T](
     *,
     deps: list[type] | None = None,
     prefix: str = "",
+    tags: Sequence[str] = (),
     title: str = _DEFAULT_TITLE,
     version: str = _DEFAULT_VERSION,
 ) -> Callable[[type[T]], type[T]]: ...
@@ -41,13 +42,15 @@ def web_cocoa[T](
     *,
     deps: list[type] | None = None,
     prefix: str = "",
+    tags: Sequence[str] = (),
     title: str = _DEFAULT_TITLE,
     version: str = _DEFAULT_VERSION,
 ) -> type[T] | Callable[[type[T]], type[T]]:
     """Mark a class as both a cocoa and an HTTP route holder.
 
     等价于 ``@cocoa(deps=...)`` 再叠加一个 web 标记；``title``/``version`` 用于生成的
-    OpenAPI 文档，``prefix`` 为该单元所有路由添加公共前缀。用法::
+    OpenAPI 文档，``prefix`` 为该单元所有路由添加公共前缀，``tags`` 是该单元所有路由的
+    公共分组标签（路由自己的 ``tags`` 拼在它后面）。用法::
 
         @web_cocoa
         class API: ...
@@ -63,7 +66,16 @@ def web_cocoa[T](
 
     def mark(c: type[T]) -> type[T]:
         cocoa(deps=deps)(c)  # 先打上 @cocoa 的依赖标记（就地修改 c）
-        setattr(c, WEB_ATTR, {"title": title, "version": version, "prefix": normalised})
+        setattr(
+            c,
+            WEB_ATTR,
+            {
+                "title": title,
+                "version": version,
+                "prefix": normalised,
+                "tags": tuple(tags),
+            },
+        )
         return c
 
     return mark(cls) if cls is not None else mark

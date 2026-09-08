@@ -36,7 +36,7 @@ def test_routes_of_scans_mro_base_first() -> None:
         @get("/own")
         async def own_route(self) -> None: ...
 
-    routes = routes_of(Service())
+    routes = [(m.method, m.path, fn) for m, fn in routes_of(Service())]
     assert [path for (_method, path, _fn) in routes] == ["/mixin", "/own"]
 
 
@@ -59,7 +59,7 @@ async def test_routes_of_keeps_same_named_mixin_routes() -> None:
     class Router(KbMixin, FileMixin, CollMixin):
         pass
 
-    routes = routes_of(Router())
+    routes = [(m.method, m.path, fn) for m, fn in routes_of(Router())]
     assert {(method, path) for method, path, _fn in routes} == {
         ("GET", "/kb/create"),
         ("GET", "/file/create"),

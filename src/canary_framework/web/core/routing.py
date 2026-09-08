@@ -28,7 +28,12 @@ _MISSING = object()  # 与 None 区分：header 真的传了空串时，None 才
 
 
 async def dispatch(
-    instance: object, fn: Callable[..., object], plan: HandlerPlan, request: Request
+    instance: object,
+    fn: Callable[..., object],
+    plan: HandlerPlan,
+    request: Request,
+    status_code: int = 200,
+    no_body: bool = False,
 ) -> Response:
     """Solve *fn*'s parameters from *request*, invoke it, and return a JSON response.
 
@@ -41,7 +46,7 @@ async def dispatch(
         raise RequestValidationError(exc) from exc
     # handler 必为 async（由 @get/@post 在装配期把关），这里没有第二条同步路径。
     result = await cast("Awaitable[Any]", fn(**kwargs))
-    return _to_response(result, plan, fn)
+    return _to_response(result, plan, fn, status_code, no_body)
 
 
 async def _value_of(spec: ParamSpec, request: Request) -> Any:
@@ -112,10 +117,20 @@ def _validate(spec: ParamSpec, raw: Any) -> Any:
     return raw if spec.adapter is None else spec.adapter.validate_python(raw)
 
 
-def _to_response(result: Any, plan: HandlerPlan, fn: Callable[..., object]) -> Response:
+def _to_response(
+    result: Any,
+    plan: HandlerPlan,
+    fn: Callable[..., object],
+    status_code: int,
+    no_body: bool,
+) -> Response:
     """Check the return value against its declared type, then serialise it.
 
-    handler 自己造好的响应原样放行——SSE、文件下载、自定义状态码、后台任务都走这里。
+    handler 自己造好的响应原样放行——SSE、文件下载、后台任务、以及需要按情况变化的状态码
+    都走这里，它自己的状态码说了算。
+
+    否则用声明的 ``status_code``。``204`` / ``304`` 按 HTTP 规范不能带响应体，发一个空响应
+    而不是 JSON 的 ``null``。
 
     有返回注解就**先校验再序列化**：``/docs`` 照着这个注解向调用方承诺了响应的形状，
     不校验的话，声明 ``-> Book`` 而实际少发一个字段没有任何人会喊一声。校验失败是服务端
@@ -123,13 +138,15 @@ def _to_response(result: Any, plan: HandlerPlan, fn: Callable[..., object]) -> R
     """
     if isinstance(result, Response):
         return result
+    if no_body:
+        return Response(status_code=status_code)
     if plan.returns is None:
         # 没有注解 / 注解是 Any：没什么可校验的，模型自己知道怎么变成 JSON。
         if isinstance(result, BaseModel):
-            return JSONResponse(result.model_dump(mode="json"))
-        return JSONResponse(result)
+            return JSONResponse(result.model_dump(mode="json"), status_code=status_code)
+        return JSONResponse(result, status_code=status_code)
     try:
         validated = plan.returns.validate_python(result)
     except ValidationError as exc:
         raise ResponseValidationError(str(getattr(fn, "__qualname__", fn)), exc) from exc
-    return JSONResponse(plan.returns.dump_python(validated, mode="json"))
+    return JSONResponse(plan.returns.dump_python(validated, mode="json"), status_code=status_code)

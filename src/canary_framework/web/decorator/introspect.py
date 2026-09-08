@@ -13,12 +13,13 @@ from collections.abc import Callable
 
 from canary_framework.common.markers import ROUTE_ATTR
 from canary_framework.core.decorator.introspect import marked_members
+from canary_framework.web.decorator.routes import RouteMark
 
 
-def routes_of(instance: object) -> list[tuple[str, str, Callable[..., object]]]:
-    """Return ``(method, path, bound method)`` for every route-marked method, base-first.
+def routes_of(instance: object) -> list[tuple[RouteMark, Callable[..., object]]]:
+    """Return ``(mark, bound method)`` for every route-marked method, base-first.
 
     返回该实例上所有被路由标记过的方法，基类在前——混入（mixin）带来的路由与本类自己
     的路由都会注册，两者叠加而非互相覆盖。
     """
-    return [(method, path, fn) for (method, path), fn in marked_members(instance, ROUTE_ATTR)]
+    return [(mark, fn) for mark, fn in marked_members(instance, ROUTE_ATTR)]

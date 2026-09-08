@@ -14,21 +14,24 @@ def test_get_sets_route_marker() -> None:
     @get("/books")
     async def handler() -> None: ...
 
-    assert getattr(handler, ROUTE_ATTR) == ("GET", "/books")
+    mark = getattr(handler, ROUTE_ATTR)
+    assert (mark.method, mark.path) == ("GET", "/books")
 
 
 def test_method_is_upper_cased() -> None:
     @route("get", "/x")
     async def handler() -> None: ...
 
-    assert getattr(handler, ROUTE_ATTR) == ("GET", "/x")
+    mark = getattr(handler, ROUTE_ATTR)
+    assert (mark.method, mark.path) == ("GET", "/x")
 
 
 def test_path_gets_leading_slash() -> None:
     @post("books")
     async def handler() -> None: ...
 
-    assert getattr(handler, ROUTE_ATTR) == ("POST", "/books")
+    mark = getattr(handler, ROUTE_ATTR)
+    assert (mark.method, mark.path) == ("POST", "/books")
 
 
 def test_all_verbs() -> None:
@@ -43,4 +46,26 @@ def test_all_verbs() -> None:
         @deco("/x")
         async def handler() -> None: ...
 
-        assert getattr(handler, ROUTE_ATTR) == (verb, "/x")
+        mark = getattr(handler, ROUTE_ATTR)
+        assert (mark.method, mark.path) == (verb, "/x")
+
+
+def test_route_metadata_rides_along_on_the_marker() -> None:
+    @post("/books", status_code=201, tags=["books"], summary="新建一本书", deprecated=True)
+    async def handler() -> None: ...
+
+    mark = getattr(handler, ROUTE_ATTR)
+    assert mark.status_code == 201
+    assert mark.tags == ("books",)
+    assert mark.summary == "新建一本书"
+    assert mark.deprecated is True
+
+
+def test_metadata_defaults_are_inert() -> None:
+    """不写元数据的路由，行为要和从前一模一样。"""
+
+    @get("/x")
+    async def handler() -> None: ...
+
+    mark = getattr(handler, ROUTE_ATTR)
+    assert (mark.status_code, mark.tags, mark.summary, mark.deprecated) == (200, (), None, False)

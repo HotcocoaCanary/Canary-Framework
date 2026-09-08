@@ -9,9 +9,11 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from canary_framework.web.decorator.resolve import HandlerPlan, ParamSpec, documented_path
+from canary_framework.web.decorator.routes import NO_BODY_STATUSES
 
 _REF_TEMPLATE = "#/components/schemas/{model}"
 
@@ -46,7 +48,7 @@ def build_openapi(title: str, version: str, routes: list[Any]) -> dict[str, Any]
     for route in routes:
         # 文档的 key 用归一化后的路径：Starlette 的 ``:converter`` 不属于 OpenAPI。
         paths.setdefault(documented_path(route.path), {})[route.method.lower()] = _operation(
-            route.plan, schemas
+            route, schemas
         )
     doc: dict[str, Any] = {
         "openapi": "3.1.0",
@@ -58,12 +60,16 @@ def build_openapi(title: str, version: str, routes: list[Any]) -> dict[str, Any]
     return doc
 
 
-def _operation(plan: HandlerPlan, schemas: dict[str, Any]) -> dict[str, Any]:
-    """Describe one handler: its parameters, its request body, its 200 response.
+def _operation(route: Any, schemas: dict[str, Any]) -> dict[str, Any]:
+    """Describe one handler: its parameters, its request body, its response.
 
     描述一个 handler。``request`` 来源的形参（整个 ``Request`` 对象）不进文档——它不是
     调用方能提供的东西。
+
+    ``summary`` 不给就用方法名，``description`` 直接取 docstring——写过的说明没理由再抄
+    一遍到装饰器参数里。
     """
+    plan: HandlerPlan = route.plan
     parameters: list[dict[str, Any]] = []
     request_body: dict[str, Any] | None = None
     for spec in plan.params:
@@ -78,7 +84,18 @@ def _operation(plan: HandlerPlan, schemas: dict[str, Any]) -> dict[str, Any]:
             continue
         parameters.append(_parameter(spec, schema))
 
-    operation: dict[str, Any] = {"responses": {"200": _response_doc(plan, schemas)}}
+    status = str(route.mark.status_code)
+    operation: dict[str, Any] = {
+        "summary": route.mark.summary or getattr(route.fn, "__name__", ""),
+        "responses": {status: _response_doc(plan, schemas, route.mark.status_code)},
+    }
+    description = inspect.getdoc(route.fn)
+    if description:
+        operation["description"] = description
+    if route.tags:
+        operation["tags"] = list(route.tags)
+    if route.mark.deprecated:
+        operation["deprecated"] = True
     if parameters:
         operation["parameters"] = parameters
     if request_body:
@@ -99,12 +116,13 @@ def _parameter(spec: ParamSpec, schema: dict[str, Any]) -> dict[str, Any]:
     return param
 
 
-def _response_doc(plan: HandlerPlan, schemas: dict[str, Any]) -> dict[str, Any]:
-    """Describe the 200 response; handlers returning a ``Response`` declare no JSON schema.
+def _response_doc(plan: HandlerPlan, schemas: dict[str, Any], status: int) -> dict[str, Any]:
+    """Describe the success response; some shapes declare no JSON schema at all.
 
-    handler 自己造响应（SSE / 文件 / 自定义状态码）时，媒体类型由它决定，文档不猜。
+    两种情况文档不写 schema：handler 自己造响应（SSE / 文件 / 按情况变化的状态码），
+    媒体类型由它决定；以及 ``204`` / ``304`` 这类按规范就不能带响应体的状态码。
     """
-    if plan.returns_response:
+    if plan.returns_response or status in NO_BODY_STATUSES:
         return {"description": "Successful Response"}
     return {
         "description": "Successful Response",

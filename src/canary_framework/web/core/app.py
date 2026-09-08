@@ -28,6 +28,7 @@ from canary_framework.web.core.openapi import SWAGGER_UI_HTML, build_openapi
 from canary_framework.web.core.routing import dispatch
 from canary_framework.web.decorator.introspect import routes_of
 from canary_framework.web.decorator.resolve import HandlerPlan, build_plan
+from canary_framework.web.decorator.routes import NO_BODY_STATUSES, RouteMark
 from canary_framework.web.error.web import (
     HTTPError,
     RequestValidationError,
@@ -37,17 +38,24 @@ from canary_framework.web.error.web import (
 
 @dataclass(frozen=True, slots=True)
 class Route:
-    """One mounted route: which method + path, which unit's method, and its compiled plan.
+    """One mounted route: where it hangs, whose method it is, and everything precomputed.
 
-    一条挂好的路由。``path`` 已含所在单元的 ``prefix``，``plan`` 是装配期编译好的取值
-    计划——分发与文档都读它，两边因此不可能各推断出一套。
+    一条挂好的路由。``path`` 已含所在单元的 ``prefix``；``plan`` 是装配期编译好的取值
+    计划（分发与文档都读它，两边因此不可能各推断出一套）；``mark`` 是声明时写下的元数据；
+    ``tags`` 是单元级与路由级标签拼起来的结果。
     """
 
-    method: str
     path: str
     instance: object
     fn: Callable[..., object]
     plan: HandlerPlan
+    mark: RouteMark
+    tags: tuple[str, ...]
+
+    @property
+    def method(self) -> str:
+        """HTTP 方法取自声明，不另存一份——免得两处不一致。"""
+        return self.mark.method
 
 
 def build_serve_app(
@@ -125,17 +133,28 @@ def collect_routes(declared: type, instance: object) -> list[Route]:
     想要 ``/api/admin`` 就写 ``prefix="/api/admin"``。
 
     """
-    prefix: str = getattr(declared, WEB_ATTR, {}).get("prefix", "")
+    meta: dict[str, object] = getattr(declared, WEB_ATTR, {})
+    prefix = str(meta.get("prefix", ""))
+    unit_tags: tuple[str, ...] = tuple(meta.get("tags", ()))  # type: ignore[arg-type]
     seen: set[tuple[str, str]] = set()
     routes: list[Route] = []
-    for method, path, fn in routes_of(instance):
-        full = _join_path(prefix, path)
-        key = (method, full)
+    for mark, fn in routes_of(instance):
+        full = _join_path(prefix, mark.path)
+        key = (mark.method, full)
         if key in seen:
-            raise RouteRegistrationError(f"duplicate route: {method} {full}")
+            raise RouteRegistrationError(f"duplicate route: {mark.method} {full}")
         seen.add(key)
         # 签名在这里编译一次，此后每个请求都不必再碰反射。
-        routes.append(Route(method, full, instance, fn, build_plan(fn, full)))
+        routes.append(
+            Route(
+                path=full,
+                instance=instance,
+                fn=fn,
+                plan=build_plan(fn, full),
+                mark=mark,
+                tags=unit_tags + mark.tags,
+            )
+        )
     return routes
 
 
@@ -153,7 +172,10 @@ def _make_endpoint(route: Route) -> Callable[[Request], Any]:
     把实例、方法与编译好的计划闭包进去——请求到来时不再有任何查找。
     """
 
+    status = route.mark.status_code
+    empty = status in NO_BODY_STATUSES
+
     async def endpoint(request: Request) -> Response:
-        return await dispatch(route.instance, route.fn, route.plan, request)
+        return await dispatch(route.instance, route.fn, route.plan, request, status, empty)
 
     return endpoint

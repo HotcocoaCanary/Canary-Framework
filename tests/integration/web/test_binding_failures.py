@@ -10,10 +10,11 @@ from typing import Annotated
 
 import pytest
 from pydantic import BaseModel, Field
+from starlette.responses import JSONResponse, Response
 from starlette.testclient import TestClient
 
 from canary_framework import Canary, DeclarationError, cocoa
-from canary_framework.web import RouteRegistrationError, get, post, web_cocoa
+from canary_framework.web import RouteRegistrationError, delete, get, post, web_cocoa
 
 pytestmark = pytest.mark.integration
 
@@ -138,3 +139,55 @@ def test_a_prefix_without_a_slash_is_normalised() -> None:
 
     with TestClient(Canary(Api2)) as client:
         assert client.get("/api/v1/ping").json() == {"ok": True}
+
+
+def test_status_code_and_doc_metadata() -> None:
+    """新建资源该是 201、删除该是 204 —— 从前只能自己造 Response，那样就丢了返回类型和文档。"""
+
+    @web_cocoa(prefix="/api", tags=["library"])
+    class Meta:
+        @post("/books", status_code=201, tags=["write"], summary="新建一本书")
+        async def create(self) -> dict:
+            """更长的说明直接写 docstring，不必抄进装饰器参数。"""
+            return {"id": 1}
+
+        @delete("/books/{book_id}", status_code=204)
+        async def remove(self, book_id: int) -> None:
+            return None
+
+        @get("/legacy", deprecated=True)
+        async def legacy(self) -> dict:
+            return {}
+
+    with TestClient(Canary(Meta)) as client:
+        created = client.post("/api/books")
+        assert created.status_code == 201
+        assert created.json() == {"id": 1}
+
+        removed = client.delete("/api/books/1")
+        assert removed.status_code == 204
+        assert removed.content == b""  # 204 不能带响应体
+
+        doc = client.get("/openapi.json").json()["paths"]
+        create_op = doc["/api/books"]["post"]
+        assert "201" in create_op["responses"]
+        assert create_op["summary"] == "新建一本书"
+        assert create_op["description"].startswith("更长的说明")
+        assert create_op["tags"] == ["library", "write"]  # 单元级在前，路由级在后
+        assert doc["/api/books/{book_id}"]["delete"]["responses"]["204"] == {
+            "description": "Successful Response"
+        }
+        assert doc["/api/legacy"]["get"]["deprecated"] is True
+
+
+def test_a_handler_building_its_own_response_keeps_its_own_status() -> None:
+    """按情况变化的状态码仍然归 handler —— 声明的 status_code 只管"没自己造响应"那条路。"""
+
+    @web_cocoa
+    class Own:
+        @get("/x", status_code=201)
+        async def x(self) -> Response:
+            return JSONResponse({"ok": True}, status_code=202)
+
+    with TestClient(Canary(Own)) as client:
+        assert client.get("/x").status_code == 202
