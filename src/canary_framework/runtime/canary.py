@@ -74,6 +74,9 @@ class Canary:
         self._started: list[type] = []
         # 事件循环探针改动前的旧值，停止时还原；未开启探针时为 None。
         self._loop_probe: tuple[asyncio.AbstractEventLoop, bool, float] | None = None
+        # 冷启动锁：没有 lifespan 时，第一个请求会顺手把应用启起来。并发的首批请求
+        # 必须在这里排队，否则后到的会看见"正在启动"就直奔一个还不存在的服务入口。
+        self._booting = asyncio.Lock()
 
     # -- read access --------------------------------------------------
     @property
@@ -116,7 +119,7 @@ class Canary:
         self._require(LifecycleState.NEW)
         self._state = LifecycleState.INITIALIZING
         try:
-            self._apply_framework_config()
+            await self._apply_framework_config()
             self._graph = build_graph(list(self.roots))
             self._order = topological_sort(self._graph)
             for t in self._order:
@@ -195,10 +198,12 @@ class Canary:
         if scope["type"] == "lifespan":
             await self._lifespan(receive, send)
             return
-        if self.state is LifecycleState.NEW:
+        if self._serve_app is None:
+            # 判据是"服务入口在不在"，不是"状态是不是 NEW"：后者在并发首批请求下会漏——
+            # 第二个请求看到的是 STARTING，于是跳过启动，直奔一个还没建好的入口。
             await self._ensure_started()
         if self._serve_app is None:
-            raise RuntimeError(f"Canary has no serving app for scope type {scope['type']!r}")
+            raise RuntimeError(self._why_it_cannot_serve(str(scope["type"])))
         await self._serve_app(scope, receive, send)
 
     async def _lifespan(self, receive: Receive, send: Send) -> None:
@@ -226,9 +231,31 @@ class Canary:
                 return
 
     async def _ensure_started(self) -> None:
-        if self.state is LifecycleState.NEW:
-            await self.init()
-            await self.start()
+        """Start once, no matter how many callers arrive at the same time.
+
+        没有 lifespan 时的冷启动入口。锁内**重新**判断状态：并发的首批请求里只有一个
+        真的去启动，其余的在锁上等，醒来时服务入口已经建好。启动失败的话它们会依次拿到
+        同一个说法——而不是各自去撞一个不存在的入口。
+        """
+        async with self._booting:
+            if self._state is LifecycleState.NEW:
+                await self.init()
+                await self.start()
+
+    def _why_it_cannot_serve(self, scope_type: str) -> str:
+        """Say which of the two reasons it is, instead of one message for both.
+
+        走到这里只有两种可能，分开说：启动失败过，或者这张图上根本没有 web 单元。
+        """
+        if self._state is LifecycleState.FAILED:
+            return (
+                f"Canary cannot serve {scope_type!r}: startup failed. "
+                f"The original error was raised where the app was started."
+            )
+        return (
+            f"Canary cannot serve {scope_type!r}: no @web_cocoa unit is reachable "
+            f"from the root(s) {', '.join(r.__name__ for r in self.roots)}."
+        )
 
     def _collect_serve_app(self) -> Any | None:
         """Collect the units' route entries and merge them into one serving app.
@@ -287,7 +314,7 @@ class Canary:
         for name, (_declared_by, value) in plan.items():
             setattr(node, name, value)
 
-    def _apply_framework_config(self) -> None:
+    async def _apply_framework_config(self) -> None:
         """Apply the ``CANARY_*`` settings. Read from the environment, nothing more.
 
         框架自有的两个开关，直接读环境变量——框架不提供配置机制，也就不该为自己的
@@ -321,6 +348,10 @@ class Canary:
         self._loop_probe = (loop, loop.get_debug(), loop.slow_callback_duration)
         loop.set_debug(True)
         loop.slow_callback_duration = seconds
+        # 让出一次，否则整个启动期都测不到：asyncio 在回调**开始执行之前**就读过
+        # loop._debug，而我们是在这个回调执行到一半时才把它打开的。让出之后，剩下的
+        # 装配与启动落在新的回调里，阻塞才看得见。
+        await asyncio.sleep(0)
 
     def _restore_loop_probe(self) -> None:
         if self._loop_probe is None:
