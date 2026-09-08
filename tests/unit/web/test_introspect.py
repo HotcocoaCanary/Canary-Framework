@@ -7,7 +7,7 @@ from collections.abc import Awaitable
 from typing import Annotated, cast
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from starlette.requests import Request
 
 from canary_framework.web import get
@@ -89,16 +89,26 @@ def test_routes_of_does_not_touch_pydantic_instance_attributes() -> None:
 
 
 def test_unwrap_splits_the_annotated_marker() -> None:
-    type_, marker = unwrap(Annotated[str, Header(alias="x-token")])
-    assert type_ is str
+    bare, marker, validated = unwrap(Annotated[str, Header(alias="x-token")])
+    assert bare is str
     assert isinstance(marker, Header)
     assert marker.alias == "x-token"
+    assert validated is str  # 标记是我们的，不能漏给 pydantic
 
 
 def test_unwrap_passes_a_bare_annotation_through() -> None:
-    type_, marker = unwrap(int)
-    assert type_ is int
-    assert marker is None
+    bare, marker, validated = unwrap(int)
+    assert (bare, marker, validated) == (int, None, int)
+
+
+def test_unwrap_keeps_the_constraints_pydantic_needs() -> None:
+    """从前直接返回 args[0]，Field(gt=0) 这类约束被无声丢掉——既不校验也不进文档。"""
+    bare, marker, validated = unwrap(Annotated[int, Header(), Field(gt=0)])
+    assert bare is int  # 推断来源只看类型本身
+    assert isinstance(marker, Header)
+    # FieldInfo 之间不做值相等，直接看它还校不校验——那才是这条规则的意义。
+    with pytest.raises(ValidationError):
+        TypeAdapter(validated).validate_python(-1)
 
 
 def test_location_of_pydantic_model_is_body() -> None:

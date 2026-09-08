@@ -18,13 +18,14 @@ import types
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar, cast
 
-from canary_framework.common.error import InjectionError, LifecycleError
-from canary_framework.common.markers import WEB_ATTR
+from canary_framework.common.error import DeclarationError, InjectionError, LifecycleError
+from canary_framework.common.markers import ROUTE_ATTR, WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
     deps_of,
     init_hooks,
     is_cocoa,
+    marked_members,
     start_hooks,
     stop_hooks,
 )
@@ -122,6 +123,7 @@ class Canary:
             await self._apply_framework_config()
             self._graph = build_graph(list(self.roots))
             self._order = topological_sort(self._graph)
+            self._reject_routes_outside_web_units()
             for t in self._order:
                 node = self._graph[t]
                 self._inject(node)
@@ -360,6 +362,26 @@ class Canary:
         loop.set_debug(debug)
         loop.slow_callback_duration = duration
         self._loop_probe = None
+
+    def _reject_routes_outside_web_units(self) -> None:
+        """A route marker on a plain ``@cocoa`` never gets collected — say so.
+
+        ``@get`` 只有写在 ``@web_cocoa`` 单元上才会被收集。写在普通 ``@cocoa`` 上时装饰器
+        确实打上了标记，但没有人去读它——路由静默消失，什么也不报。这类"写了、没报错、
+        也没生效"是最难查的问题，所以在装配期直接拒绝。
+        """
+        for t in self._order:
+            if hasattr(t, WEB_ATTR):
+                continue
+            routes = marked_members(self._graph[t], ROUTE_ATTR)
+            if routes:
+                names = ", ".join(sorted(getattr(fn, "__name__", "?") for _, fn in routes))
+                raise DeclarationError(
+                    t.__name__,
+                    f"{names} carry route markers, but {t.__name__} is a plain @cocoa. "
+                    f"Only @web_cocoa units have their routes collected — "
+                    f"change the decorator to @web_cocoa, or move these methods.",
+                )
 
     def _assembly_summary(self) -> str:
         """Render what the runtime actually assembled — the graph knows, so it should say.

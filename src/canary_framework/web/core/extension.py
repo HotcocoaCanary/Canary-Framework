@@ -59,9 +59,22 @@ def web_cocoa[T](
     ``prefix="/api/admin"``。依赖关系决定启动顺序，不决定 URL 长什么样。
     """
 
+    normalised = _normalise_prefix(prefix)
+
     def mark(c: type[T]) -> type[T]:
         cocoa(deps=deps)(c)  # 先打上 @cocoa 的依赖标记（就地修改 c）
-        setattr(c, WEB_ATTR, {"title": title, "version": version, "prefix": prefix})
+        setattr(c, WEB_ATTR, {"title": title, "version": version, "prefix": normalised})
         return c
 
     return mark(cls) if cls is not None else mark
+
+
+def _normalise_prefix(prefix: str) -> str:
+    """``"api/"`` → ``"/api"``；空前缀保持为空。
+
+    ``@get("ping")`` 早就会自动补上前导斜杠，``prefix`` 却不会——写成 ``prefix="api"``
+    会一路拼成 ``"api/ping"``，最后在 Starlette 里炸出一个裸的 ``AssertionError``。
+    同一个框架里两个都是"路径"的东西，不该一个宽容一个苛刻。
+    """
+    trimmed = prefix.strip().strip("/")
+    return f"/{trimmed}" if trimmed else ""

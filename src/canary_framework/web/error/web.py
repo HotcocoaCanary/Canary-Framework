@@ -28,10 +28,12 @@ class RouteRegistrationError(WebError):
     """
 
 
-class MissingParameterError(WebError):
-    """Raised when a required request parameter is absent.
+class BindingError(WebError):
+    """Raised when a request cannot supply what the handler's signature asks for.
 
-    请求缺少必填参数时抛出（内部使用，通常映射为 HTTP 422）。
+    请求满足不了 handler 签名时抛出：缺必填参数、请求体不是合法 JSON、请求体为空而形参
+    又没有缺省值。它是**内部信号**——总会被 :class:`RequestValidationError` 包住再往上走，
+    使用者要 catch 的是后者。分成两层是因为"具体哪里对不上"和"这是一次 422"是两件事。
     """
 
 
@@ -64,7 +66,7 @@ class RequestValidationError(WebError):
     这是框架层面的失败——请求根本没能进到 handler，所以它就该是 4xx，不进业务信封。
     """
 
-    def __init__(self, cause: ValidationError | MissingParameterError) -> None:
+    def __init__(self, cause: ValidationError | BindingError) -> None:
         self.cause = cause
         super().__init__(str(cause))
 
@@ -77,3 +79,21 @@ class RequestValidationError(WebError):
             # 已做好脱敏，且保留了 gt / max_length 这类有用的约束值。
             return json.loads(self.cause.json(include_url=False))
         return str(self.cause)
+
+
+class ResponseValidationError(WebError):
+    """Raised when a handler returns something its declared return type does not allow.
+
+    handler 返回了不符合自己返回注解的东西时抛出——这是**服务端的 bug**，不是客户端的
+    问题，所以它不会变成 4xx，而是照常走 500 并把 traceback 留在服务器日志里。
+
+    为什么要校验：``/docs`` 会照着返回注解向调用方承诺响应长什么样。不校验的话，声明
+    ``-> Book`` 而实际发出 ``{"title": ...}``（少了 stock）不会有任何人喊一声，文档就
+    在撒谎。既然框架承诺"文档与实际一致"，这一处就不能留例外。
+    """
+
+    def __init__(self, handler: str, cause: ValidationError) -> None:
+        self.cause = cause
+        super().__init__(
+            f"{handler} returned a value that does not match its declared return type: {cause}"
+        )

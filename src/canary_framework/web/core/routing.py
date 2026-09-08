@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
@@ -17,7 +18,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from canary_framework.web.decorator.resolve import HandlerPlan, ParamSpec
-from canary_framework.web.error.web import MissingParameterError, RequestValidationError
+from canary_framework.web.error.web import (
+    BindingError,
+    RequestValidationError,
+    ResponseValidationError,
+)
 
 _MISSING = object()  # 与 None 区分：header 真的传了空串时，None 才表示"没有这一项"
 
@@ -32,11 +37,11 @@ async def dispatch(
     """
     try:
         kwargs = {spec.name: await _value_of(spec, request) for spec in plan.params}
-    except (ValidationError, MissingParameterError) as exc:
+    except (ValidationError, BindingError) as exc:
         raise RequestValidationError(exc) from exc
     # handler 必为 async（由 @get/@post 在装配期把关），这里没有第二条同步路径。
     result = await cast("Awaitable[Any]", fn(**kwargs))
-    return _to_response(result, plan)
+    return _to_response(result, plan, fn)
 
 
 async def _value_of(spec: ParamSpec, request: Request) -> Any:
@@ -49,14 +54,37 @@ async def _value_of(spec: ParamSpec, request: Request) -> Any:
     if spec.location == "request":
         return request
     if spec.location == "body":
-        return _validate(spec, await request.json())
+        body = await _body_of(spec, request)
+        # 没有请求体、而形参有缺省值——这就是"可选请求体"。
+        return spec.default if body is _MISSING else _validate(spec, body)
 
     raw = _raw_of(spec, request)
     if raw is _MISSING:
         if not spec.required:
             return spec.default
-        raise MissingParameterError(f"missing {spec.location} parameter: {spec.source}")
+        raise BindingError(f"missing {spec.location} parameter: {spec.source}")
     return _validate(spec, raw)
+
+
+async def _body_of(spec: ParamSpec, request: Request) -> Any:
+    """Read and parse the request body, turning every failure into a 422.
+
+    请求体的三条失败路径从前全掉进 500：空 body、不是合法 JSON、发成了表单。原因是
+    ``request.json()`` 抛的是 ``JSONDecodeError``，而分发只接住了字段校验失败那一种。
+    它们统统是**调用方**把请求发错了，该是 422。
+
+    先读原始字节再解析，是为了把"没有请求体"和"请求体是 null"分开——只有前者才能落到
+    形参的缺省值上，``item: Item | None = None`` 这种可选请求体因此才写得出来。
+    """
+    raw = await request.body()
+    if not raw.strip():
+        if not spec.required:
+            return _MISSING
+        raise BindingError("missing request body")
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise BindingError(f"request body is not valid JSON: {exc}") from exc
 
 
 def _raw_of(spec: ParamSpec, request: Request) -> Any:
@@ -76,7 +104,7 @@ def _raw_of(spec: ParamSpec, request: Request) -> Any:
         return request.headers.get(spec.source, _MISSING)
     if spec.location == "cookie":
         return request.cookies.get(spec.source, _MISSING)
-    raise MissingParameterError(f"unsupported parameter location: {spec.location}")
+    raise BindingError(f"unsupported parameter location: {spec.location}")
 
 
 def _validate(spec: ParamSpec, raw: Any) -> Any:
@@ -84,15 +112,24 @@ def _validate(spec: ParamSpec, raw: Any) -> Any:
     return raw if spec.adapter is None else spec.adapter.validate_python(raw)
 
 
-def _to_response(result: Any, plan: HandlerPlan) -> Response:
-    """Serialise the handler's return value.
+def _to_response(result: Any, plan: HandlerPlan, fn: Callable[..., object]) -> Response:
+    """Check the return value against its declared type, then serialise it.
 
     handler 自己造好的响应原样放行——SSE、文件下载、自定义状态码、后台任务都走这里。
+
+    有返回注解就**先校验再序列化**：``/docs`` 照着这个注解向调用方承诺了响应的形状，
+    不校验的话，声明 ``-> Book`` 而实际少发一个字段没有任何人会喊一声。校验失败是服务端
+    的 bug，所以抛 :class:`ResponseValidationError` 走 500，而不是伪装成客户端的错。
     """
     if isinstance(result, Response):
         return result
-    if isinstance(result, BaseModel):
-        return JSONResponse(result.model_dump(mode="json"))
     if plan.returns is None:
+        # 没有注解 / 注解是 Any：没什么可校验的，模型自己知道怎么变成 JSON。
+        if isinstance(result, BaseModel):
+            return JSONResponse(result.model_dump(mode="json"))
         return JSONResponse(result)
-    return JSONResponse(plan.returns.dump_python(result, mode="json"))
+    try:
+        validated = plan.returns.validate_python(result)
+    except ValidationError as exc:
+        raise ResponseValidationError(str(getattr(fn, "__qualname__", fn)), exc) from exc
+    return JSONResponse(plan.returns.dump_python(validated, mode="json"))

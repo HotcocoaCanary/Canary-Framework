@@ -72,3 +72,17 @@ class ConstructionError(CanaryError):
             f"arguments — declare what it needs in @cocoa(deps=[...]) and read the values "
             f"from those dependencies in @on_init or @on_start."
         )
+
+
+class DeclarationError(CanaryError):
+    """Raised when a declaration is attached to something that cannot honour it.
+
+    声明打在了读不到它的地方时抛出。典型例子：``@get`` 写在普通 ``@cocoa`` 上——装饰器
+    确实打上了标记，但只有 ``@web_cocoa`` 单元的路由会被收集，于是那条路由静默消失。
+
+    静默失效是这个框架一直在消灭的东西：写了、没报错、也没生效，是最难查的一类问题。
+    """
+
+    def __init__(self, unit: str, detail: str) -> None:
+        self.unit = unit
+        super().__init__(f"{unit}: {detail}")

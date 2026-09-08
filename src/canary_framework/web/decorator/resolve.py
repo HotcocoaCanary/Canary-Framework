@@ -33,6 +33,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from canary_framework.web.decorator.params import Param
+from canary_framework.web.error.web import RouteRegistrationError
 from canary_framework.web.infra.naming import header_name
 
 _log = logging.getLogger("canary.web")
@@ -129,8 +130,8 @@ def build_plan(fn: Callable[..., object], path: str) -> HandlerPlan:
     for name, param in inspect.signature(fn).parameters.items():
         if name in ("self", "cls") or param.kind in _SKIPPED_KINDS:
             continue
-        type_, marker = unwrap(hints.get(name, param.annotation))
-        location = location_of(type_, marker, name, path_params)
+        bare, marker, validated = unwrap(hints.get(name, param.annotation))
+        location = location_of(bare, marker, name, path_params)
         alias = marker.alias if marker is not None and marker.alias else name
         specs.append(
             ParamSpec(
@@ -138,12 +139,22 @@ def build_plan(fn: Callable[..., object], path: str) -> HandlerPlan:
                 location=location,
                 source=header_name(alias) if location == "header" else alias,
                 # Request 对象原样交出，不该也不能被校验。
-                adapter=None if location == "request" else _adapter(type_, fn, name),
+                adapter=None if location == "request" else _adapter(validated, fn, name),
                 default=param.default,
-                multi=get_origin(type_) is list,
-                annotation=type_,
+                multi=get_origin(bare) is list,
+                annotation=bare,
                 description=marker.description if marker is not None else None,
             )
+        )
+
+    bodies = [spec.name for spec in specs if spec.location == "body"]
+    if len(bodies) > 1:
+        # 两个形参各拿整份 body 是静默的错——从前两个都拿到同一份完整 JSON，谁也没提醒。
+        # 不做 FastAPI 那种按形参名自动嵌套：那是隐式行为，一个请求体就该对应一个形参。
+        raise RouteRegistrationError(
+            f"{getattr(fn, '__qualname__', fn)} declares {len(bodies)} request-body "
+            f"parameters ({', '.join(bodies)}), but a request has only one body. "
+            f"Merge them into a single model."
         )
 
     returned = hints.get("return", _EMPTY)
@@ -189,20 +200,28 @@ def hints_of(fn: Callable[..., object]) -> dict[str, Any]:
     return get_type_hints(getattr(fn, "__func__", fn), include_extras=True)
 
 
-def unwrap(annotation: Any) -> tuple[Any, Param | None]:
-    """Split ``Annotated[T, Header()]`` into ``(T, marker)``; pass others through.
+def unwrap(annotation: Any) -> tuple[Any, Param | None, Any]:
+    """Split an annotation into ``(bare type, our marker, what pydantic should see)``.
+
+    返回三样东西，因为它们各有各的用处：
+
+    - **裸类型** 用来推断来源（是不是标量、是不是 ``list``）——推断只关心类型本身。
+    - **来源标记**（``Header`` / ``Cookie``）是我们自己的东西，不能漏给 pydantic。
+    - **交给 pydantic 的注解** 必须保留 ``Annotated`` 里的其余元数据。从前这里直接返回
+      ``args[0]``，于是 ``Annotated[int, Field(gt=0)]`` 的约束**被无声丢掉**——既不校验
+      也不进文档。约束是使用者写下的声明，凭什么丢。
 
     标记只能出现在 ``Annotated`` 里——把它写成默认值（FastAPI 的经典写法）会在装配期
     被 :func:`~canary_framework.web.infra.checks.require_annotated_sources` 拒绝，
     因为那让"默认值"这个位置同时表示两件事。
     """
-    if get_origin(annotation) is Annotated:
-        args = get_args(annotation)
-        for meta in args[1:]:
-            if isinstance(meta, Param):
-                return args[0], meta
-        return args[0], None
-    return annotation, None
+    if get_origin(annotation) is not Annotated:
+        return annotation, None, annotation
+    bare, *extras = get_args(annotation)
+    marker = next((m for m in extras if isinstance(m, Param)), None)
+    rest = [m for m in extras if not isinstance(m, Param)]
+    # 去掉我们的标记、留下其余元数据；一个都不剩就退回裸类型。
+    return bare, marker, Annotated[(bare, *rest)] if rest else bare
 
 
 def is_scalar(type_: Any) -> bool:
