@@ -6,7 +6,7 @@
 pip install canary-framework
 ```
 
-需要 Python 3.12+。
+需要 Python 3.12+。核心零依赖 —— 不会拉进任何第三方包。
 
 ## 声明单元
 
@@ -18,16 +18,18 @@ from canary_framework import cocoa
 
 @cocoa
 class Config:
-    def __init__(self) -> None:
+    def __init__(self) -> None:      # 无参构造：不能有必填参数
         self.database_url = "postgresql://localhost/dev"
 
 
 @cocoa(deps=[Config])
 class Database:
-    # self.config 会在 start() 阶段注入
-    def __init__(self) -> None:
-        self.pool = None
+    # self.config 在 init() 阶段注入
+    pass
 ```
+
+单元一律由框架**无参构造**，所以需要什么值就声明成依赖，在生命周期钩子里从协作者那里读 ——
+不要写成构造参数。
 
 ## 添加生命周期行为
 
@@ -41,16 +43,21 @@ from canary_framework import cocoa, on_init, on_start, on_stop
 class Database:
     @on_init
     def setup(self) -> None:
+        # 依赖已就位，但还没有任何东西开始运行
         self.pool = ConnectionPool(self.config.database_url)
 
     @on_start
     async def connect(self) -> None:
+        # 要连接、要起后台任务的，归这里
         await self.pool.connect()
 
     @on_stop
     async def disconnect(self) -> None:
         await self.pool.close()
 ```
+
+判据：不碰外部资源的准备工作放 `@on_init`，需要获取资源的放 `@on_start` —— 因为只有
+`@on_start` 拿到的东西才会被 `@on_stop` 回收。
 
 ## 用 `Canary` 运行
 
@@ -70,12 +77,11 @@ async def main() -> None:
     app = Canary(UserService)
     await app.init()
     await app.start()
-
     try:
         users = app[UserService]
         assert users.database is app[Database]
     finally:
-        await app.stop()
+        await app.stop()      # 从任何终态都能调，幂等
 
 
 asyncio.run(main())
@@ -98,6 +104,7 @@ asyncio.run(main())
 
 ```python
 app = Canary(UserService, ReportService)
+await app.init()
 await app.start()
 assert app[Database] is app[UserService].database
 ```
@@ -117,10 +124,10 @@ from canary_framework import Canary
 from canary_framework.web import get, web_cocoa
 
 
-@web_cocoa(deps=[Database])
+@web_cocoa(deps=[Database], prefix="/api")
 class LibraryAPI:
     @get("/books")
-    async def list_books(self) -> list[dict]:
+    async def list_books(self) -> list[dict]:       # handler 必须是 async def
         return self.database.all("books")
 
 
@@ -133,9 +140,17 @@ uvicorn examples.library.web:app --reload
 
 打开 `/docs` 查看交互式 OpenAPI 文档。详见 [Web 应用](web.md)。
 
+## 看看框架装配出了什么
+
+把日志级别设成 `DEBUG`，启动末尾会打印一份装配摘要（启动顺序、依赖、路由）：
+
+```bash
+CANARY_LOG_LEVEL=DEBUG python -m examples.library.main
+```
+
 ## 下一步
 
-- [Cocoa 单元](cocoa.md) —— 声明、依赖与钩子。
+- [Cocoa 单元](cocoa.md) —— 声明、构造规则与钩子。
 - [运行时（Canary）](canary.md) —— 编排、多根与 ASGI。
-- [生命周期](lifecycle.md) —— 状态机与钩子顺序。
-- [依赖注入](dependency-injection.md) —— 注入、共享、成环。
+- [生命周期](lifecycle.md) —— 五个时刻、状态机与失败路径。
+- [依赖注入](dependency-injection.md) —— 注入、共享、成环、撞名。

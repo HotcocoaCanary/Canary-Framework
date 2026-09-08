@@ -10,7 +10,7 @@ cocoa 通过 `@cocoa(deps=[...])` 声明依赖。无需额外 DSL，也无需 `_
 class UserService: ...
 ```
 
-`deps=[...]` 是一个有序的 cocoa 类型列表。在 `start()` 阶段，运行时把每个依赖注入到实例上，
+`deps=[...]` 是一个有序的 cocoa 类型列表。在 `init()` 阶段，运行时把每个依赖注入到实例上，
 属性名由类名转 snake_case 得到：
 
 | 依赖类型 | 注入属性 |
@@ -18,17 +18,48 @@ class UserService: ...
 | `Config` | `self.config` |
 | `Database` | `self.database` |
 | `UserService` | `self.user_service` |
+| `APIService` | `self.api_service` |
+| `HTTPServer` | `self.http_server` |
 
 ```python
 @cocoa(deps=[Database])
 class UserService:
-    @on_start
-    def warm_up(self) -> None:
-        self.database.ping()  # 在 @on_start 执行前已注入
+    @on_init
+    def check(self) -> None:
+        assert self.database is not None  # @on_init 时已经注入
 ```
 
-因为注入发生在 `start()` 而非 `__init__`，构造函数保持空、单元构建廉价。不要在 `__init__`
-里读注入属性；请用 `@on_init` 或 `@on_start`。
+**注入属于装配，不属于启动**，所以它发生在 `init()` 而不是 `start()`。这带来两件事：
+`@on_init` 能看到自己的协作者（否则它和 `__init__` 几乎没区别）；装配类的错误（撞名、
+不是 cocoa、成环）在装配阶段就暴露，不必等到 `start()`。
+
+不要在 `__init__` 里读注入属性 —— 那时它们还不存在。请用 `@on_init` 或 `@on_start`。
+
+## 值从哪来
+
+单元一律**无参构造**，所以"这个单元需要一个 dsn / 一个 api key / 一个超时时间"不能写成
+构造参数，得写成依赖：
+
+```python
+@cocoa
+class Config:
+    def __init__(self) -> None:
+        self.dsn = os.environ["DATABASE_URL"]
+        self.timeout = 5.0
+
+
+@cocoa(deps=[Config])
+class Database:
+    @on_init
+    def configure(self) -> None:
+        self.pool = ConnectionPool(self.config.dsn, timeout=self.config.timeout)
+```
+
+代价要认：**每个参数化的单元因此都依赖一个配置单元**，而这条依赖不是业务上的协作，纯粹
+是用来搬运值的。这是这个设计换来"框架能构造每一个单元、失败时能逆序回收"的代价。
+
+配置本身没有任何特殊待遇 —— 它就是一个普通的 `@cocoa`，你想怎么读环境变量、`.env`、
+远程配置中心都行（远程的放 `@on_start`，那是 IO）。
 
 ## 解析
 
@@ -64,11 +95,14 @@ class Root: ...
 
 
 app = Canary(Root)
-await app.start()
+await app.init()
 assert app[Database].config is app[Cache].config  # 同一个 Config
 ```
 
 共享作用域限于单个 `Canary`。两个独立的 `Canary` 实例会构建两张独立的图。
+
+**类型即身份。** 一个类型在一张图里只有一个实例，所以"两个连不同库的 `Database`"写不
+出来 —— 需要两个实例就写两个类。
 
 ## 成环
 
@@ -84,9 +118,23 @@ class A: ...
 class B: ...
 
 
-app = Canary(A)
-await app.init()  # CircularDependencyError: circular dependency detected: A -> B -> A
+await Canary(A).init()  # CircularDependencyError: circular dependency detected: A -> B -> A
 ```
+
+## 撞名
+
+注入属性名由依赖的**类名**派生，与 `deps` 的顺序无关。两个依赖的 snake_case 撞名时抛
+`InjectionError`，而不是"后写的赢"：
+
+```python
+@cocoa(deps=[KBFileRepository, KbFileRepository])
+class Collide: ...
+
+# InjectionError: Collide.kb_file_repository is claimed by more than one source:
+#   KBFileRepository, KbFileRepository
+```
+
+改名其中一个类即可。缩写会被正确处理（`APIService` → `api_service`）。
 
 ## 多根图
 
@@ -94,12 +142,18 @@ await app.init()  # CircularDependencyError: circular dependency detected: A -> 
 
 ```python
 app = Canary(UserService, ReportService)
-await app.start()
+await app.init()
 assert app[UserService].database is app[ReportService].database
 ```
 
-## 命名边界情况
+## 测试时替换依赖
 
-注入属性名由依赖的类名转 snake_case 而来。缩写也能正确处理（`APIService` →
-`api_service`、`HTTPServer` → `http_server`）。若两个依赖会撞名，请重命名其中一个类 ——
-注入属性由类型派生，而非列表顺序。
+框架**不提供**替换入口。因为注入本来就只是给属性赋值，测试里直接赋值即可：
+
+```python
+service = UserService()
+service.database = FakeDatabase()      # 就是注入在做的事
+await service.some_method()
+```
+
+需要连生命周期一起测时，把假实现写成一个 `@cocoa` 单元，用它当根组一张测试专用的图。

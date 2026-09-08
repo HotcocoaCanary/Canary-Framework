@@ -1,23 +1,46 @@
 # Lifecycle
 
-`Canary` drives each unit through an explicit, async-native lifecycle. Hooks are declared with
-`@on_init` / `@on_start` / `@on_stop` and run in a deterministic order.
+`Canary` drives every unit through an explicit, async-native timeline.
 
-## The three hooks
+## Five moments
+
+The framework splits "a unit from nothing to running to gone" into five moments. The criterion
+is one thing: **what you have in your hands at that moment.**
+
+| Moment | Who acts | What you have |
+|---|---|---|
+| Construction | your `__init__` | nothing (no arguments) |
+| **Assembly** | **the framework** | build → validate → sort → inject |
+| Init `@on_init` | you | dependencies in place, nothing running yet |
+| Start `@on_start` | you | dependencies in place; acquire resources |
+| Stop `@on_stop` | you | reclaim, in reverse |
+
+The middle step is **a framework action, not a user hook** — which is exactly why it needs no
+hook: at any instant during assembly you would have nothing that the moments on either side do
+not already give you.
+
+## Three hooks
 
 | Declaration | Runs during | Order |
 |---|---|---|
-| `@on_init` | `init()` | topological (dependencies first) |
-| `@on_start` | `start()` | topological (dependencies first), after injection |
+| `@on_init` | `init()`, after injection | topological (dependencies first) |
+| `@on_start` | `start()` | topological (dependencies first) |
 | `@on_stop` | `stop()` | reverse topological (dependents first) |
 
-Every hook is optional. A hook may be a plain function or a coroutine function — the runtime
-inspects the return value and `await`s it only when it is awaitable, so sync and async hooks mix
-freely.
+All hooks are optional and may be sync or async — the runtime inspects the return value and only
+awaits when it is awaitable, so the two mix freely.
 
-## State machine
+## What each method does
 
-Each `Canary` tracks an eight-state machine:
+| Method | Transition | What it does |
+|---|---|---|
+| `await app.init()` | `NEW → INITIALIZED` | build, validate, sort, **inject dependencies**, run `@on_init` in order |
+| `await app.start()` | `INITIALIZED → STARTED` | run `@on_start` in order, then merge the routes of every `@web_cocoa` unit |
+| `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse |
+
+In one line: **`init` assembles the graph so every unit is usable; `start` lets them go to work.**
+
+## The state machine
 
 ```
 NEW ─▶ INITIALIZING ─▶ INITIALIZED ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
@@ -25,33 +48,29 @@ NEW ─▶ INITIALIZING ─▶ INITIALIZED ─▶ STARTING ─▶ STARTED ─▶
         └───────────────▶ FAILED ◀───┴────────────────────┘
 ```
 
-`app.state` returns the current `LifecycleState`. The state machine guarantees lifecycle
-operations run in a legal order:
+`app.state` returns the current `LifecycleState`. Illegal transitions raise `LifecycleError`:
 
 ```python
-await app.stop()  # LifecycleError: illegal transition from NEW
 await app.init()
 await app.start()
 await app.start()  # LifecycleError: illegal transition from STARTED
 ```
 
-A hook that raises marks the state `FAILED` and re-raises the exception.
+## Hook order
 
-## Hook ordering
+For the graph `APIService → UserService → Database` (arrow = "depends on"):
 
-For a graph `APIService → UserService → Database` (arrow = "depends on"):
+- **Init** — `Database` → `UserService` → `APIService`
+- **Start** — `Database` → `UserService` → `APIService`
+- **Stop** — `APIService` → `UserService` → `Database`
 
-- **Init** — `Database` → `UserService` → `APIService`.
-- **Start** — `Database` → `UserService` → `APIService`.
-- **Stop** — `APIService` → `UserService` → `Database`.
+Every unit is initialised and started after its dependencies, and stopped before them. The order
+comes from Kahn's algorithm, so it is deterministic.
 
-Every unit initialises and starts only after its dependencies; it stops before its
-dependencies. The order comes from a Kahn topological sort, so it is deterministic.
+## Hooks stack
 
-## Hooks are stacked
-
-A marker can be shared by several methods — mixin hooks run before the class's own, in
-definition order. This lets a mixin add `@on_start` behaviour without overriding the class's:
+One marker can be shared by several methods — mixin hooks run before the class's own, in
+definition order:
 
 ```python
 class LoggingMixin:
@@ -69,14 +88,55 @@ class Database(LoggingMixin):
 
 Both `log_start` (mixin) and `connect` (class) run, in that order.
 
-## Failure handling
+## Failure paths
 
-A hook exception propagates out of `init()` / `start()` / `stop()` after the runtime sets the
-state to `FAILED`. The runtime does not attempt automatic rollback — build rollback into your
-own `@on_stop` hooks where a partial teardown matters.
+Failure paths are a deliberate part of this framework, and the three rules differ:
 
-## Under an ASGI server
+**A failing `init()` does not unwind.** No `@on_start` has run yet, so there is nothing to
+reclaim. The state becomes `FAILED` and the exception propagates unchanged.
 
-When `Canary` is served through ASGI (e.g. via uvicorn), the `lifespan` protocol drives the
-same lifecycle: `lifespan.startup` runs `init()` + `start()`, `lifespan.shutdown` runs
-`stop()`. Explicit calls and the server path share one engine.
+**A failing `start()` unwinds everything.** The invariant is *either everything started, or
+nothing did*. When any step raises, every unit that **entered** `@on_start` (including the one
+that failed) runs its `@on_stop` in reverse, and then the original exception is re-raised;
+failures during that unwind are attached to it as notes, without changing its type.
+
+**`stop()` is the single reclamation path.** It serves both normal and failed termination:
+
+```python
+app = Canary(Root)
+try:
+    await app.init()
+    await app.start()
+finally:
+    await app.stop()   # callable from STARTED and from FAILED; idempotent
+```
+
+Calling `stop()` on something that never started is not an error — it is a no-op that settles
+into `STOPPED` (an earlier `FAILED` is not erased). That makes `finally: await app.stop()`
+always safe, with no state check first.
+
+A single failing `@on_stop` does not abort the shutdown: errors are collected, the remaining
+units are reclaimed anyway, and everything is raised at the end as one `ExceptionGroup`.
+
+## Under ASGI
+
+`Canary` is itself an ASGI app. Under a server like uvicorn the `lifespan` protocol drives the
+same lifecycle: `lifespan.startup` runs `init()` + `start()`, `lifespan.shutdown` runs `stop()`.
+A failed startup is **reported and then raised** (`lifespan.startup.failed`), so a caller can
+never conclude that an app which did not start actually started.
+
+Without a lifespan (for example when you call `app` directly), the first request starts the app.
+Concurrent first requests queue for that single startup rather than each starting their own or
+hitting a serving app that is not built yet.
+
+## Two environment variables
+
+The framework has exactly two knobs of its own, read straight from the environment:
+
+| Variable | Effect |
+|---|---|
+| `CANARY_LOG_LEVEL` | Sets the level of the `canary` logger tree only. No handler, no format, nothing touched on root. `DEBUG` also prints the assembly summary (start order, dependencies, routes). |
+| `CANARY_SLOW_CALLBACK_SECONDS` | Turns on an event-loop lag probe: any callback occupying the loop for longer than this gets an asyncio WARNING. It enables asyncio debug mode and costs something, so it is a development tool and off by default. |
+
+The framework provides no configuration mechanism — configuration is just one of your own
+`@cocoa` units, and logging is the standard library's `logging.getLogger(__name__)`.

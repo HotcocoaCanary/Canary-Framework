@@ -2,81 +2,132 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
-## [0.9.3] — 2026-09-04
+## [0.9.3] — 2026-09-08
 
-修复两条失败路径上的全部已知问题，并给单元补上「配置」与「日志」两个协作者。
-This release closes the framework's failure paths — request handling and lifecycle — and
-gives every unit its logger and its settings.
+A convergence release: the failure paths are completed, the mental model is straightened out, and
+everything that looked necessary but that users can write themselves in ten lines is gone. It
+contains several breaking changes — 0.9.x is still taking shape.
+
+一次收敛：补完失败路径、理顺心智模型，并砍掉那些"看起来该有、其实使用者自己十行就能写"的
+东西。含多处破坏性变更。
+
+**The rule that runs through it**: the framework only builds empty shells; anything that needs
+input from outside happens in the lifecycle. Every instance on the graph is constructed by the
+framework with no arguments — there is no second source.
 
 ### Added
 
-- `@on_request_error(ExcType, ...)` — map an exception to a response, once, for the whole
-  app. Structurally identical to `@get` (a method marker read at assembly), looked up by
-  `type(exc).__mro__`. Registering the same type twice raises `RouteRegistrationError`.
-- `HTTPError(status_code, detail, headers=)` — for errors that already *are* HTTP concepts;
-  no registration needed. Domain errors should stay domain errors and be mapped instead.
-- `RequestValidationError` — 422 is now *raised* rather than returned, so it can be replaced
-  with the house error envelope via `@on_request_error(RequestValidationError)`.
-- Built-in handlers for `RequestValidationError` (422), `HTTPError`, and `Exception`
-  (a JSON 500). All three are overridable.
-- `Canary(*roots, overrides={Type: substitute})` — replace a unit (or a config class) with a
-  ready-made instance. Substitution happens at *construction*, so an overridden unit's own
-  dependencies are never instantiated. An override that never applies raises `OverrideError`.
-- Class-level annotations are declarations the runtime fills: `log: logging.Logger` gets a
-  logger named `module.QualName`; `config: SomeSettings` gets the shared instance of that
-  settings class. Two sources claiming the same attribute name raise `InjectionError`.
-- `canary_framework.common.config` — `Config` (a `BaseSettings` that also reads `.env`) and
-  `CanaryConfig` (`CANARY_*`; `log_level` applies to the `canary` logger tree only).
-- Assembly summary on the `canary.runtime` logger at DEBUG: start order, dependencies,
-  substitutions, mounted routes, error handlers — plus a note when multiple roots mean there
-  is no "after everything started" position.
-
-### Fixed
-
-- **Start failure leaked started units.** `start()` now keeps an explicit ledger and unwinds
-  it in reverse (including the unit that failed), then re-raises the original exception with
-  rollback failures attached as notes.
-- **A failing `@on_stop` aborted shutdown.** Stop now collects errors and keeps going,
-  raising an `ExceptionGroup` at the end.
-- **`stop()` was illegal after a failure.** It is now callable from any settled state and is
-  idempotent — one reclamation path for both normal and failed termination.
-- **Lifespan startup failure hung the process.** `_lifespan` returned to `await receive()`
-  after sending `lifespan.startup.failed`, where no further message ever arrives.
-- **A validator raising `ValueError` crashed its own 422** into a 500 (the live exception
-  object sat in `ctx` and could not be serialised).
-- **Handlers could not return a `Response`.** SSE, file downloads, custom status codes and
-  background tasks all work now.
-- **Non-scalar parameters were read from the query string.** Inference is now one rule:
-  scalars come from the query (or the path when the name matches a placeholder), everything
-  else from the body.
-- **One undescribable type took down the whole OpenAPI document.** It degrades to an
-  unconstrained schema with a WARNING naming the handler.
-- **`{name:path}` converters leaked into the OpenAPI document.**
+- **Injection moved from `start()` to `init()`.** `@on_init` therefore has a meaning of its own
+  for the first time — "dependencies are in place, nothing is running yet" — and assembly errors
+  surface during assembly instead of waiting for `start()`.
+- `ConstructionError` — a unit that needs constructor arguments gets an actionable error naming
+  the single way out (turn the argument into a dependency), instead of a bare `TypeError` that
+  neither points at the rule nor inherits `CanaryError`.
+- `DeclarationError` — `@get` on a plain `@cocoa` used to fail silently: the decorator applied,
+  nothing was reported, and the route was simply not there. Refused at assembly now.
+- `InjectionError` — two dependencies whose snake_case names collide no longer let the last one
+  silently win.
+- Assembly summary on the `canary.runtime` logger at DEBUG: start order, each unit's
+  dependencies, and the mounted routes.
+- `CANARY_SLOW_CALLBACK_SECONDS` — an optional event-loop lag probe. It catches synchronous
+  blocking inside `async def` bodies, complementing the declaration-time refusal of synchronous
+  handlers, and is restored on `stop()` so it never leaks into the rest of the process.
+- `status_code` on every route decorator — `@post(..., status_code=201)`,
+  `@delete(..., status_code=204)`. Previously this meant building a `Response` by hand, which
+  lost both return-type validation and the response schema in the document. `204` / `304` send
+  an empty body per the HTTP spec.
+- Documentation metadata: `tags` (on `@web_cocoa` and on each route, concatenated), `summary`,
+  `deprecated`. The OpenAPI `description` comes from the handler's docstring.
+- Return values are validated against the return annotation before serialisation. `/docs`
+  promises callers that shape, so a mismatch is a server-side bug and becomes a 500.
 
 ### Changed
 
-- **Handlers must be `async def`.** A synchronous handler runs on the event loop and stalls
-  the entire process, not just its own request; Canary refuses to route it at declaration
-  time rather than silently offloading it to a thread pool. Wrap blocking calls with
-  `await asyncio.to_thread(...)` — one rule, and it works in handlers, repositories and
-  lifecycle hooks alike. `@on_request_error` handlers follow the same rule.
-- `stop()` raises `ExceptionGroup` instead of the first exception.
-- Unhandled exceptions produce a JSON 500 body instead of Starlette's `text/plain`.
-- `pydantic` and `pydantic-settings` are now core dependencies (`dependencies` is no longer
-  empty). Configuration is not an optional concern the way `web` is — every application has
-  it — so making it an extra would have meant a core feature that sometimes isn't there.
-  The `web` extra drops its own `pydantic` entry.
+- **BREAKING: `Canary(provide=...)` removed** (it never shipped under its earlier name
+  `overrides=` either). It contradicted "units are always constructed with no arguments":
+  `ConstructionError` pointed at it, while `provide` refused any instance that declared `deps`.
+  Substituting a dependency in a test is plain attribute assignment (`svc.database = FakeDb()`)
+  — injection never did more than that. `ProvisionError` is gone with it.
+- **BREAKING: `@on_request_error` and exception-mapping registration removed.** Exceptions now
+  have three fixed outcomes: the request cannot bind → 422, `HTTPError` → its own status code,
+  anything else → a JSON 500. Expected business failures belong in the return value, not thrown
+  for the framework to translate into a status code.
+- **BREAKING: prefixes no longer nest along the dependency chain.** `@web_cocoa(prefix=...)` is
+  an absolute prefix. Dependencies say what starts first and who may call whom; URLs say how
+  resources are named — neither should decide the other. Prefixes are normalised (`"api"`,
+  `"/api/"` → `/api`).
+- **BREAKING: `Query` / `Path` / `Body` parameter markers removed.** Inference already gives the
+  same answer: scalars come from the query string (or the path when the name matches a
+  placeholder), everything else from the body. `Header` and `Cookie` stay — they are the only two
+  sources inference cannot reach.
+- **BREAKING: parameter markers only inside `Annotated`.** `x: int = Query(10)` made the
+  default-value position mean two things at once; the form is refused at assembly.
+- **BREAKING: handlers and error handlers must be `async def`.** A synchronous handler runs on
+  the event loop and stalls the whole process, not just its own request. The framework refuses at
+  declaration time rather than silently offloading it to a thread pool; wrap blocking calls with
+  `await asyncio.to_thread(...)`.
+- **BREAKING: `/redoc` removed.** One documentation UI is enough.
+- `stop()` is the single reclamation path — callable from `STARTED` and from `FAILED`, idempotent,
+  a no-op when nothing ever started. `finally: await app.stop()` is always safe.
+- Core dependencies are back to none: pydantic left the core and belongs to `[web]` only.
+- `MissingParameterError` is no longer public: it is an internal signal always wrapped in
+  `RequestValidationError`, which is what callers catch.
 
-### Notes
+### Fixed
 
-- **Multiple roots have no "after everything started" position.** With a single root, that
-  root is always last in topological order, so its `@on_start` *is* the after-all hook and
-  its `@on_stop` runs before anything else tears down. Declare a composition root when you
-  need it; no new lifecycle hook was added.
-- Acquire resources in `@on_start`, not `@on_init` — dependencies are not injected yet at
-  init time, so an `@on_stop` written against them has nothing to release.
-- `@on_stop` must tolerate a unit whose `@on_start` only got halfway; that is the price of
-  rolling back the failed unit too.
+- **A failing `start()` leaked started units.** It now keeps an explicit ledger and unwinds it in
+  reverse (including the unit that failed), then re-raises the original exception with rollback
+  failures attached as notes.
+- **A failing `@on_stop` aborted the shutdown.** Errors are collected, the remaining units are
+  reclaimed anyway, and everything is raised at the end as one `ExceptionGroup`.
+- **A failing lifespan startup hung the process.** After sending `lifespan.startup.failed` the
+  error must be raised, or a caller that implements the protocol fully concludes an app that
+  never started did start, and hangs forever at shutdown. Shutdown failures are handled
+  symmetrically.
+- **Concurrent cold start without a lifespan crashed.** The check was "is the state NEW", so once
+  the first request flipped it to STARTING and yielded, later requests skipped startup and went
+  straight to a serving app that did not exist. Five concurrent first requests produced one
+  success and four `RuntimeError`s.
+- **Every request-body failure became a 500.** `request.json()` raises `JSONDecodeError`, which
+  dispatch did not catch. An empty body, invalid JSON and a form post are all 422 now — and
+  reading the raw bytes first makes `item: Item | None = None` (an optional body) expressible.
+- **Constraints inside `Annotated` were silently dropped.** `Annotated[int, Field(gt=0)]` neither
+  validated nor reached the document.
+- **Two request-body parameters each received the whole body.** Refused at assembly.
+- **`prefix="api"` raised a bare `AssertionError`** from Starlette. Route paths were already
+  normalised; prefixes now are too.
+- **One undescribable type took down the whole OpenAPI document.** It degrades to an
+  unconstrained schema and logs a WARNING naming the handler — at startup, not on the first
+  request for the document.
+- **`{name:path}` converters leaked into the OpenAPI document.**
+- **Handlers could not return a `Response`.** SSE, file downloads, custom status codes and
+  background tasks all work now.
+- **A validator raising `ValueError` crashed its own 422** into a 500 (the live exception object
+  sat in `ctx` and could not be serialised).
+- **Non-scalar parameters were read from the query string.**
+- **The slow-callback probe could not see the startup phase.** asyncio reads the debug flag
+  before a callback runs, and the probe was switched on inside `init()` — so init and start,
+  which usually run in that same callback, were never measured.
+
+### Performance
+
+- Handler signatures are compiled at assembly time into a value-fetching plan (source, validator,
+  default, serialiser). The request path no longer re-runs `get_type_hints`, rebuilds
+  `inspect.signature` or constructs `TypeAdapter`s: **125 µs → 16.5 µs** per request on the
+  framework's own path (direct ASGI call, mean of 20 000).
+- Dispatch and OpenAPI generation read the same plan, so the documented binding behaviour and the
+  actual behaviour cannot drift apart.
+- The MRO scan behind lifecycle hooks and routes is a single implementation, cached per class.
+
+### Removed
+
+- `SERVE_ATTR` and `ROUTE_ENTRIES_ATTR` — `@web_cocoa` no longer injects a hook to stash route
+  entries on the instance for `Canary` to read back. It only writes a marker; `Canary` picks the
+  units carrying it and hands them to the web extension.
+- `runtime/mounts.py` — with absolute prefixes the runtime does no path arithmetic at all.
+- `build_web_app` — dead, and a second entry point for what `build_serve_app` already did.
+- The re-export layers in seven `__init__.py` files that had no callers (and had already drifted:
+  `common/__init__` forwarded three of six errors).
 
 ## [0.9.2] — 2026-08-19
 

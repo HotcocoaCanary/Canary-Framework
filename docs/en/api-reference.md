@@ -8,8 +8,8 @@ Everything below is exported from `canary_framework` unless stated otherwise.
 def cocoa(cls=None, *, deps: list[type] | None = None)
 ```
 
-Marks `cls` as a cocoa — the minimum unit. `deps` is the ordered list of dependency types.
-Usable directly or as a decorator factory:
+Marks `cls` as a cocoa — the minimum unit. `deps` is an ordered list of dependency types. Usable
+directly or as a decorator factory:
 
 ```python
 @cocoa
@@ -20,6 +20,9 @@ class Config: ...
 class Database: ...
 ```
 
+Units are always constructed by the framework **with no arguments**: `__init__` may not have
+required parameters, or `init()` raises `ConstructionError`.
+
 ## `on_init` / `on_start` / `on_stop`
 
 ```python
@@ -28,8 +31,8 @@ def on_start(fn) -> fn
 def on_stop(fn) -> fn
 ```
 
-Register a method as a lifecycle hook. Each accepts sync or async functions, and any number of
-hooks may share a stage.
+Register a method as a lifecycle hook. Each accepts sync or async functions; a phase may have any
+number of hooks, and mixin hooks run before the class's own.
 
 ## `Canary`
 
@@ -37,34 +40,17 @@ hooks may share a stage.
 class Canary(*roots: type)
 ```
 
-The orchestrator. Raises `TypeError` if a root is not decorated with `@cocoa`.
+The orchestrator. Raises `TypeError` if a root is not marked with `@cocoa`. Construction itself
+does nothing.
 
-### `state` — property
+### Properties
 
-```python
-@property
-def state(self) -> LifecycleState
-```
-
-The current lifecycle state.
-
-### `order` — property
-
-```python
-@property
-def order(self) -> tuple[type, ...]
-```
-
-Unit types in topological startup order (dependencies first).
-
-### `instances` — property
-
-```python
-@property
-def instances(self) -> tuple[object, ...]
-```
-
-The instances, in topological order.
+| Property | Type | Meaning |
+|---|---|---|
+| `state` | `LifecycleState` | current lifecycle state |
+| `order` | `tuple[type, ...]` | topological start order (dependencies first) |
+| `instances` | `tuple[object, ...]` | the instances in that order |
+| `roots` | `tuple[type, ...]` | the roots given at construction |
 
 ### `__getitem__`
 
@@ -72,7 +58,7 @@ The instances, in topological order.
 def __getitem__(self, cls: type[T]) -> T
 ```
 
-Returns the shared singleton for `cls` in this graph. Raises `KeyError` if absent.
+Returns the shared singleton for `cls`, or raises `KeyError`.
 
 ### `init`
 
@@ -80,8 +66,9 @@ Returns the shared singleton for `cls` in this graph. Raises `KeyError` if absen
 async def init(self) -> None
 ```
 
-Builds the graph, topologically sorts it, and runs `@on_init` in order.
-`NEW → INITIALIZED`.
+`NEW → INITIALIZED`. Builds the graph (each type constructed once, with no arguments), validates,
+sorts, **injects dependencies** and runs `@on_init` in order. On failure the state becomes
+`FAILED` and the exception propagates — **without unwinding**, since no `@on_start` has run yet.
 
 ### `start`
 
@@ -89,8 +76,10 @@ Builds the graph, topologically sorts it, and runs `@on_init` in order.
 async def start(self) -> None
 ```
 
-Injects dependencies, runs `@on_start` in order, then collects any serving app.
-`INITIALIZED → STARTED`.
+`INITIALIZED → STARTED`. Runs `@on_start` in order, then merges every `@web_cocoa` unit's routes
+into one serving app. If any step fails, every unit that entered `@on_start` (including the one
+that failed) is reclaimed in reverse, and the original exception is re-raised with any unwind
+failures attached as notes.
 
 ### `stop`
 
@@ -98,7 +87,9 @@ Injects dependencies, runs `@on_start` in order, then collects any serving app.
 async def stop(self) -> None
 ```
 
-Runs `@on_stop` in reverse topological order. `STARTED → STOPPED`.
+Runs `@on_stop` in reverse topological order. **The single reclamation path**: callable from
+`STARTED` and from `FAILED`, idempotent, a no-op when nothing ever started. A failing `@on_stop`
+does not abort the rest — the errors are collected and raised together as an `ExceptionGroup`.
 
 ### `__call__` — ASGI
 
@@ -106,12 +97,13 @@ Runs `@on_stop` in reverse topological order. `STARTED → STOPPED`.
 async def __call__(self, scope, receive, send) -> None
 ```
 
-Serves ASGI: `lifespan` drives the lifecycle; other scopes are delegated to the serving app a
-unit exposed during `start()`.
+Serves ASGI: `lifespan` drives the lifecycle, every other scope is delegated to the merged serving
+app. Without a lifespan the first request starts the app, and concurrent first requests queue for
+that single startup.
 
 ### `__aenter__` / `__aexit__`
 
-Async context-manager protocol wrapping `init()` + `start()` / `stop()`.
+The async context manager protocol, wrapping `init()` + `start()` / `stop()`.
 
 ## Enums
 
@@ -121,45 +113,59 @@ Async context-manager protocol wrapping `init()` + `start()` / `stop()`.
 
 ### `State`
 
-The base enum every state enum inherits; a mount point for `issubclass` checks, not itself used.
+(`canary_framework.common.type`) The base of every state enum; a mounting point for `issubclass`
+checks.
 
 ## Exceptions
 
 | Exception | Base | Meaning |
 |---|---|---|
-| `CanaryError` | `Exception` | base class for every framework error |
-| `CircularDependencyError` | `CanaryError` | dependency cycle; exposes `.cycle` (list of type names) |
-| `LifecycleError` | `CanaryError` | illegal lifecycle transition |
+| `CanaryError` | `Exception` | the root of every framework and extension error |
+| `CircularDependencyError` | `CanaryError` | a cycle in the graph; `.cycle` lists the type names |
+| `ConstructionError` | `CanaryError` | the unit needs constructor arguments and cannot be built |
+| `DeclarationError` | `CanaryError` | a declaration sits where nothing reads it (e.g. `@get` on a plain `@cocoa`) |
+| `InjectionError` | `CanaryError` | two dependencies claim the same attribute; `.attribute` / `.claimants` |
+| `LifecycleError` | `CanaryError` | an illegal lifecycle transition |
 
-All framework and extension errors inherit `CanaryError`, so `except CanaryError` catches
-everything.
+Everything inherits `CanaryError`, so a single `except CanaryError` catches the framework and all
+its extensions.
 
-## Introspection (`canary_framework.core`)
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| `CANARY_LOG_LEVEL` | the level of the `canary` logger tree; `DEBUG` also prints the assembly summary |
+| `CANARY_SLOW_CALLBACK_SECONDS` | threshold in seconds for the event-loop lag probe; a development tool, off by default |
+
+## Introspection (`canary_framework.core.decorator.introspect`)
 
 | Function | Purpose |
 |---|---|
-| `is_cocoa(cls)` | `True` if `cls` was decorated with `@cocoa` |
-| `deps_of(cls)` | the declared dependencies |
-| `hooks_of(instance, marker)` | marked methods of `instance`, base-first |
-| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | hooks for a stage |
-| `to_snake(name)` | `UserService` → `user_service` |
+| `is_cocoa(cls)` | whether `cls` is marked with `@cocoa` |
+| `deps_of(cls)` | the declared dependencies (a tuple) |
+| `marked_members(instance, marker)` | `(payload, bound method)` for every marked method, base-first |
+| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | the hooks of one phase |
+| `to_snake(name)` | (`core.infra.naming`) `UserService` → `user_service` |
 
-## Graph algorithms (`canary_framework.runtime`)
+## Graph algorithms (`canary_framework.runtime.graph`)
 
 | Function | Purpose |
 |---|---|
-| `build_graph(roots)` | instantiate each root and its transitive deps, one instance each |
+| `build_graph(roots)` | instantiate every root and its transitive dependencies, once each, with no arguments |
 | `topological_sort(graph)` | Kahn's algorithm; raises `CircularDependencyError` on a cycle |
 
 ## Web extension (`canary_framework.web`)
 
 | Name | Purpose |
 |---|---|
-| `@web_cocoa(deps=[...], prefix=..., title=..., version=...)` | mark a class as a `@cocoa` *and* an HTTP route holder; `prefix` nests along `deps` |
-| `@get` / `@post` / `@put` / `@patch` / `@delete` / `@route(method, path)` | mark a method as a route handler |
-| `Query` / `Path` / `Header` / `Cookie` / `Body` | parameter source markers (as a default or via `Annotated`) |
-| `WebError` | base class for web-extension errors |
-| `RouteRegistrationError` | duplicate method + path |
-| `MissingParameterError` | required request parameter absent (maps to HTTP 422) |
+| `@web_cocoa(deps=[...], prefix="", tags=(), title="Canary API", version="0.1.0")` | mark a class as both a `@cocoa` and a route holder; `prefix` is **absolute** |
+| `@get` / `@post` / `@put` / `@patch` / `@delete` `(path, *, status_code=200, tags=(), summary=None, deprecated=False)` | mark a method as a request handler (must be `async def`) |
+| `@route(method, path, ...)` | the generic form of the five above |
+| `Header(*, description=None, alias=None)` | a header parameter, written inside `Annotated` |
+| `Cookie(*, description=None, alias=None)` | a cookie parameter, written inside `Annotated` |
+| `HTTPError(status_code, detail=None, headers=None)` | an error that already is an HTTP concept |
+| `WebError` | the root of the extension's errors (inherits `CanaryError`) |
+| `RouteRegistrationError` | a route cannot be registered: duplicate method + path, a non-async handler, two body parameters, … |
+| `RequestValidationError` | the request cannot satisfy the signature; mapped to 422 |
 
 See [Web Apps](web.md) for usage.

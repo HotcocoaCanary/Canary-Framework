@@ -6,11 +6,11 @@ Install the framework:
 pip install canary-framework
 ```
 
-Requires Python 3.12+.
+Python 3.12+ is required. The core has zero dependencies — nothing third-party is pulled in.
 
 ## Declare units
 
-Mark any plain class with `@cocoa`. Dependencies are declared with `deps=[...]`:
+Mark any plain class with `@cocoa` and declare dependencies with `deps=[...]`:
 
 ```python
 from canary_framework import cocoa
@@ -18,20 +18,23 @@ from canary_framework import cocoa
 
 @cocoa
 class Config:
-    def __init__(self) -> None:
+    def __init__(self) -> None:      # no required parameters
         self.database_url = "postgresql://localhost/dev"
 
 
 @cocoa(deps=[Config])
 class Database:
-    # `self.config` is injected at start() time
-    def __init__(self) -> None:
-        self.pool = None
+    # self.config is injected during init()
+    pass
 ```
+
+Units are always constructed by the framework **with no arguments**, so whatever value a unit
+needs it declares as a dependency and reads from a collaborator in a lifecycle hook — never as a
+constructor parameter.
 
 ## Add lifecycle behaviour
 
-Use `@on_init`, `@on_start` and `@on_stop` — all optional, each sync or async:
+Use `@on_init`, `@on_start` and `@on_stop` — all optional, sync or async:
 
 ```python
 from canary_framework import cocoa, on_init, on_start, on_stop
@@ -41,10 +44,12 @@ from canary_framework import cocoa, on_init, on_start, on_stop
 class Database:
     @on_init
     def setup(self) -> None:
+        # dependencies are in place, nothing is running yet
         self.pool = ConnectionPool(self.config.database_url)
 
     @on_start
     async def connect(self) -> None:
+        # connections and background tasks belong here
         await self.pool.connect()
 
     @on_stop
@@ -52,10 +57,13 @@ class Database:
         await self.pool.close()
 ```
 
-## Run with `Canary`
+The criterion: preparation that touches no external resource goes in `@on_init`; acquiring
+resources goes in `@on_start` — because only what `@on_start` acquired is reclaimed by
+`@on_stop`.
 
-`Canary(*roots)` resolves the graph from each root, topologically sorts it, and drives the
-lifecycle explicitly:
+## Run it with `Canary`
+
+`Canary(*roots)` resolves the graph from each root, sorts it and drives the lifecycle explicitly:
 
 ```python
 import asyncio
@@ -71,18 +79,17 @@ async def main() -> None:
     app = Canary(UserService)
     await app.init()
     await app.start()
-
     try:
         users = app[UserService]
         assert users.database is app[Database]
     finally:
-        await app.stop()
+        await app.stop()      # callable from any settled state; idempotent
 
 
 asyncio.run(main())
 ```
 
-Or use it as an async context manager:
+Or use the async context manager:
 
 ```python
 async def main() -> None:
@@ -93,22 +100,23 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-## Compose multiple roots
+## Compose several roots
 
-`Canary` accepts several roots, composing their graphs into one:
+`Canary` accepts several roots and merges their graphs into one:
 
 ```python
 app = Canary(UserService, ReportService)
+await app.init()
 await app.start()
 assert app[Database] is app[UserService].database
 ```
 
-Any sub-tree can be launched on its own — `Canary(Database)` starts only `Database` and its
-dependencies (`Config`).
+Any subgraph can be started on its own — `Canary(Database)` starts only `Database` and its
+dependency `Config`.
 
-## Expose it as a web app
+## Expose it over HTTP
 
-Add the optional `web` extension to serve a unit over HTTP:
+Install the optional `web` extra:
 
 ```bash
 pip install "canary-framework[web]"
@@ -119,14 +127,14 @@ from canary_framework import Canary
 from canary_framework.web import get, web_cocoa
 
 
-@web_cocoa(deps=[Database])
+@web_cocoa(deps=[Database], prefix="/api")
 class LibraryAPI:
     @get("/books")
-    async def list_books(self) -> list[dict]:
+    async def list_books(self) -> list[dict]:       # handlers must be async def
         return self.database.all("books")
 
 
-app = Canary(LibraryAPI)  # `app` is the ASGI application
+app = Canary(LibraryAPI)  # `app` is the ASGI app
 ```
 
 ```bash
@@ -135,9 +143,18 @@ uvicorn examples.library.web:app --reload
 
 Open `/docs` for the interactive OpenAPI document. See [Web Apps](web.md).
 
-## What's next
+## See what the framework assembled
 
-- [Cocoa Units](cocoa.md) — declaration, dependencies and hooks.
-- [Runtime (Canary)](canary.md) — orchestration, multi-root and ASGI.
-- [Lifecycle](lifecycle.md) — the state machine and hook ordering.
-- [Dependency Injection](dependency-injection.md) — injection, sharing, cycles.
+Set the log level to `DEBUG` and the end of startup prints an assembly summary — start order,
+dependencies, routes:
+
+```bash
+CANARY_LOG_LEVEL=DEBUG python -m examples.library.main
+```
+
+## Next
+
+- [Cocoa Units](cocoa.md) — declaration, construction rules, hooks.
+- [Runtime (Canary)](canary.md) — composition, multi-root, ASGI.
+- [Lifecycle](lifecycle.md) — five moments, the state machine, failure paths.
+- [Dependency Injection](dependency-injection.md) — injection, sharing, cycles, name clashes.

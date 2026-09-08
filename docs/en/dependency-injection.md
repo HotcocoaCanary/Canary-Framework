@@ -1,7 +1,7 @@
 # Dependency Injection
 
-Cocoas declare dependencies with `@cocoa(deps=[...])`. There is no separate DSL and no
-`__init__` plumbing — the dependency graph lives in the decorators.
+A cocoa declares its dependencies with `@cocoa(deps=[...])`. No extra DSL, no `__init__` wiring —
+the dependency graph lives in the decorator.
 
 ## The contract
 
@@ -10,43 +10,72 @@ Cocoas declare dependencies with `@cocoa(deps=[...])`. There is no separate DSL 
 class UserService: ...
 ```
 
-`deps=[...]` is an ordered list of cocoa types. At `start()`, the runtime injects each
-dependency onto the instance as an attribute named after the class, in snake_case:
+`deps=[...]` is an ordered list of cocoa types. During `init()` the runtime injects each
+dependency onto the instance under a name derived from the class name:
 
 | Dependency type | Injected attribute |
 |---|---|
 | `Config` | `self.config` |
 | `Database` | `self.database` |
 | `UserService` | `self.user_service` |
+| `APIService` | `self.api_service` |
+| `HTTPServer` | `self.http_server` |
 
 ```python
 @cocoa(deps=[Database])
 class UserService:
-    @on_start
-    def warm_up(self) -> None:
-        self.database.ping()  # injected before @on_start runs
+    @on_init
+    def check(self) -> None:
+        assert self.database is not None  # already injected by @on_init
 ```
 
-Because injection happens at `start()` — not in `__init__` — constructors stay empty and units
-are cheap to build. Do not read injected attributes in `__init__`; use `@on_init` or
+**Injection is assembly, not startup**, which is why it happens in `init()` rather than
+`start()`. Two things follow: `@on_init` can see its collaborators (otherwise it would barely
+differ from `__init__`), and assembly errors — name clashes, "not a cocoa", cycles — surface
+during assembly instead of waiting for `start()`.
+
+Do not read injected attributes in `__init__`; they do not exist yet. Use `@on_init` or
 `@on_start`.
+
+## Where values come from
+
+Units are always constructed with no arguments, so "this unit needs a dsn / an api key / a
+timeout" cannot be a constructor parameter. It becomes a dependency:
+
+```python
+@cocoa
+class Config:
+    def __init__(self) -> None:
+        self.dsn = os.environ["DATABASE_URL"]
+        self.timeout = 5.0
+
+
+@cocoa(deps=[Config])
+class Database:
+    @on_init
+    def configure(self) -> None:
+        self.pool = ConnectionPool(self.config.dsn, timeout=self.config.timeout)
+```
+
+There is a cost, and it should be named: **every parameterised unit now depends on a
+configuration unit**, and that edge is not a business collaboration — it exists to carry values.
+That is the price of "the framework can construct every unit, and every failure can be unwound".
+
+Configuration itself gets no special treatment — it is an ordinary `@cocoa`, and how it reads
+environment variables, a `.env` file or a remote config service is up to you (remote reads are
+IO, so they belong in `@on_start`).
 
 ## Resolution
 
-`init()` builds the graph by walking each root's `deps=[...]` transitively and instantiating
-every type once. A type that is not decorated with `@cocoa` raises `TypeError`.
+`init()` builds the graph by walking `deps=[...]` from every root and instantiating each type
+once. A type that is not marked with `@cocoa` raises `TypeError`.
 
-Dependencies are resolved by concrete class object — no strings, no forward references:
-
-```python
-@cocoa(deps=[Database])
-class UserService: ...
-```
+Dependencies are resolved by class object — no strings, no forward references.
 
 ## Sharing
 
-Each type is instantiated **once per graph**. When several units depend on the same type, they
-share the same instance:
+Each type is instantiated **once per graph**. Units that depend on the same type share the same
+instance:
 
 ```python
 @cocoa
@@ -66,17 +95,19 @@ class Root: ...
 
 
 app = Canary(Root)
-await app.start()
-assert app[Database].config is app[Cache].config  # same Config
+await app.init()
+assert app[Database].config is app[Cache].config  # the same Config
 ```
 
-Sharing is scoped to a single `Canary`. Two separate `Canary` instances build two independent
-graphs.
+Sharing is scoped to a single `Canary`; two independent instances build two independent graphs.
+
+**Type is identity.** One type has one instance per graph, so "two `Database` instances pointing
+at different servers" cannot be expressed — write two classes if you need two instances.
 
 ## Cycles
 
-Cycles are rejected during `init()`. The topological sort detects them and raises
-`CircularDependencyError`, which exposes the offending types on `.cycle`:
+Cycles are rejected during `init()`. The topological sort raises `CircularDependencyError` and
+exposes the types on the cycle through `.cycle`:
 
 ```python
 @cocoa(deps=[B])
@@ -87,24 +118,46 @@ class A: ...
 class B: ...
 
 
-app = Canary(A)
-await app.init()  # CircularDependencyError: circular dependency detected: A -> B -> A
+await Canary(A).init()  # CircularDependencyError: circular dependency detected: A -> B -> A
 ```
+
+## Name clashes
+
+The injected attribute name is derived from the dependency's **class name**, independent of the
+order in `deps`. When two dependencies produce the same snake_case name, the runtime raises
+`InjectionError` instead of letting the last one win:
+
+```python
+@cocoa(deps=[KBFileRepository, KbFileRepository])
+class Collide: ...
+
+# InjectionError: Collide.kb_file_repository is claimed by more than one source:
+#   KBFileRepository, KbFileRepository
+```
+
+Rename one of the classes. Acronyms are handled correctly (`APIService` → `api_service`).
 
 ## Multi-root graphs
 
-Passing several roots to `Canary` unions their graphs. Dependencies shared between the roots
-are still instantiated once:
+Passing several roots merges their graphs. Dependencies shared between roots are still
+instantiated once:
 
 ```python
 app = Canary(UserService, ReportService)
-await app.start()
+await app.init()
 assert app[UserService].database is app[ReportService].database
 ```
 
-## Naming edge cases
+## Substituting dependencies in tests
 
-The injected attribute name comes from the dependency's class name, converted to snake_case.
-Acronyms are handled (`APIService` → `api_service`, `HTTPServer` → `http_server`). If two
-dependencies would collide on a name, rename one of the classes — the injected attribute is
-derived from the type, not from the list order.
+The framework provides **no** substitution entry point. Injection is nothing but attribute
+assignment, so a test can do it directly:
+
+```python
+service = UserService()
+service.database = FakeDatabase()      # exactly what injection does
+await service.some_method()
+```
+
+When you need the lifecycle too, write the fake as a `@cocoa` unit and compose a test-only graph
+with it as a root.
