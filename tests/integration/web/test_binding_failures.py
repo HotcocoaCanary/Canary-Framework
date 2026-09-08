@@ -14,7 +14,14 @@ from starlette.responses import JSONResponse, Response
 from starlette.testclient import TestClient
 
 from canary_framework import Canary, DeclarationError, cocoa
-from canary_framework.web import RouteRegistrationError, delete, get, post, web_cocoa
+from canary_framework.web import (
+    Cookie,
+    RouteRegistrationError,
+    delete,
+    get,
+    post,
+    web_cocoa,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -191,3 +198,61 @@ def test_a_handler_building_its_own_response_keeps_its_own_status() -> None:
 
     with TestClient(Canary(Own)) as client:
         assert client.get("/x").status_code == 202
+
+
+def test_a_repeated_query_parameter_binds_to_a_list() -> None:
+    """``?tag=a&tag=b`` 要还原成两个元素——``get`` 只会给最后一个。"""
+
+    @web_cocoa
+    class Multi:
+        @get("/search")
+        async def search(self, tag: list[str], page: int = 1) -> dict:
+            return {"tags": tag, "page": page}
+
+    with TestClient(Canary(Multi), raise_server_exceptions=False) as client:
+        assert client.get("/search?tag=a&tag=b").json() == {"tags": ["a", "b"], "page": 1}
+        assert client.get("/search?tag=a").json() == {"tags": ["a"], "page": 1}
+        assert client.get("/search").status_code == 422  # 必填的多值参数缺失
+
+
+def test_a_repeated_query_parameter_may_have_a_default() -> None:
+    @web_cocoa
+    class Multi:
+        @get("/search")
+        async def search(self, tag: list[str] = []) -> dict:  # noqa: B006 - 只读，不改
+            return {"tags": tag}
+
+    with TestClient(Canary(Multi)) as client:
+        assert client.get("/search").json() == {"tags": []}
+
+
+def test_cookies_bind_and_honour_their_alias() -> None:
+    @web_cocoa
+    class Session:
+        @get("/me")
+        async def me(
+            self,
+            sid: Annotated[str, Cookie(alias="session-id")],
+            theme: Annotated[str, Cookie()] = "light",
+        ) -> dict:
+            return {"sid": sid, "theme": theme}
+
+    with TestClient(Canary(Session), raise_server_exceptions=False) as client:
+        assert client.get("/me").status_code == 422  # 必填 cookie 缺失
+        client.cookies.set("session-id", "abc")
+        assert client.get("/me").json() == {"sid": "abc", "theme": "light"}
+        client.cookies.set("theme", "dark")
+        assert client.get("/me").json() == {"sid": "abc", "theme": "dark"}
+
+
+def test_a_model_returned_without_an_annotation_still_serialises() -> None:
+    """没有返回注解时没什么可校验的，但模型自己知道怎么变成 JSON。"""
+
+    @web_cocoa
+    class Loose:
+        @get("/book")
+        async def book(self):  # type: ignore[no-untyped-def]  # 故意不写返回注解
+            return Book(title="三体", stock=3)
+
+    with TestClient(Canary(Loose)) as client:
+        assert client.get("/book").json() == {"title": "三体", "stock": 3}
