@@ -8,51 +8,24 @@ from __future__ import annotations
 
 import inspect
 from collections import defaultdict, deque
-from collections.abc import Mapping
 
-from canary_framework.common.error import (
-    CircularDependencyError,
-    ConstructionError,
-    ProvisionError,
-)
+from canary_framework.common.error import CircularDependencyError, ConstructionError
 from canary_framework.core.decorator.introspect import deps_of, is_cocoa
 
 
-def build_graph(
-    roots: list[type], provide: Mapping[type, object] | None = None
-) -> dict[type, object]:
+def build_graph(roots: list[type]) -> dict[type, object]:
     """Instantiate every root and its transitive dependencies, one instance each.
 
-    递归实例化每个根及其传递依赖；每个类型只实例化一次，即整张图共享的单例。
+    递归实例化每个根及其传递依赖；每个类型只实例化一次，那个实例就是整张图共享的单例。
 
-    ``provide`` 直接给出某个类型的实例，框架不再构造它。它同时服务两种用途：生产
-    接线（这个节点需要构造参数，我造好了）与测试替换（用假的顶掉真的）——两者说的
-    是同一件事，所以用同一个入口。
-
-    规则只有一条：**给出的实例是完整的。** 框架不构造它，不展开它声明的依赖，也不往
-    它里面注入任何东西——既然实例已经造好，它的协作者也该由造它的人准备；把真实依赖再
-    实例化一遍既浪费又可能失败（替掉数据库之后仍去连数据库）。
-
-    因此给出的实例**不能自己再声明** ``deps``（继承被替换的类时最容易不小心带上），
-    否则抛 :class:`ProvisionError`。判据看的是**你交出来的那个对象**的类，不是被替换的
-    声明类型：普通替身没有 ``@cocoa`` 标记，自然一条依赖也不声明。
-
-    给定的实例不必是 ``@cocoa``：它的生命周期钩子照常被扫描执行。
+    图上的实例**全部由框架构造**，没有第二条来源。所以"这个单元是怎么来的"永远只有一个
+    答案，也就不存在"有些单元框架能造、有些得你造好交进来"的分裂。需要外界输入的事情
+    一律推迟到生命周期钩子里做（见 :class:`~canary_framework.common.error.ConstructionError`）。
     """
-    given: Mapping[type, object] = provide or {}
     graph: dict[type, object] = {}
 
     def visit(t: type) -> None:
         if t in graph:
-            return
-        if t in given:
-            instance = given[t]
-            declared = deps_of(type(instance))
-            if declared:
-                raise ProvisionError.declares_dependencies(
-                    type(instance).__name__, [d.__name__ for d in declared]
-                )
-            graph[t] = instance
             return
         if not is_cocoa(t):
             raise TypeError(f"'{t.__name__}' is not decorated with @cocoa")
@@ -69,7 +42,7 @@ def _construct(t: type) -> object:
     """Instantiate *t* with no arguments, turning an arity mismatch into a real error.
 
     先看签名再调用：签名对不上说明它需要构造参数，那是框架的一条硬约束，报
-    :class:`ConstructionError` 并给出两条出路；签名对得上就照常调用，构造器自己抛的
+    :class:`ConstructionError` 并说清该往哪儿改；签名对得上就照常调用，构造器自己抛的
     异常原样传播——那是使用者的代码出错，不该被框架的错误盖住。
     """
     try:
@@ -90,10 +63,8 @@ def topological_sort(graph: dict[type, object]) -> list[type]:
     """
     indegree = dict.fromkeys(graph, 0)
     dependents: dict[type, list[type]] = defaultdict(list)
-    for t, node in graph.items():
-        # 依赖取自**实例的类**而非声明类型：被 provide 的节点不接受注入，也就不该因为
-        # 声明类型上的依赖被排到它们后面。注入、排序、摘要因此看的是同一份事实。
-        for dep in deps_of(type(node)):
+    for t in graph:
+        for dep in deps_of(t):
             if dep in graph:
                 indegree[t] += 1
                 dependents[dep].append(t)

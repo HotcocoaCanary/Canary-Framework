@@ -15,10 +15,10 @@ import inspect
 import logging
 import os
 import types
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar, cast
 
-from canary_framework.common.error import InjectionError, LifecycleError, ProvisionError
+from canary_framework.common.error import InjectionError, LifecycleError
 from canary_framework.common.markers import WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
@@ -59,14 +59,11 @@ class Canary:
     自身就是 ASGI 应用，可直接 ``uvicorn app:app``。
     """
 
-    def __init__(self, *roots: type, provide: Mapping[type, object] | None = None) -> None:
+    def __init__(self, *roots: type) -> None:
         for root in roots:
             if not is_cocoa(root):
                 raise TypeError(f"'{root.__name__}' is not decorated with @cocoa")
         self.roots = roots
-        # 现成实例：类型 -> 实例。生产接线（需要构造参数的节点）与测试替换共用它。
-        # 见 :func:`~canary_framework.runtime.graph.build_graph`。
-        self._provided: Mapping[type, object] = provide or {}
         self._state = LifecycleState.NEW
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
@@ -120,8 +117,7 @@ class Canary:
         self._state = LifecycleState.INITIALIZING
         try:
             self._apply_framework_config()
-            self._graph = build_graph(list(self.roots), self._provided)
-            self._require_everything_provided_was_used()
+            self._graph = build_graph(list(self.roots))
             self._order = topological_sort(self._graph)
             for t in self._order:
                 node = self._graph[t]
@@ -280,9 +276,6 @@ class Canary:
 
         按依赖类名的 snake_case 注入属性（``Database`` → ``node.database``）。
         两个依赖的 snake_case 撞名时抛 :class:`InjectionError`，不再"后写的赢"。
-
-        依赖取自**实例的类**。被 ``provide`` 的实例按建图时的规则一条依赖也不声明，
-        所以这里对它天然是空转——图里不会存在"声明了却没装配"的依赖。
         """
         cls = type(node)
         plan: dict[str, tuple[str, object]] = {}
@@ -337,20 +330,10 @@ class Canary:
         loop.slow_callback_duration = duration
         self._loop_probe = None
 
-    def _require_everything_provided_was_used(self) -> None:
-        """Every provided type must be on the graph; a typo must not pass silently.
-
-        紧跟在建图之后：``provide`` 的条目全部由 ``build_graph`` 消费，所以那一步结束
-        时就已经知道哪些没用上——装配类的检查都该落在装配阶段。
-        """
-        unused = [t.__name__ for t in self._provided if t not in self._graph]
-        if unused:
-            raise ProvisionError.never_applied(unused)
-
     def _assembly_summary(self) -> str:
         """Render what the runtime actually assembled — the graph knows, so it should say.
 
-        装配摘要：框架掌握着全部事实（顺序、依赖、替身、路由），
+        装配摘要：框架掌握着全部事实（顺序、依赖、路由），
         却一直零输出。这里在 DEBUG 级别一次性说清楚，排查"为什么这条路由不在"
         或"为什么这个单元先启动"时不必再去读框架源码。
         """
@@ -363,10 +346,8 @@ class Canary:
             )
         lines.append("  start order (stop runs in reverse):")
         for i, t in enumerate(self._order, 1):
-            # 用实例的类型而非声明类型取依赖——替身没有依赖，展示要和实际注入一致。
-            deps = ", ".join(d.__name__ for d in deps_of(type(self._graph[t])))
-            substituted = " [provided]" if t in self._provided else ""
-            lines.append(f"    {i}. {t.__name__}{substituted}" + (f"  <- {deps}" if deps else ""))
+            deps = ", ".join(d.__name__ for d in deps_of(t))
+            lines.append(f"    {i}. {t.__name__}" + (f"  <- {deps}" if deps else ""))
         if self._route_entries:
             lines.append("  routes:")
             for route in self._route_entries:

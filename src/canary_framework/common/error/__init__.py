@@ -5,8 +5,6 @@
 ``except CanaryError`` 就能统一捕获框架与所有扩展的错误。
 """
 
-from typing import Self
-
 
 class CanaryError(Exception):
     """Base class for every framework error — and the extension point.
@@ -54,49 +52,23 @@ class InjectionError(CanaryError):
 class ConstructionError(CanaryError):
     """Raised when the runtime cannot construct a unit because it needs arguments.
 
-    单元由框架**无参构造**（``build_graph`` 里的 ``t()``），所以带必填参数的类不能
-    直接进图。这条约束一直存在，只是从前失败时抛的是构造器自己的 ``TypeError``，
-    既不指向这条规则、也兜不进 ``except CanaryError``。
+    单元一律由框架**无参构造**，所以带必填参数的类不能进图。
+
+    这条约束是有意的，不是限制。构造函数没有对手——``@on_start`` 有 ``@on_stop`` 配对，
+    而"构造"没有"析构"：一个在 ``__init__`` 里开了连接的单元，如果后面某个单元构造失败，
+    没有任何机制去关它。把需要外界输入的事情推迟到生命周期钩子里，等于让每一件事都落进
+    一个有台账、能逆序回收的阶段。``__init__`` 也不能是 ``async``，本来就装不下需要 IO
+    的初始化。
+
+    所以出路只有一条：**把构造参数变成依赖**。值从协作者那里读（``self.config.url``），
+    读取动作放在 ``@on_init``（只要依赖，不碰外部资源）或 ``@on_start``（要连接、要起
+    后台任务）里。
     """
 
     def __init__(self, unit: str, detail: str) -> None:
         self.unit = unit
         super().__init__(
-            f"cannot construct {unit}: {detail}. Units are constructed with no arguments — "
-            f"either take the value from a dependency in @on_init/@on_start, or build it "
-            f"yourself and hand it over: Canary(root, provide={{{unit}: {unit}(...)}})."
-        )
-
-
-class ProvisionError(CanaryError):
-    """Raised when an entry passed to ``Canary(provide=...)`` cannot be honoured.
-
-    ``provide`` 只有一条规则：**给出的实例是完整的**——框架不构造它、不展开它声明的
-    依赖、也不往它里面注入任何东西。两种违背这条规则的写法都在装配阶段抛出：
-
-    - **条目没落到图上**（类型写错）。沉默地忽略会让测试"通过"却根本没替换成功，
-      也会让生产接线以为自己接上了。
-    - **给出的实例自己还声明着** ``deps``。那些依赖不会被装配，属性也就永远不会出现。
-      从前这里漏出一个裸 ``KeyError``，而且漏不漏取决于别的单元有没有恰好依赖同一个
-      类型——同一份代码两种行为，这比报错本身更糟。
-    """
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-    @classmethod
-    def never_applied(cls, unused: list[str]) -> Self:
-        return cls(
-            "provided types never applied (not reachable from the roots): " + ", ".join(unused)
-        )
-
-    @classmethod
-    def declares_dependencies(cls, unit: str, declared: list[str]) -> Self:
-        return cls(
-            f"{unit} was handed to provide=, but it still declares dependencies: "
-            + ", ".join(declared)
-            + ". A provided instance is complete — Canary neither constructs it nor wires "
-            "anything into it, so those attributes would never appear. Either drop the "
-            "declaration (a substitute can be a plain class, or @cocoa with no deps), or "
-            "build its collaborators yourself and pass them to its constructor."
+            f"cannot construct {unit}: {detail}. Units are always constructed with no "
+            f"arguments — declare what it needs in @cocoa(deps=[...]) and read the values "
+            f"from those dependencies in @on_init or @on_start."
         )

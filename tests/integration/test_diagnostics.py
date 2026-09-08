@@ -42,22 +42,6 @@ async def test_assembly_summary_is_logged_at_debug(
     assert "3. App  <- Repository" in summary
 
 
-async def test_summary_marks_provided_nodes_and_hides_their_unused_dependencies(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    class FakeRepository:
-        pass
-
-    with caplog.at_level(logging.DEBUG, logger="canary.runtime"):
-        async with Canary(App, provide={Repository: FakeRepository()}):
-            pass
-
-    summary = "\n".join(r.getMessage() for r in caplog.records)
-    # 给定的实例没有依赖，展示要和实际注入一致——不能还挂着 Database。
-    assert "Repository [provided]" in summary
-    assert "Database" not in summary
-
-
 async def test_multiple_roots_are_told_they_have_no_after_all_position(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

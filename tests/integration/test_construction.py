@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from canary_framework import Canary, CanaryError, ConstructionError, cocoa
+from canary_framework import Canary, CanaryError, ConstructionError, cocoa, on_init
 
 pytestmark = pytest.mark.integration
 
@@ -29,13 +29,27 @@ async def test_a_unit_that_needs_arguments_says_what_to_do() -> None:
         await canary.init()
 
     message = str(caught.value)
-    assert "provide=" in message  # 报错要指出出路
+    assert "@cocoa(deps=" in message  # 报错要指出唯一的出路
+    assert "@on_init" in message
     assert isinstance(caught.value, CanaryError)  # 兜得进框架的错误体系
 
 
-async def test_providing_the_instance_is_the_way_out() -> None:
-    async with Canary(Consumer, provide={NeedsArguments: NeedsArguments("postgres://x")}) as app:
-        assert app[Consumer].needs_arguments.dsn == "postgres://x"
+async def test_taking_the_value_from_a_dependency_is_the_way_out() -> None:
+    """唯一的出路：把构造参数变成依赖，值在生命周期里读。"""
+
+    @cocoa
+    class Settings:
+        def __init__(self) -> None:
+            self.dsn = "postgres://x"
+
+    @cocoa(deps=[Settings])
+    class Database:
+        @on_init
+        def take_the_dsn(self) -> None:
+            self.dsn = self.settings.dsn
+
+    async with Canary(Database) as app:
+        assert app[Database].dsn == "postgres://x"
 
 
 async def test_default_arguments_are_fine() -> None:

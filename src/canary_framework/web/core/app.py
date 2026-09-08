@@ -124,8 +124,6 @@ def collect_routes(declared: type, instance: object) -> list[Route]:
     关系说的是启动顺序和谁能调用谁，URL 说的是对外的资源命名——两件事，不该互相决定。
     想要 ``/api/admin`` 就写 ``prefix="/api/admin"``。
 
-    前缀取自 *declared*（图上登记的那个类型）而不是 ``type(instance)``：被 ``provide``
-    顶掉的单元，替身身上没有 ``@web_cocoa`` 的标记，挂载点仍应由被替换者决定。
     """
     prefix: str = getattr(declared, WEB_ATTR, {}).get("prefix", "")
     seen: set[tuple[str, str]] = set()
