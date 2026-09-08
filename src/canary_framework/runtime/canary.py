@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import InjectionError, LifecycleError, ProvisionError
-from canary_framework.common.markers import ERROR_ENTRIES_ATTR, ROUTE_ENTRIES_ATTR, WEB_ATTR
+from canary_framework.common.markers import ROUTE_ENTRIES_ATTR, WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
     deps_of,
@@ -42,9 +42,6 @@ _Hook = Callable[[], object]
 
 # 路由条目：(method, path, instance, handler)
 _RouteEntry = tuple[str, str, object, Callable[..., object]]
-
-# 异常映射条目：(exception type, handler)
-_ErrorEntry = tuple[type[Exception], Callable[..., object]]
 
 # 进行中的状态：只可能被并发调用者观察到，此时再驱动生命周期一定是误用。
 _TRANSIENT = (
@@ -75,7 +72,6 @@ class Canary:
         self._order: list[type] = []
         self._serve_app: Any | None = None
         self._route_entries: list[_RouteEntry] = []
-        self._error_entries: list[_ErrorEntry] = []
         # 已进入 ``@on_start`` 的单元，按进入顺序；回收时逆序消费。
         # 记录的是“进入”而非“完成”——启动到一半失败的单元同样要被回收。
         self._started: list[type] = []
@@ -252,26 +248,21 @@ class Canary:
         因此无需安装 ``canary-framework[web]``。
         """
         all_entries: list[_RouteEntry] = []
-        all_error_entries: list[_ErrorEntry] = []
         meta: dict[str, str] = {}  # 文档元数据取最外层单元的
 
         for t in reversed(self._order):
-            node = self._graph[t]
-            # 异常映射的作用域是全应用，因此每个单元只收一次。
-            all_error_entries.extend(getattr(node, ERROR_ENTRIES_ATTR, None) or [])
-            entries: list[_RouteEntry] | None = getattr(node, ROUTE_ENTRIES_ATTR, None)
+            entries: list[_RouteEntry] | None = getattr(self._graph[t], ROUTE_ENTRIES_ATTR, None)
             if entries is None:
                 continue
             all_entries.extend(entries)
             meta = meta or getattr(t, WEB_ATTR, {})
 
         self._route_entries = all_entries
-        self._error_entries = all_error_entries
         if not all_entries:
             return None
         from canary_framework.web.core.app import build_serve_app
 
-        return build_serve_app(meta, all_entries, all_error_entries)
+        return build_serve_app(meta, all_entries)
 
     # -- context manager ----------------------------------------------
     async def __aenter__(self) -> Self:
@@ -364,7 +355,7 @@ class Canary:
     def _assembly_summary(self) -> str:
         """Render what the runtime actually assembled — the graph knows, so it should say.
 
-        装配摘要：框架掌握着全部事实（顺序、依赖、替身、挂载、路由、异常映射），
+        装配摘要：框架掌握着全部事实（顺序、依赖、替身、路由），
         却一直零输出。这里在 DEBUG 级别一次性说清楚，排查"为什么这条路由不在"
         或"为什么这个单元先启动"时不必再去读框架源码。
         """
@@ -388,10 +379,6 @@ class Canary:
                     f"    {method:<6} {path}  -> {type(instance).__name__}."
                     f"{getattr(fn, '__name__', fn)}"
                 )
-        if self._error_entries:
-            lines.append("  error handlers:")
-            for exc_type, fn in self._error_entries:
-                lines.append(f"    {exc_type.__name__} -> {getattr(fn, '__qualname__', fn)}")
         return "\n".join(lines)
 
     async def _unwind(self) -> list[Exception]:

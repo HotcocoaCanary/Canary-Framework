@@ -39,8 +39,10 @@ class HTTPError(WebError):
     """An error that already knows its own HTTP response.
 
     HTTP 语义自带的错误：``raise HTTPError(401, "token expired")``。内置处理器把它
-    变成 ``{"detail": ...}``，无需登记 ``@on_request_error``。领域错误不该继承它——
-    那会让领域层知道 HTTP 的存在；领域错误用 ``@on_request_error`` 映射。
+    变成 ``{"detail": ...}`` 加上对应状态码。它是从代码深处产生一个 4xx / 5xx 的唯一
+    途径——请求本身就不该成立时（没权限、没登录、资源真的不存在）用它。
+
+    业务上"预期内的失败"不要用它：那种失败应该由 handler 以返回值表达，框架不参与。
     """
 
     def __init__(
@@ -59,8 +61,7 @@ class RequestValidationError(WebError):
     """Raised when a request cannot be bound to the handler's signature.
 
     请求无法绑定到 handler 签名时抛出（缺参 / 校验失败），内置处理器映射为 422。
-    它被设计成**可抛出、可拦截**的，因此使用者可以用
-    ``@on_request_error(RequestValidationError)`` 把 422 改成自家的错误信封。
+    这是框架层面的失败——请求根本没能进到 handler，所以它就该是 4xx，不进业务信封。
     """
 
     def __init__(self, cause: ValidationError | MissingParameterError) -> None:

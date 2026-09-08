@@ -1,8 +1,11 @@
 """Web app builder — assemble route entries into a Starlette app.
 
-app 构建：从单个或多个 ``@web_cocoa`` 单元收集 ``@get``/``@post`` 路由与
-``@on_request_error`` 异常映射，组装成 Starlette 应用，并挂载 ``/openapi.json``
-与 ``/docs``。
+app 构建：从单个或多个 ``@web_cocoa`` 单元收集 ``@get``/``@post`` 路由，组装成
+Starlette 应用，并挂载 ``/openapi.json`` 与 ``/docs``。
+
+异常有三条固定的出路，全部由框架内置、不可登记也不需要登记：请求绑定失败 → 422、
+``HTTPError`` → 它自带的状态码、其余任何异常 → JSON 500。业务上"预期内的失败"该由
+handler 自己以返回值表达（比如统一响应体里的 ``code``），而不是抛出去让框架翻译。
 
 :func:`build_serve_app` 是 web 扩展交给运行时的**工厂**：``@web_cocoa`` 把它挂到
 ``SERVE_ATTR`` 标记下，``Canary`` 只按标记取出并调用，从不 import 本模块。
@@ -21,14 +24,12 @@ from starlette.routing import Route
 from canary_framework.common.markers import WEB_ATTR
 from canary_framework.web.core.openapi import SWAGGER_UI_HTML, build_openapi
 from canary_framework.web.core.routing import dispatch
-from canary_framework.web.decorator.introspect import error_handlers_of, routes_of
+from canary_framework.web.decorator.introspect import routes_of
 from canary_framework.web.error.web import (
     HTTPError,
     RequestValidationError,
     RouteRegistrationError,
 )
-
-_ErrorEntry = tuple[type[Exception], Callable[..., object]]
 
 _DEFAULT_TITLE = "Canary API"
 _DEFAULT_VERSION = "0.1.0"
@@ -37,15 +38,13 @@ _DEFAULT_VERSION = "0.1.0"
 def build_serve_app(
     meta: dict[str, str],
     route_entries: list[tuple[str, str, object, Callable[..., object]]],
-    error_entries: list[_ErrorEntry] | None = None,
 ) -> Starlette:
     """Build one Starlette app from pre-collected route entries, with a single OpenAPI doc.
 
     web 扩展交给运行时的工厂（挂在 ``SERVE_ATTR`` 下）：``route_entries`` 是所有
     ``@web_cocoa`` 单元按挂载前缀拼好完整路径后的路由条目，``meta`` 是最外层单元的
     ``WEB_ATTR``（提供 ``title`` / ``version``）。合并后只有一份 ``/docs`` 与
-    ``/openapi.json``。``error_entries`` 是所有单元的 ``@on_request_error`` 登记，
-    作用域为全应用。
+    ``/openapi.json``。
     """
     title = meta.get("title", _DEFAULT_TITLE)
     version = meta.get("version", _DEFAULT_VERSION)
@@ -75,41 +74,7 @@ def build_serve_app(
     ]
     for method, path, instance, fn in deduped:
         app_routes.append(Route(path, _make_endpoint(instance, fn), methods=[method]))
-    return Starlette(routes=app_routes, exception_handlers=_exception_handlers(error_entries or []))
-
-
-def _exception_handlers(error_entries: list[_ErrorEntry]) -> dict[Any, Any]:
-    """Merge the built-in mappings with the units' ``@on_request_error`` registrations.
-
-    内置三条兜底（422 / ``HTTPError`` / 500）先铺上，使用者的登记再覆盖上去——覆盖
-    内置是有意支持的（换成自家错误信封）；使用者之间重复登记同一类型则报错。
-    """
-    handlers: dict[Any, Any] = {
-        RequestValidationError: _handle_validation_error,
-        HTTPError: _handle_http_error,
-        Exception: _handle_server_error,
-    }
-    registered: dict[type[Exception], Callable[..., object]] = {}
-    for exc_type, fn in error_entries:
-        if exc_type in registered:
-            raise RouteRegistrationError(
-                f"duplicate @on_request_error for {exc_type.__name__}: "
-                f"{_where(registered[exc_type])} vs {_where(fn)}"
-            )
-        registered[exc_type] = fn
-        handlers[exc_type] = _make_error_endpoint(fn)
-    return handlers
-
-
-def _where(fn: Callable[..., object]) -> str:
-    return getattr(fn, "__qualname__", repr(fn))
-
-
-def _make_error_endpoint(fn: Callable[..., object]) -> Callable[[Request, Exception], Any]:
-    async def endpoint(request: Request, exc: Exception) -> Response:
-        return cast(Response, await cast(Any, fn)(request, exc))
-
-    return endpoint
+    return Starlette(routes=app_routes, exception_handlers=_EXCEPTION_HANDLERS)
 
 
 async def _handle_validation_error(request: Request, exc: Exception) -> Response:
@@ -127,6 +92,16 @@ async def _handle_server_error(request: Request, exc: Exception) -> Response:
     # 兜底成 JSON（Starlette 默认是 text/plain）；ServerErrorMiddleware 随后仍会重新
     # 抛出，因此 traceback 照常进服务器日志。
     return JSONResponse({"detail": "Internal Server Error"}, status_code=500)
+
+
+# 异常的三条固定出路。它们是**框架**层面的失败（请求根本没能进到 handler、或者 handler
+# 炸了），不是业务失败——所以状态码就该是 4xx / 5xx，而不是包进业务信封里。
+# Starlette 按 ``type(exc).__mro__`` 逐级向上查找，命中最具体的那一条。
+_EXCEPTION_HANDLERS: dict[Any, Any] = {
+    RequestValidationError: _handle_validation_error,
+    HTTPError: _handle_http_error,
+    Exception: _handle_server_error,
+}
 
 
 def collect_routes(
@@ -157,14 +132,6 @@ def _join_path(prefix: str, path: str) -> str:
     路由自身的 ``/`` 要保留——``prefix="/api"`` 加上 ``@get("/")`` 得到 ``/api/``。
     """
     return prefix.rstrip("/") + path if prefix else path
-
-
-def collect_error_handlers(instance: object) -> list[_ErrorEntry]:
-    """Collect ``(exc_type, bound_method)`` for *instance*'s ``@on_request_error`` methods.
-
-    与 :func:`collect_routes` 对称，供 ``@web_cocoa`` 的启动钩子调用。
-    """
-    return error_handlers_of(instance)
 
 
 def _make_endpoint(instance: object, fn: Callable[..., object]) -> Callable[[Request], Any]:
