@@ -1,31 +1,18 @@
-"""OpenAPI document generation and the ``/docs`` / ``/openapi.json`` pages.
+"""OpenAPI document generation and the ``/docs`` page.
 
-文档生成：从路由 + 参数注解 + Pydantic 模型生成 OpenAPI 3.1 文档；``/docs``（Swagger
-UI）用 CDN 静态 HTML 渲染，供浏览器直接打开。
+文档生成：从装配期编译好的 :class:`~canary_framework.web.decorator.resolve.HandlerPlan`
+生成 OpenAPI 3.1 文档；``/docs``（Swagger UI）用 CDN 静态 HTML 渲染，供浏览器直接打开。
+
+**文档和分发读的是同一份计划**——谁从查询串来、谁从请求体来、必填还是可选，这里不再
+自己推断一遍。两边的一致因此是构造出来的，而不是"两处都记得调同一对函数"。
 """
 
 from __future__ import annotations
 
-import inspect
-import logging
-from collections.abc import Callable
 from typing import Any
 
-from pydantic import PydanticSchemaGenerationError, TypeAdapter
-from starlette.responses import Response
+from canary_framework.web.decorator.resolve import HandlerPlan, ParamSpec, documented_path
 
-from canary_framework.web.decorator.resolve import (
-    documented_path,
-    hints_of,
-    location_of,
-    path_param_names,
-    unwrap,
-)
-from canary_framework.web.infra.naming import header_name
-
-_log = logging.getLogger("canary.web.openapi")
-
-_EMPTY = inspect.Parameter.empty
 _REF_TEMPLATE = "#/components/schemas/{model}"
 
 SWAGGER_UI_HTML = """<!DOCTYPE html>
@@ -48,17 +35,19 @@ SWAGGER_UI_HTML = """<!DOCTYPE html>
 """
 
 
-def build_openapi(
-    title: str,
-    version: str,
-    routes: list[tuple[str, str, object, Callable[..., object]]],
-) -> dict[str, Any]:
-    """Build the OpenAPI document for the given routes."""
+def build_openapi(title: str, version: str, routes: list[Any]) -> dict[str, Any]:
+    """Build the OpenAPI document for the given routes.
+
+    从路由表生成整份文档。``routes`` 是 :class:`~canary_framework.web.core.app.Route`
+    的列表——这里只用到 ``method`` / ``path`` / ``plan`` 三项。
+    """
     schemas: dict[str, Any] = {}
     paths: dict[str, Any] = {}
-    for method, path, _instance, fn in routes:
+    for route in routes:
         # 文档的 key 用归一化后的路径：Starlette 的 ``:converter`` 不属于 OpenAPI。
-        paths.setdefault(documented_path(path), {})[method.lower()] = _operation(fn, path, schemas)
+        paths.setdefault(documented_path(route.path), {})[route.method.lower()] = _operation(
+            route.plan, schemas
+        )
     doc: dict[str, Any] = {
         "openapi": "3.1.0",
         "info": {"title": title, "version": version},
@@ -69,43 +58,27 @@ def build_openapi(
     return doc
 
 
-def _operation(fn: Callable[..., object], path: str, schemas: dict[str, Any]) -> dict[str, Any]:
-    hints = hints_of(fn)
-    sig = inspect.signature(fn)
-    path_params = path_param_names(path)
+def _operation(plan: HandlerPlan, schemas: dict[str, Any]) -> dict[str, Any]:
+    """Describe one handler: its parameters, its request body, its 200 response.
+
+    描述一个 handler。``request`` 来源的形参（整个 ``Request`` 对象）不进文档——它不是
+    调用方能提供的东西。
+    """
     parameters: list[dict[str, Any]] = []
     request_body: dict[str, Any] | None = None
-    for name, param in sig.parameters.items():
-        if name in ("self", "cls"):
+    for spec in plan.params:
+        if spec.location == "request":
             continue
-        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            continue
-        type_, marker = unwrap(hints.get(name, param.annotation))
-        location = location_of(type_, marker, name, path_params)
-        if location == "request":
-            continue
-        required = param.default is _EMPTY
-        schema = _schema(type_, schemas, fn)
-        if location == "body":
+        schema = _schema(spec.adapter, schemas)
+        if spec.location == "body":
             request_body = {
-                "required": required,
+                "required": spec.required,
                 "content": {"application/json": {"schema": schema}},
             }
             continue
-        param_name = marker.alias if marker and marker.alias else name
-        if location == "header":
-            param_name = header_name(param_name)
-        param_obj: dict[str, Any] = {
-            "name": param_name,
-            "in": location,
-            "required": required,
-            "schema": schema,
-        }
-        if marker and marker.description:
-            param_obj["description"] = marker.description
-        parameters.append(param_obj)
+        parameters.append(_parameter(spec, schema))
 
-    operation: dict[str, Any] = {"responses": {"200": _response_doc(hints, fn, schemas)}}
+    operation: dict[str, Any] = {"responses": {"200": _response_doc(plan, schemas)}}
     if parameters:
         operation["parameters"] = parameters
     if request_body:
@@ -113,42 +86,42 @@ def _operation(fn: Callable[..., object], path: str, schemas: dict[str, Any]) ->
     return operation
 
 
-def _response_doc(
-    hints: dict[str, Any], fn: Callable[..., object], schemas: dict[str, Any]
-) -> dict[str, Any]:
-    """Describe the 200 response; handlers returning a ``Response`` declare no JSON schema."""
-    annotation = hints.get("return", _EMPTY)
-    if inspect.isclass(annotation) and issubclass(annotation, Response):
-        # handler 自己造响应（SSE / 文件 / 自定义状态码），媒体类型由它决定，文档不猜。
+def _parameter(spec: ParamSpec, schema: dict[str, Any]) -> dict[str, Any]:
+    """One non-body parameter. ``source`` 已经是协议里的名字（请求头已转成 ``x-token``）。"""
+    param: dict[str, Any] = {
+        "name": spec.source,
+        "in": spec.location,
+        "required": spec.required,
+        "schema": schema,
+    }
+    if spec.description:
+        param["description"] = spec.description
+    return param
+
+
+def _response_doc(plan: HandlerPlan, schemas: dict[str, Any]) -> dict[str, Any]:
+    """Describe the 200 response; handlers returning a ``Response`` declare no JSON schema.
+
+    handler 自己造响应（SSE / 文件 / 自定义状态码）时，媒体类型由它决定，文档不猜。
+    """
+    if plan.returns_response:
         return {"description": "Successful Response"}
     return {
         "description": "Successful Response",
-        "content": {"application/json": {"schema": _schema(annotation, schemas, fn)}},
+        "content": {"application/json": {"schema": _schema(plan.returns, schemas)}},
     }
 
 
-def _schema(
-    annotation: Any, schemas: dict[str, Any], fn: Callable[..., object] | None = None
-) -> dict[str, Any]:
-    """Build the JSON schema for *annotation*, degrading to ``{}`` when it has none.
+def _schema(adapter: Any, schemas: dict[str, Any]) -> dict[str, Any]:
+    """Render *adapter*'s JSON schema, hoisting any ``$defs`` into the shared components.
 
-    一个无法生成 schema 的类型（``TextIO``、``Callable``、自定义容器……）不该让整份
-    文档 500——那会连累其余几十个端点。这里退化成"未约束"，并记一条 WARNING 指明
-    是哪个 handler 的哪个类型，让问题可见而不是可致命。
+    没有转换器就是"未约束"（``{}``）：没写注解、注解是 ``Any``、或者这个类型 pydantic
+    描述不了——最后那种在装配期已经记过一条 WARNING 点名是哪个 handler，这里不再重复，
+    也绝不让它连累整份文档。
     """
-    if annotation is _EMPTY or annotation is Any or annotation is type(None):
+    if adapter is None:
         return {}
-    try:
-        schema = TypeAdapter(annotation).json_schema(ref_template=_REF_TEMPLATE)
-    except (PydanticSchemaGenerationError, ValueError) as exc:
-        where = getattr(fn, "__qualname__", "<unknown handler>") if fn else "<unknown handler>"
-        _log.warning(
-            "OpenAPI: no schema for %r in %s (%s); documenting it as unconstrained",
-            annotation,
-            where,
-            type(exc).__name__,
-        )
-        return {}
+    schema: dict[str, Any] = adapter.json_schema(ref_template=_REF_TEMPLATE)
     defs = schema.pop("$defs", None)
     if defs:
         schemas.update(defs)

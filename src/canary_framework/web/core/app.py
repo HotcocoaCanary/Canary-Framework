@@ -14,18 +14,20 @@ handler 自己以返回值表达（比如统一响应体里的 ``code``），而
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, cast
 
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
-from starlette.routing import Route
+from starlette.routing import Route as StarletteRoute
 
 from canary_framework.common.markers import WEB_ATTR
 from canary_framework.web.core.extension import _DEFAULT_TITLE, _DEFAULT_VERSION
 from canary_framework.web.core.openapi import SWAGGER_UI_HTML, build_openapi
 from canary_framework.web.core.routing import dispatch
 from canary_framework.web.decorator.introspect import routes_of
+from canary_framework.web.decorator.resolve import HandlerPlan, build_plan
 from canary_framework.web.error.web import (
     HTTPError,
     RequestValidationError,
@@ -33,9 +35,24 @@ from canary_framework.web.error.web import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class Route:
+    """One mounted route: which method + path, which unit's method, and its compiled plan.
+
+    一条挂好的路由。``path`` 已含所在单元的 ``prefix``，``plan`` 是装配期编译好的取值
+    计划——分发与文档都读它，两边因此不可能各推断出一套。
+    """
+
+    method: str
+    path: str
+    instance: object
+    fn: Callable[..., object]
+    plan: HandlerPlan
+
+
 def build_serve_app(
     meta: dict[str, str],
-    route_entries: list[tuple[str, str, object, Callable[..., object]]],
+    route_entries: list[Route],
 ) -> Starlette:
     """Build one Starlette app from pre-collected route entries, with a single OpenAPI doc.
 
@@ -47,31 +64,29 @@ def build_serve_app(
     title = meta.get("title", _DEFAULT_TITLE)
     version = meta.get("version", _DEFAULT_VERSION)
 
-    # 跨实例、跨挂载点去重：同一 (method, path) 只能有一个处理器
+    # 跨单元去重：同一 (method, path) 只能有一个处理器
     seen: dict[tuple[str, str], object] = {}
-    deduped: list[tuple[str, str, object, Callable[..., object]]] = []
-    for method, path, instance, fn in route_entries:
-        key = (method, path)
+    for route in route_entries:
+        key = (route.method, route.path)
         if key in seen:
             raise RouteRegistrationError(
-                f"duplicate route: {method} {path} "
-                f"({type(seen[key]).__name__} vs {type(instance).__name__})"
+                f"duplicate route: {route.method} {route.path} "
+                f"({type(seen[key]).__name__} vs {type(route.instance).__name__})"
             )
-        seen[key] = instance
-        deduped.append((method, path, instance, fn))
+        seen[key] = route.instance
 
     async def openapi_endpoint(request: Request) -> JSONResponse:
-        return JSONResponse(build_openapi(title, version, deduped))
+        return JSONResponse(build_openapi(title, version, route_entries))
 
     async def docs_endpoint(request: Request) -> HTMLResponse:
         return HTMLResponse(SWAGGER_UI_HTML)
 
-    app_routes: list[Route] = [
-        Route("/openapi.json", openapi_endpoint, methods=["GET"]),
-        Route("/docs", docs_endpoint, methods=["GET"]),
+    app_routes: list[StarletteRoute] = [
+        StarletteRoute("/openapi.json", openapi_endpoint, methods=["GET"]),
+        StarletteRoute("/docs", docs_endpoint, methods=["GET"]),
     ]
-    for method, path, instance, fn in deduped:
-        app_routes.append(Route(path, _make_endpoint(instance, fn), methods=[method]))
+    for route in route_entries:
+        app_routes.append(StarletteRoute(route.path, _make_endpoint(route), methods=[route.method]))
     return Starlette(routes=app_routes, exception_handlers=_EXCEPTION_HANDLERS)
 
 
@@ -102,9 +117,7 @@ _EXCEPTION_HANDLERS: dict[Any, Any] = {
 }
 
 
-def collect_routes(
-    declared: type, instance: object
-) -> list[tuple[str, str, object, Callable[..., object]]]:
+def collect_routes(declared: type, instance: object) -> list[Route]:
     """Collect ``(method, full path, instance, fn)`` for *instance*'s route-marked methods.
 
     路径在这里就拼完整：``prefix`` 是这个单元的**绝对**前缀，与它被谁依赖无关。依赖
@@ -116,14 +129,15 @@ def collect_routes(
     """
     prefix: str = getattr(declared, WEB_ATTR, {}).get("prefix", "")
     seen: set[tuple[str, str]] = set()
-    routes: list[tuple[str, str, object, Callable[..., object]]] = []
+    routes: list[Route] = []
     for method, path, fn in routes_of(instance):
         full = _join_path(prefix, path)
         key = (method, full)
         if key in seen:
             raise RouteRegistrationError(f"duplicate route: {method} {full}")
         seen.add(key)
-        routes.append((method, full, instance, fn))
+        # 签名在这里编译一次，此后每个请求都不必再碰反射。
+        routes.append(Route(method, full, instance, fn, build_plan(fn, full)))
     return routes
 
 
@@ -135,8 +149,13 @@ def _join_path(prefix: str, path: str) -> str:
     return prefix.rstrip("/") + path if prefix else path
 
 
-def _make_endpoint(instance: object, fn: Callable[..., object]) -> Callable[[Request], Any]:
+def _make_endpoint(route: Route) -> Callable[[Request], Any]:
+    """Close over everything the request path needs, so the request itself carries nothing.
+
+    把实例、方法与编译好的计划闭包进去——请求到来时不再有任何查找。
+    """
+
     async def endpoint(request: Request) -> Response:
-        return await dispatch(instance, fn, request)
+        return await dispatch(route.instance, route.fn, route.plan, request)
 
     return endpoint

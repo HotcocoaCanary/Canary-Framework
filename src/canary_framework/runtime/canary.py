@@ -16,7 +16,7 @@ import logging
 import os
 import types
 from collections.abc import Callable, Mapping
-from typing import Any, Literal, Self, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import InjectionError, LifecycleError, ProvisionError
 from canary_framework.common.markers import WEB_ATTR
@@ -31,6 +31,9 @@ from canary_framework.core.decorator.introspect import (
 from canary_framework.core.infra.naming import to_snake
 from canary_framework.runtime.graph import build_graph, topological_sort
 
+if TYPE_CHECKING:  # 仅供类型标注——运行时对 web 的 import 始终是延迟的
+    from canary_framework.web.core.app import Route
+
 _log = logging.getLogger("canary.runtime")
 
 
@@ -39,9 +42,6 @@ _T = TypeVar("_T")
 # 一个钩子：同步时返回 None，异步时返回一个可等待对象（协程）。
 # ``Callable[[], object]`` 对二者都成立——协程也是 ``object`` 的子类型。
 _Hook = Callable[[], object]
-
-# 路由条目：(method, path, instance, handler)
-_RouteEntry = tuple[str, str, object, Callable[..., object]]
 
 # 进行中的状态：只可能被并发调用者观察到，此时再驱动生命周期一定是误用。
 _TRANSIENT = (
@@ -71,7 +71,7 @@ class Canary:
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
         self._serve_app: Any | None = None
-        self._route_entries: list[_RouteEntry] = []
+        self._route_entries: list[Route] = []
         # 已进入 ``@on_start`` 的单元，按进入顺序；回收时逆序消费。
         # 记录的是“进入”而非“完成”——启动到一半失败的单元同样要被回收。
         self._started: list[type] = []
@@ -369,10 +369,10 @@ class Canary:
             lines.append(f"    {i}. {t.__name__}{substituted}" + (f"  <- {deps}" if deps else ""))
         if self._route_entries:
             lines.append("  routes:")
-            for method, path, instance, fn in self._route_entries:
+            for route in self._route_entries:
                 lines.append(
-                    f"    {method:<6} {path}  -> {type(instance).__name__}."
-                    f"{getattr(fn, '__name__', fn)}"
+                    f"    {route.method:<6} {route.path}  -> "
+                    f"{type(route.instance).__name__}.{getattr(route.fn, '__name__', route.fn)}"
                 )
         return "\n".join(lines)
 

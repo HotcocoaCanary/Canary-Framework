@@ -1,118 +1,98 @@
-"""Request dispatch — bind handler parameters and build a JSON response.
+"""Request dispatch — execute a handler's precompiled plan and build the response.
 
-请求分发：把一次请求的路径 / 查询 / 请求头 / 请求体按 handler 签名绑定为关键字参数，
-调用 handler（必为 ``async def``），再把返回值校验后序列化为 JSON 响应。
+请求分发：照着装配期编译好的 :class:`~canary_framework.web.decorator.resolve.HandlerPlan`
+取值，调用 handler（必为 ``async def``），再把返回值序列化为 JSON 响应。
+
+这条路径上**没有任何反射**——签名、类型注解、校验器都在启动时算完了，每个请求只是
+遍历一个元组、按来源取值、跑已经造好的校验器。
 """
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Awaitable, Callable
-from typing import Any, cast, get_origin
+from typing import Any, cast
 
-from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic import BaseModel, ValidationError
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from canary_framework.web.decorator.resolve import hints_of, location_of, unwrap
+from canary_framework.web.decorator.resolve import HandlerPlan, ParamSpec
 from canary_framework.web.error.web import MissingParameterError, RequestValidationError
-from canary_framework.web.infra.naming import header_name
 
-_EMPTY = inspect.Parameter.empty
+_MISSING = object()  # 与 None 区分：header 真的传了空串时，None 才表示"没有这一项"
 
 
-async def dispatch(instance: object, fn: Callable[..., object], request: Request) -> Response:
+async def dispatch(
+    instance: object, fn: Callable[..., object], plan: HandlerPlan, request: Request
+) -> Response:
     """Solve *fn*'s parameters from *request*, invoke it, and return a JSON response.
 
     绑定失败（缺参 / 校验失败）抛出 :class:`RequestValidationError`；它和 handler 抛出的
-    其它异常一样，交给统一的异常映射处理——422 因此也是可被使用者覆盖的。
+    其它异常一样交给内置的异常映射处理，最终成为 422。
     """
-    hints = hints_of(fn)
     try:
-        kwargs = await _solve(fn, request, hints)
+        kwargs = {spec.name: await _value_of(spec, request) for spec in plan.params}
     except (ValidationError, MissingParameterError) as exc:
         raise RequestValidationError(exc) from exc
     # handler 必为 async（由 @get/@post 在装配期把关），这里没有第二条同步路径。
-    result = await cast(Awaitable[Any], fn(**kwargs))
-    return _to_response(result, hints.get("return", _EMPTY))
+    result = await cast("Awaitable[Any]", fn(**kwargs))
+    return _to_response(result, plan)
 
 
-async def _solve(
-    fn: Callable[..., object], request: Request, hints: dict[str, Any]
-) -> dict[str, Any]:
-    sig = inspect.signature(fn)
-    path_params = set(request.path_params)
-    values: dict[str, Any] = {}
-    for name, param in sig.parameters.items():
-        if name in ("self", "cls"):
-            continue
-        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
-            continue
-        type_, marker = unwrap(hints.get(name, param.annotation))
-        location = location_of(type_, marker, name, path_params)
-        values[name] = await _resolve_one(name, type_, marker, location, request, param.default)
-    return values
+async def _value_of(spec: ParamSpec, request: Request) -> Any:
+    """Fetch one parameter from its declared source and validate it.
 
-
-async def _resolve_one(
-    name: str,
-    type_: Any,
-    marker: Any,
-    location: str,
-    request: Request,
-    default: Any,
-) -> Any:
-    if location == "request":
+    按 :class:`ParamSpec` 说好的来源取一个值。取不到时：有缺省值就用缺省值，没有就报缺参。
+    ``body`` 与 ``request`` 不走"取不到"这条路——请求体总是存在（哪怕是空的），而
+    ``Request`` 对象本来就在手上。
+    """
+    if spec.location == "request":
         return request
-    alias = marker.alias if marker and marker.alias else name
-    if location == "body":
-        return _coerce(type_, await request.json())
-    if location == "path":
-        return _coerce(type_, request.path_params.get(name))
-    if location == "query":
-        return _from_query(name, type_, request, default)
-    if location in ("header", "cookie"):
-        raw = (
-            request.headers.get(header_name(alias))
-            if location == "header"
-            else request.cookies.get(alias)
-        )
-        if raw is None:
-            if default is not _EMPTY:
-                return default
-            raise MissingParameterError(f"missing {location} parameter: {alias}")
-        return _coerce(type_, raw)
-    raise MissingParameterError(f"unsupported parameter location: {location}")
+    if spec.location == "body":
+        return _validate(spec, await request.json())
+
+    raw = _raw_of(spec, request)
+    if raw is _MISSING:
+        if not spec.required:
+            return spec.default
+        raise MissingParameterError(f"missing {spec.location} parameter: {spec.source}")
+    return _validate(spec, raw)
 
 
-def _from_query(name: str, type_: Any, request: Request, default: Any) -> Any:
-    if get_origin(type_) is list:
-        values = request.query_params.getlist(name)
-        if values:
-            return _coerce(type_, values)
-        if default is not _EMPTY:
-            return default
-        raise MissingParameterError(f"missing query parameter: {name}")
-    raw = request.query_params.get(name)
-    if raw is None:
-        if default is not _EMPTY:
-            return default
-        raise MissingParameterError(f"missing query parameter: {name}")
-    return _coerce(type_, raw)
+def _raw_of(spec: ParamSpec, request: Request) -> Any:
+    """Pull the still-unvalidated value out of the request, or :data:`_MISSING`.
+
+    从请求里取出未经校验的原始值。查询串的多值参数用 ``getlist``——``?tag=a&tag=b``
+    要还原成 ``["a", "b"]``，而 ``get`` 只会给最后一个。
+    """
+    if spec.location == "path":
+        return request.path_params.get(spec.source, _MISSING)
+    if spec.location == "query":
+        if spec.multi:
+            values = request.query_params.getlist(spec.source)
+            return values if values else _MISSING
+        return request.query_params.get(spec.source, _MISSING)
+    if spec.location == "header":
+        return request.headers.get(spec.source, _MISSING)
+    if spec.location == "cookie":
+        return request.cookies.get(spec.source, _MISSING)
+    raise MissingParameterError(f"unsupported parameter location: {spec.location}")
 
 
-def _coerce(type_: Any, raw: Any) -> Any:
-    if type_ is _EMPTY or type_ is Any or type_ is type(None):
-        return raw
-    return TypeAdapter(type_).validate_python(raw)
+def _validate(spec: ParamSpec, raw: Any) -> Any:
+    """没有转换器就原样透传——没注解、``Any``、或 pydantic 描述不了的类型。"""
+    return raw if spec.adapter is None else spec.adapter.validate_python(raw)
 
 
-def _to_response(result: Any, return_ann: Any) -> Response:
-    # handler 自己造好的响应原样放行——SSE、文件下载、自定义状态码、后台任务都走这里。
+def _to_response(result: Any, plan: HandlerPlan) -> Response:
+    """Serialise the handler's return value.
+
+    handler 自己造好的响应原样放行——SSE、文件下载、自定义状态码、后台任务都走这里。
+    """
     if isinstance(result, Response):
         return result
     if isinstance(result, BaseModel):
         return JSONResponse(result.model_dump(mode="json"))
-    if return_ann is _EMPTY or return_ann is Any or return_ann is type(None):
+    if plan.returns is None:
         return JSONResponse(result)
-    return JSONResponse(TypeAdapter(return_ann).dump_python(result, mode="json"))
+    return JSONResponse(plan.returns.dump_python(result, mode="json"))
