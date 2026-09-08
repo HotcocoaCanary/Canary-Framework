@@ -301,6 +301,9 @@ class Canary:
 
         按依赖类名的 snake_case 注入属性（``Database`` → ``node.database``）。
         两个依赖的 snake_case 撞名时抛 :class:`InjectionError`，不再"后写的赢"。
+
+        依赖取自**实例的类**。被 ``provide`` 的实例按建图时的规则一条依赖也不声明，
+        所以这里对它天然是空转——图里不会存在"声明了却没装配"的依赖。
         """
         cls = type(node)
         plan: dict[str, tuple[str, object]] = {}
@@ -363,7 +366,7 @@ class Canary:
         """
         unused = [t.__name__ for t in self._provided if t not in self._graph]
         if unused:
-            raise ProvisionError(unused)
+            raise ProvisionError.never_applied(unused)
 
     def _assembly_summary(self) -> str:
         """Render what the runtime actually assembled — the graph knows, so it should say.

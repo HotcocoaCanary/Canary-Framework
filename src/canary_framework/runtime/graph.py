@@ -10,7 +10,11 @@ import inspect
 from collections import defaultdict, deque
 from collections.abc import Mapping
 
-from canary_framework.common.error import CircularDependencyError, ConstructionError
+from canary_framework.common.error import (
+    CircularDependencyError,
+    ConstructionError,
+    ProvisionError,
+)
 from canary_framework.core.decorator.introspect import deps_of, is_cocoa
 
 
@@ -25,9 +29,15 @@ def build_graph(
     接线（这个节点需要构造参数，我造好了）与测试替换（用假的顶掉真的）——两者说的
     是同一件事，所以用同一个入口。
 
-    给定的类型**不再展开它声明的依赖**：既然实例已经造好，它的协作者也该由造它的人
-    准备；把真实依赖再实例化一遍既浪费又可能失败（替掉数据库之后仍去连数据库）。
-    给定的实例不必是 ``@cocoa``：它的生命周期钩子照常被扫描执行，只是没有依赖可注入。
+    规则只有一条：**给出的实例是完整的。** 框架不构造它，不展开它声明的依赖，也不往
+    它里面注入任何东西——既然实例已经造好，它的协作者也该由造它的人准备；把真实依赖再
+    实例化一遍既浪费又可能失败（替掉数据库之后仍去连数据库）。
+
+    因此给出的实例**不能自己再声明** ``deps``（继承被替换的类时最容易不小心带上），
+    否则抛 :class:`ProvisionError`。判据看的是**你交出来的那个对象**的类，不是被替换的
+    声明类型：普通替身没有 ``@cocoa`` 标记，自然一条依赖也不声明。
+
+    给定的实例不必是 ``@cocoa``：它的生命周期钩子照常被扫描执行。
     """
     given: Mapping[type, object] = provide or {}
     graph: dict[type, object] = {}
@@ -36,7 +46,13 @@ def build_graph(
         if t in graph:
             return
         if t in given:
-            graph[t] = given[t]
+            instance = given[t]
+            declared = deps_of(type(instance))
+            if declared:
+                raise ProvisionError.declares_dependencies(
+                    type(instance).__name__, [d.__name__ for d in declared]
+                )
+            graph[t] = instance
             return
         if not is_cocoa(t):
             raise TypeError(f"'{t.__name__}' is not decorated with @cocoa")
@@ -74,8 +90,10 @@ def topological_sort(graph: dict[type, object]) -> list[type]:
     """
     indegree = dict.fromkeys(graph, 0)
     dependents: dict[type, list[type]] = defaultdict(list)
-    for t in graph:
-        for dep in deps_of(t):
+    for t, node in graph.items():
+        # 依赖取自**实例的类**而非声明类型：被 provide 的节点不接受注入，也就不该因为
+        # 声明类型上的依赖被排到它们后面。注入、排序、摘要因此看的是同一份事实。
+        for dep in deps_of(type(node)):
             if dep in graph:
                 indegree[t] += 1
                 dependents[dep].append(t)

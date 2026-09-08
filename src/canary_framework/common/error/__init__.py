@@ -5,6 +5,8 @@
 ``except CanaryError`` 就能统一捕获框架与所有扩展的错误。
 """
 
+from typing import Self
+
 
 class CanaryError(Exception):
     """Base class for every framework error — and the extension point.
@@ -67,14 +69,34 @@ class ConstructionError(CanaryError):
 
 
 class ProvisionError(CanaryError):
-    """Raised when an entry passed to ``Canary(provide=...)`` never applies.
+    """Raised when an entry passed to ``Canary(provide=...)`` cannot be honoured.
 
-    ``provide`` 里的某个类型不在依赖图上时抛出。沉默地忽略一个写错的类型，会让测试
-    "通过"却根本没替换成功，也会让生产接线以为自己接上了——这类错误必须响。
+    ``provide`` 只有一条规则：**给出的实例是完整的**——框架不构造它、不展开它声明的
+    依赖、也不往它里面注入任何东西。两种违背这条规则的写法都在装配阶段抛出：
+
+    - **条目没落到图上**（类型写错）。沉默地忽略会让测试"通过"却根本没替换成功，
+      也会让生产接线以为自己接上了。
+    - **给出的实例自己还声明着** ``deps``。那些依赖不会被装配，属性也就永远不会出现。
+      从前这里漏出一个裸 ``KeyError``，而且漏不漏取决于别的单元有没有恰好依赖同一个
+      类型——同一份代码两种行为，这比报错本身更糟。
     """
 
-    def __init__(self, unused: list[str]) -> None:
-        self.unused = unused
-        super().__init__(
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+    @classmethod
+    def never_applied(cls, unused: list[str]) -> Self:
+        return cls(
             "provided types never applied (not reachable from the roots): " + ", ".join(unused)
+        )
+
+    @classmethod
+    def declares_dependencies(cls, unit: str, declared: list[str]) -> Self:
+        return cls(
+            f"{unit} was handed to provide=, but it still declares dependencies: "
+            + ", ".join(declared)
+            + ". A provided instance is complete — Canary neither constructs it nor wires "
+            "anything into it, so those attributes would never appear. Either drop the "
+            "declaration (a substitute can be a plain class, or @cocoa with no deps), or "
+            "build its collaborators yourself and pass them to its constructor."
         )
