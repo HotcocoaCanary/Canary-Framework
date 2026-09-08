@@ -14,5 +14,3 @@ ON_STOP = "__on_stop__"
 # --- web：路由与文档元数据 ---
 ROUTE_ATTR = "__canary_route__"
 WEB_ATTR = "__canary_web__"
-# 实例上暂存的路由条目，由 ``@web_cocoa`` 的启动钩子写入、``Canary`` 合并时读取。
-ROUTE_ENTRIES_ATTR = "__canary_route_entries__"

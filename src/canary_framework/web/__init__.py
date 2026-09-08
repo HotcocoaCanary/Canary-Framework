@@ -14,7 +14,6 @@ from canary_framework.web.decorator.params import Cookie, Header
 from canary_framework.web.decorator.routes import delete, get, patch, post, put, route
 from canary_framework.web.error.web import (
     HTTPError,
-    MissingParameterError,
     RequestValidationError,
     RouteRegistrationError,
     WebError,
@@ -24,7 +23,6 @@ __all__ = [
     "Cookie",
     "HTTPError",
     "Header",
-    "MissingParameterError",
     "RequestValidationError",
     "RouteRegistrationError",
     "WebError",

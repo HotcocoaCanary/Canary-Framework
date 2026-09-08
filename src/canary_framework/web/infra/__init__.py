@@ -1,8 +1,5 @@
-"""Infrastructure — naming helpers.
+"""Infrastructure — declaration-time checks and wire-name helpers.
 
-基础设施：命名工具。
+基础设施：装配期检查（:mod:`~canary_framework.web.infra.checks`）与协议命名
+（:mod:`~canary_framework.web.infra.naming`）。
 """
-
-from canary_framework.web.infra.naming import header_name
-
-__all__ = ["header_name"]

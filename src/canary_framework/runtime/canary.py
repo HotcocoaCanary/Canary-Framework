@@ -19,7 +19,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import InjectionError, LifecycleError, ProvisionError
-from canary_framework.common.markers import ROUTE_ENTRIES_ATTR, WEB_ATTR
+from canary_framework.common.markers import WEB_ATTR
 from canary_framework.common.type import LifecycleState, Receive, Scope, Send
 from canary_framework.core.decorator.introspect import (
     deps_of,
@@ -237,32 +237,27 @@ class Canary:
     def _collect_serve_app(self) -> Any | None:
         """Collect the units' route entries and merge them into one serving app.
 
-        每个 ``@web_cocoa`` 单元在 ``@on_start`` 里把自己的路由条目（路径已含它自己的
-        ``prefix``）写到 ``ROUTE_ENTRIES_ATTR``；这里只是把它们并起来，交给 web 扩展合并
-        成一个统一的应用（含 ``/openapi.json`` 与 ``/docs``）。**运行时不做任何路径运算**
-        ——URL 长什么样是 web 的事，运行时只管有哪些单元。
+        运行时在这里只做两件事：**按 ``WEB_ATTR`` 标记挑出哪些单元带路由**，再把它们交给
+        web 扩展。路由怎么收、路径怎么拼、文档怎么生成，全是 web 的事——运行时不做任何
+        路径运算，也不需要认识路由的形状。
 
         逆拓扑序遍历（依赖者在前），所以文档元数据取的是最外层那个 web 单元的。
 
-        对 web 扩展的 import 是延迟的：没有路由条目就不会发生，纯 ``@cocoa`` 编排
+        对 web 扩展的 import 是延迟的：没有 web 单元就不会发生，纯 ``@cocoa`` 编排
         因此无需安装 ``canary-framework[web]``。
         """
-        all_entries: list[_RouteEntry] = []
-        meta: dict[str, str] = {}  # 文档元数据取最外层单元的
-
-        for t in reversed(self._order):
-            entries: list[_RouteEntry] | None = getattr(self._graph[t], ROUTE_ENTRIES_ATTR, None)
-            if entries is None:
-                continue
-            all_entries.extend(entries)
-            meta = meta or getattr(t, WEB_ATTR, {})
-
-        self._route_entries = all_entries
-        if not all_entries:
+        web_types = [t for t in reversed(self._order) if hasattr(t, WEB_ATTR)]
+        if not web_types:
             return None
-        from canary_framework.web.core.app import build_serve_app
 
-        return build_serve_app(meta, all_entries)
+        from canary_framework.web.core.app import build_serve_app, collect_routes
+
+        self._route_entries = [
+            entry for t in web_types for entry in collect_routes(t, self._graph[t])
+        ]
+        if not self._route_entries:
+            return None
+        return build_serve_app(getattr(web_types[0], WEB_ATTR, {}), self._route_entries)
 
     # -- context manager ----------------------------------------------
     async def __aenter__(self) -> Self:

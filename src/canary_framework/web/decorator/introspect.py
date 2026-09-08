@@ -1,6 +1,10 @@
 """Declaration introspection — read back the ``@get`` / ``@post`` markers.
 
-声明自省：读取路由装饰器写下的标记，供扩展收集。
+声明自省：读取路由装饰器写下的标记，供 web 扩展收集。
+
+扫描本身不在这里——它和生命周期钩子的扫描是同一件事，收口在
+:func:`canary_framework.core.decorator.introspect.marked_members`。这里只负责把载荷
+摊开成调用方要的形状。
 """
 
 from __future__ import annotations
@@ -8,24 +12,13 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from canary_framework.common.markers import ROUTE_ATTR
+from canary_framework.core.decorator.introspect import marked_members
 
 
 def routes_of(instance: object) -> list[tuple[str, str, Callable[..., object]]]:
-    """Return ``(method, path, bound_method)`` for every route-marked method, base-first.
+    """Return ``(method, path, bound method)`` for every route-marked method, base-first.
 
-    仿照 :func:`canary_framework.core.decorator.introspect.hooks_of`：沿 MRO 基类优先
-    扫描，混入的路由与本类路由都能注册（叠加而非覆盖）。
+    返回该实例上所有被路由标记过的方法，基类在前——混入（mixin）带来的路由与本类自己
+    的路由都会注册，两者叠加而非互相覆盖。
     """
-    cls = type(instance)
-    routes: list[tuple[str, str, Callable[..., object]]] = []
-    seen: set[Callable[..., object]] = set()
-    for klass in reversed(cls.__mro__):  # 基类 → 派生类
-        for raw in klass.__dict__.values():
-            if not callable(raw) or not hasattr(raw, ROUTE_ATTR):
-                continue
-            if raw in seen:
-                continue
-            seen.add(raw)
-            method, path = getattr(raw, ROUTE_ATTR)
-            routes.append((method, path, raw.__get__(instance, klass)))
-    return routes
+    return [(method, path, fn) for (method, path), fn in marked_members(instance, ROUTE_ATTR)]

@@ -22,6 +22,7 @@ from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from canary_framework.common.markers import WEB_ATTR
+from canary_framework.web.core.extension import _DEFAULT_TITLE, _DEFAULT_VERSION
 from canary_framework.web.core.openapi import SWAGGER_UI_HTML, build_openapi
 from canary_framework.web.core.routing import dispatch
 from canary_framework.web.decorator.introspect import routes_of
@@ -30,9 +31,6 @@ from canary_framework.web.error.web import (
     RequestValidationError,
     RouteRegistrationError,
 )
-
-_DEFAULT_TITLE = "Canary API"
-_DEFAULT_VERSION = "0.1.0"
 
 
 def build_serve_app(
@@ -105,15 +103,18 @@ _EXCEPTION_HANDLERS: dict[Any, Any] = {
 
 
 def collect_routes(
-    instance: object,
+    declared: type, instance: object
 ) -> list[tuple[str, str, object, Callable[..., object]]]:
     """Collect ``(method, full path, instance, fn)`` for *instance*'s route-marked methods.
 
     路径在这里就拼完整：``prefix`` 是这个单元的**绝对**前缀，与它被谁依赖无关。依赖
     关系说的是启动顺序和谁能调用谁，URL 说的是对外的资源命名——两件事，不该互相决定。
     想要 ``/api/admin`` 就写 ``prefix="/api/admin"``。
+
+    前缀取自 *declared*（图上登记的那个类型）而不是 ``type(instance)``：被 ``provide``
+    顶掉的单元，替身身上没有 ``@web_cocoa`` 的标记，挂载点仍应由被替换者决定。
     """
-    prefix: str = getattr(type(instance), WEB_ATTR, {}).get("prefix", "")
+    prefix: str = getattr(declared, WEB_ATTR, {}).get("prefix", "")
     seen: set[tuple[str, str]] = set()
     routes: list[tuple[str, str, object, Callable[..., object]]] = []
     for method, path, fn in routes_of(instance):

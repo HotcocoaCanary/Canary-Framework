@@ -1,12 +1,5 @@
 """Web-extension errors.
 
-web 扩展的错误体系：:class:`WebError` 及其子类。
+web 扩展的错误，全部继承 :class:`~canary_framework.web.error.web.WebError`，而它继承
+核心的 :class:`~canary_framework.common.error.CanaryError`。
 """
-
-from canary_framework.web.error.web import (
-    MissingParameterError,
-    RouteRegistrationError,
-    WebError,
-)
-
-__all__ = ["MissingParameterError", "RouteRegistrationError", "WebError"]

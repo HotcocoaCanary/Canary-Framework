@@ -23,4 +23,4 @@ def test_web_cocoa_forwards_deps() -> None:
     @web_cocoa(deps=[Repo])
     class API: ...
 
-    assert deps_of(API) == [Repo]
+    assert deps_of(API) == (Repo,)

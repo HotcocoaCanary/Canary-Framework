@@ -31,8 +31,8 @@ def test_cocoa_is_dual_use() -> None:
     class B:
         pass
 
-    assert deps_of(A) == []
-    assert deps_of(B) == [A]
+    assert deps_of(A) == ()
+    assert deps_of(B) == (A,)
 
 
 def test_cocoa_preserves_class_identity() -> None:

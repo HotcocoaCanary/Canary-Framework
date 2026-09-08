@@ -31,7 +31,7 @@ def cocoa[T](
 ) -> type[T] | Callable[[type[T]], type[T]]:
     """Mark a class as a cocoa (the minimum unit), optionally with dependencies.
 
-    把类标记为最小单元；``deps`` 里的依赖会在 ``start`` 阶段注入为 snake_case 属性。用法::
+    把类标记为最小单元；``deps`` 里的依赖会在 ``init`` 阶段注入为 snake_case 属性。用法::
 
         @cocoa
         class Config: ...
@@ -39,7 +39,9 @@ def cocoa[T](
         @cocoa(deps=[Config])          # 注入为 self.config
         class Database: ...
     """
-    _deps = list(deps or ())
+    # 存成元组：依赖清单在类定义之后就不该再变，而 deps_of 会被建图、拓扑排序、
+    # 注入、摘要反复调用——不可变就能直接返回同一个对象，不必每次拷一份。
+    _deps = tuple(deps or ())
 
     def mark(c: type[T]) -> type[T]:
         setattr(c, COCOA_ATTR, _deps)
