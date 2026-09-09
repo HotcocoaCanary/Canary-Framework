@@ -113,24 +113,15 @@ class UserService:
 
 ## 接进一个宿主
 
-Canary 不认识任何外壳 —— 它既不是 web 框架，也不是 CLI 框架。任何有"启动 / 关停"概念的宿主
-都能驱动它，只要把自己的运行期包住：
+Canary 不认识任何外壳。Python 世界的宿主只有两种形状，两种都直接支持：收异步上下文管理器的
+用 `canary.lifespan`（ASGI、MCP、FastStream），收成对回调的用 `init()`/`start()`/`stop()`
+（Quart、Sanic、arq、Dramatiq）。
 
 ```python
-from contextlib import asynccontextmanager
-
 from fastapi import Depends, FastAPI
 
 canary = Canary(UserService)
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    async with canary:            # 进入时 init + start，退出时 stop
-        yield
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=canary.lifespan)       # 进入时 init + start，退出时 stop
 
 
 def provide[T](cls: type[T]):

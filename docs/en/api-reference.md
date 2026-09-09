@@ -90,16 +90,37 @@ Runs `@on_stop` in reverse topological order. **The single reclamation path**: c
 `STARTED` and from `FAILED`, idempotent, a no-op when nothing ever started. A failing `@on_stop`
 does not abort the rest — the errors are collected and raised together as an `ExceptionGroup`.
 
-### `__aenter__` / `__aexit__`
-
-The async context manager protocol, wrapping `init()` + `start()` / `stop()`. It is also the only
-way to plug Canary into a host (FastAPI's `lifespan=`, a CLI command wrapper, your own `main()`):
+### `lifespan`
 
 ```python
 @asynccontextmanager
-async def lifespan(_app):
-    async with canary:
-        yield
+def lifespan(self, _host: object = None) -> AsyncContextManager[None]
+```
+
+The host-facing entry point: `init()` + `start()` on enter, `stop()` on exit, **yielding
+`None`**.
+
+`_host` accepts the host a framework passes in (ASGI's `lifespan(app)`, MCP's
+`lifespan(server)`) and defaults to `None`, so it also works standalone as
+`async with canary.lifespan():`.
+
+```python
+app = FastAPI(lifespan=canary.lifespan)
+app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
+server = MCPServer("demo", lifespan=canary.lifespan)
+```
+
+Yielding `None` is required: the ASGI lifespan protocol treats the yielded value as a mapping to
+merge into `scope["state"]`.
+
+### `__aenter__` / `__aexit__`
+
+The async context manager protocol, wrapping `init()` + `start()` / `stop()`, **handing back the
+container** — it serves your own code:
+
+```python
+async with Canary(Root) as canary:
+    canary[SomeUnit].do_something()
 ```
 
 ## Enums

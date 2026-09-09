@@ -4,8 +4,10 @@
 让“嵌套”“单独启动”“组合”共用同一条代码路径。引擎是 async 原生：钩子既可以是
 同步函数，也可以是协程函数，运行时按返回值自动判断是否 ``await``。
 
-运行时**只做装配与生命周期**，不认识任何外壳（HTTP、CLI、消息消费者……）。要把它接进
-一个宿主，用 ``async with canary:`` 包住宿主的运行期即可。
+运行时**只做装配与生命周期**，不认识任何外壳（HTTP、CLI、消息消费者……）。接进宿主有两条
+路，对应 Python 世界仅有的两种宿主协议：``canary.lifespan`` 交给收异步上下文管理器的宿主
+（ASGI 的 lifespan、MCP、FastStream……），三个显式方法交给收成对回调的宿主
+（``on_startup`` / ``on_shutdown``）。
 """
 
 from __future__ import annotations
@@ -15,7 +17,8 @@ import inspect
 import logging
 import os
 import types
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Literal, Self, TypeVar, cast
 
 from canary_framework.common.error import InjectionError, LifecycleError
@@ -177,6 +180,33 @@ class Canary:
         self._state = LifecycleState.STOPPED
 
     # -- context manager ----------------------------------------------
+    @asynccontextmanager
+    async def lifespan(self, _host: object = None) -> AsyncIterator[None]:
+        """The host-facing entry point: start on enter, stop on exit, yield nothing.
+
+        交给宿主的入口。它和 ``async with canary`` 只差一件事：**交出 None 而不是自己**。
+
+        Python 世界里"一个有生命期的东西"事实上的标准就是异步上下文管理器，各领域的宿主
+        收的都是同一个形状 —— ``Callable[[Host], AsyncContextManager[T]]``：ASGI 的
+        ``lifespan=``（Starlette / FastAPI / Litestar）、MCP 的 ``MCPServer(lifespan=)``、
+        FastStream 的 ``lifespan=`` 都是。所以 ``_host`` 收下宿主自己传进来的那个参数，
+        又给了默认值，让它在没有宿主时（CLI、脚本、测试夹具）也能直接
+        ``async with canary.lifespan():``。
+
+        为什么必须交出 None：ASGI 的 lifespan 协议**把交出来的值当作要合并进
+        ``scope["state"]`` 的映射**（Starlette 用它给使用者传共享状态）。``__aenter__``
+        返回的是 ``self``，于是 Starlette 会去 ``dict.update(canary)``，漏出一个
+        ``KeyError: 0`` —— 毫无线索。Litestar 没有这层约定，所以它直接给就能用；同一个
+        协议的两种方言，这里一次性照顾到。
+
+        ``async with canary`` 保持原样（交出容器自己），它服务的是你自己的代码::
+
+            app = FastAPI(lifespan=canary.lifespan)      # 宿主
+            async with canary as app: ...                # 你自己
+        """
+        async with self:
+            yield
+
     async def __aenter__(self) -> Self:
         await self.init()
         await self.start()

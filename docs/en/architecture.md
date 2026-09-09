@@ -65,14 +65,14 @@ have one way of being handled.
 ## It knows about no shell
 
 `Canary` does assembly and lifecycle, nothing else. HTTP, CLIs, schedulers, message consumers —
-those are **shells**, owned by other libraries, and Canary knows about none of them. There is one
-way in: let the host wrap its own runtime in the async context manager.
+those are **shells**, owned by other libraries, and Canary knows about none of them.
+
+There are two ways in, because Python only has two host shapes: a host takes an async context
+manager, or it takes paired startup/shutdown callbacks.
 
 ```python
-@asynccontextmanager
-async def lifespan(_app):
-    async with canary:
-        yield
+app = FastAPI(lifespan=canary.lifespan)      # shape one: ASGI, MCP, FastStream
+                                             # shape two: init()/start() and stop()
 ```
 
 That boundary is deliberate. A web layer used to live in this repository (`@web_cocoa`, route

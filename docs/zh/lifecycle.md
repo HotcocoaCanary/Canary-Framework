@@ -115,17 +115,32 @@ finally:
 
 ## 交给宿主驱动
 
-`Canary` 实现了异步上下文管理器协议，所以任何宿主只要在自己的运行期把它包住即可：
+两种宿主协议，两个入口：
+
+| 宿主收什么 | 用哪个 | 谁是这样 |
+|---|---|---|
+| 一个异步上下文管理器 `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI（Starlette / FastAPI / Litestar）、MCP、FastStream |
+| 成对的启动 / 关停回调 | `init()` / `start()` 与 `stop()` | Quart、Sanic、arq、Dramatiq |
 
 ```python
-@asynccontextmanager
-async def lifespan(_app):
-    async with canary:      # 进入时 init + start，退出时 stop
-        yield
+app = FastAPI(lifespan=canary.lifespan)          # 就这一行
+app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
+server = MCPServer("demo", lifespan=canary.lifespan)
 ```
 
-FastAPI / Starlette 的 `lifespan=`、Typer 的命令包装、你自己的 `main()` —— 都是同一个写法。
-框架不认识任何具体宿主。
+没有宿主时（CLI、脚本、测试夹具）直接用：
+
+```python
+async with canary.lifespan():
+    ...
+```
+
+框架不认识任何具体宿主 —— 上面那张表覆盖的是 Python 世界仅有的两种形状。
+
+`canary.lifespan` 和 `async with canary` 只差一件事：**它交出 `None` 而不是容器自己**。
+ASGI 的 lifespan 协议会把交出来的值当作要合并进 `scope["state"]` 的映射，交出容器会让
+Starlette 去 `dict.update(canary)`，漏出一个毫无线索的 `KeyError`。`async with canary`
+服务的是你自己的代码，照常交出容器。
 
 ## 两个环境变量
 

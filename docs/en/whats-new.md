@@ -60,6 +60,21 @@ or lifecycle.
 
 ## Added
 
+- **`Canary.lifespan`** — the host-facing entry point; one line plugs it into any mainstream
+  framework:
+
+  ```python
+  app = FastAPI(lifespan=canary.lifespan)
+  app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
+  server = MCPServer("demo", lifespan=canary.lifespan)
+  ```
+
+  Python has only two host shapes — take an async context manager, or take paired
+  startup/shutdown callbacks — and both are now supported directly. `lifespan` differs from
+  `async with canary` only in what it yields: `None` (the ASGI protocol treats the yielded value
+  as a mapping to merge into `scope["state"]`, so yielding the container leaks a clueless
+  `KeyError`) rather than the container itself.
+
 - **Injection moved to `init()`.** `@on_init` therefore has a meaning of its own for the first
   time — "dependencies are in place, nothing is running yet".
 - **`ConstructionError`** — a unit that needs constructor arguments gets an actionable error

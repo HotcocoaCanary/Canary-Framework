@@ -120,20 +120,10 @@ Canary does not care who drives it — it only needs someone to wrap it for the 
 run. Any host with a startup/shutdown notion works; FastAPI's lifespan, for instance:
 
 ```python
-from contextlib import asynccontextmanager
-
 from fastapi import Depends, FastAPI
 
 canary = Canary(UserService)
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    async with canary:           # init + start on entry, stop on exit
-        yield
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=canary.lifespan)      # init + start on entry, stop on exit
 
 
 def provide[T](cls: type[T]):

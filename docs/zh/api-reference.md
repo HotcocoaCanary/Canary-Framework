@@ -87,16 +87,35 @@ async def stop(self) -> None
 重复调用是幂等的，没启动过时空转。单个 `@on_stop` 抛出不会中断回收 —— 异常收集完毕后
 合并成一个 `ExceptionGroup` 抛出。
 
-### `__aenter__` / `__aexit__`
-
-异步上下文管理器协议，封装 `init()` + `start()` / `stop()`。这也是把 Canary 接进宿主
-（FastAPI 的 `lifespan=`、CLI 的命令包装、你自己的 `main()`）的唯一方式：
+### `lifespan`
 
 ```python
 @asynccontextmanager
-async def lifespan(_app):
-    async with canary:
-        yield
+def lifespan(self, _host: object = None) -> AsyncContextManager[None]
+```
+
+交给宿主的入口：进入时 `init()` + `start()`，退出时 `stop()`，**交出 `None`**。
+
+`_host` 收下宿主传进来的自己（ASGI 的 `lifespan(app)`、MCP 的 `lifespan(server)`），又给了
+默认值，所以没有宿主时也能直接 `async with canary.lifespan():`。
+
+```python
+app = FastAPI(lifespan=canary.lifespan)
+app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
+server = MCPServer("demo", lifespan=canary.lifespan)
+```
+
+交出 `None` 是必须的：ASGI 的 lifespan 协议把交出来的值当作要合并进 `scope["state"]` 的
+映射。
+
+### `__aenter__` / `__aexit__`
+
+异步上下文管理器协议，封装 `init()` + `start()` / `stop()`，**交出容器自己** —— 它服务的是
+你自己的代码：
+
+```python
+async with Canary(Root) as canary:
+    canary[SomeUnit].do_something()
 ```
 
 ## 枚举

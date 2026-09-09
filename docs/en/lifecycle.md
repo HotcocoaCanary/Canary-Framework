@@ -120,18 +120,34 @@ units are reclaimed anyway, and everything is raised at the end as one `Exceptio
 
 ## Letting a host drive it
 
-`Canary` implements the async context manager protocol, so any host only has to wrap its own
-runtime with it:
+Two host protocols, two entry points:
+
+| What the host takes | Use | Who does this |
+|---|---|---|
+| an async context manager, `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI (Starlette / FastAPI / Litestar), MCP, FastStream |
+| paired startup / shutdown callbacks | `init()` / `start()` and `stop()` | Quart, Sanic, arq, Dramatiq |
 
 ```python
-@asynccontextmanager
-async def lifespan(_app):
-    async with canary:      # init + start on entry, stop on exit
-        yield
+app = FastAPI(lifespan=canary.lifespan)          # that is the whole wiring
+app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
+server = MCPServer("demo", lifespan=canary.lifespan)
 ```
 
-FastAPI's and Starlette's `lifespan=`, a Typer command wrapper, your own `main()` — all the same
-shape. The framework knows about none of them specifically.
+Without a host (a CLI, a script, a test fixture) use it directly:
+
+```python
+async with canary.lifespan():
+    ...
+```
+
+The framework knows about none of them specifically — the table above covers the only two shapes
+that exist in Python.
+
+`canary.lifespan` differs from `async with canary` in exactly one way: **it yields `None` rather
+than the container.** The ASGI lifespan protocol treats the yielded value as a mapping to merge
+into `scope["state"]`, so yielding the container makes Starlette call `dict.update(canary)` and
+leak a `KeyError` with no clue in it. `async with canary` serves your own code and still hands
+back the container.
 
 ## Two environment variables
 

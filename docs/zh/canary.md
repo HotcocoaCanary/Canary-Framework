@@ -91,24 +91,26 @@ Canary assembled 4 unit(s)
 
 ## 交给宿主驱动
 
-`Canary` 不认识任何外壳 —— 它既不是 web 框架，也不是 CLI 框架。要把它接进一个宿主，用
-异步上下文管理器把宿主的运行期包住就行：
+`Canary` 不认识任何外壳 —— 它既不是 web 框架，也不是 CLI 框架。
+
+两种宿主协议，两个入口：
+
+| 宿主收什么 | 用哪个 | 谁是这样 |
+|---|---|---|
+| 一个异步上下文管理器 `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI（Starlette / FastAPI / Litestar）、MCP、FastStream |
+| 成对的启动 / 关停回调 | `init()` / `start()` 与 `stop()` | Quart、Sanic、arq、Dramatiq |
 
 ```python
-from contextlib import asynccontextmanager
+app = FastAPI(lifespan=canary.lifespan)          # 就这一行
+app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
+server = MCPServer("demo", lifespan=canary.lifespan)
+```
 
-from fastapi import FastAPI
+没有宿主时（CLI、脚本、测试夹具）直接用：
 
-canary = Canary(LibraryApp)
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    async with canary:      # 进入时 init + start，退出时 stop
-        yield
-
-
-app = FastAPI(lifespan=lifespan)
+```python
+async with canary.lifespan():
+    ...
 ```
 
 需要在宿主的处理函数里拿到某个单元时，`canary[SomeUnit]` 就是它 —— 依赖已经注入好了，

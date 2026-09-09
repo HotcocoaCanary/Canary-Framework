@@ -121,24 +121,15 @@ repeatedly — `finally: await app.stop()` is always safe.
 
 ## Plug it into a host
 
-Canary knows about no shell — it is neither a web framework nor a CLI framework. Any host that
-has a startup/shutdown notion can drive it by wrapping its own runtime:
+Canary knows about no shell. There are only two host shapes in Python and both are supported
+directly: hosts taking an async context manager use `canary.lifespan` (ASGI, MCP, FastStream),
+hosts taking paired callbacks use `init()`/`start()`/`stop()` (Quart, Sanic, arq, Dramatiq).
 
 ```python
-from contextlib import asynccontextmanager
-
 from fastapi import Depends, FastAPI
 
 canary = Canary(UserService)
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    async with canary:            # init + start on entry, stop on exit
-        yield
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=canary.lifespan)       # init + start on entry, stop on exit
 
 
 def provide[T](cls: type[T]):

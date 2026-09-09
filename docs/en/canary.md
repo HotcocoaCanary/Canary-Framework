@@ -94,24 +94,26 @@ Canary assembled 4 unit(s)
 
 ## Letting a host drive it
 
-`Canary` knows about no shell — it is neither a web framework nor a CLI framework. To plug it
-into a host, wrap that host's runtime in the async context manager:
+`Canary` knows about no shell — it is neither a web framework nor a CLI framework.
+
+Two host protocols, two entry points:
+
+| What the host takes | Use | Who does this |
+|---|---|---|
+| an async context manager, `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI (Starlette / FastAPI / Litestar), MCP, FastStream |
+| paired startup / shutdown callbacks | `init()` / `start()` and `stop()` | Quart, Sanic, arq, Dramatiq |
 
 ```python
-from contextlib import asynccontextmanager
+app = FastAPI(lifespan=canary.lifespan)          # that is the whole wiring
+app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
+server = MCPServer("demo", lifespan=canary.lifespan)
+```
 
-from fastapi import FastAPI
+Without a host (a CLI, a script, a test fixture) use it directly:
 
-canary = Canary(LibraryApp)
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    async with canary:      # init + start on entry, stop on exit
-        yield
-
-
-app = FastAPI(lifespan=lifespan)
+```python
+async with canary.lifespan():
+    ...
 ```
 
 To reach a unit inside a host's handler, `canary[SomeUnit]` is it — dependencies are already

@@ -54,6 +54,19 @@ app.get("/books/{book_id}")(unit.get_book)      # FastAPI 全都认
 
 ## 新增
 
+- **`Canary.lifespan`** —— 交给宿主的入口，一行接进任何主流框架：
+
+  ```python
+  app = FastAPI(lifespan=canary.lifespan)
+  app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
+  server = MCPServer("demo", lifespan=canary.lifespan)
+  ```
+
+  Python 世界的宿主只有两种形状——收异步上下文管理器，或收成对的启动/关停回调——两种现在
+  都直接支持。`lifespan` 与 `async with canary` 只差交出什么：前者交出 `None`（ASGI 协议
+  把交出值当作要合并进 `scope["state"]` 的映射，交出容器会漏出一个毫无线索的 `KeyError`），
+  后者交出容器自己。
+
 - **注入提前到 `init()`。** `@on_init` 因此第一次有了独立含义 —— "依赖已就位，但还没有
   任何东西开始运行"。装配类的错误也在装配阶段就暴露。
 - **`ConstructionError`** —— 需要构造参数的单元给出可操作的错误，而不是裸 `TypeError`，

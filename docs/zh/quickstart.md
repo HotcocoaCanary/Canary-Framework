@@ -117,20 +117,10 @@ Canary 不关心谁来驱动它 —— 它只需要有人在运行期把它包�
 可以，比如 FastAPI 的 lifespan：
 
 ```python
-from contextlib import asynccontextmanager
-
 from fastapi import Depends, FastAPI
 
 canary = Canary(UserService)
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    async with canary:           # 启动时 init + start，关停时 stop
-        yield
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=canary.lifespan)      # 启动时 init + start，关停时 stop
 
 
 def provide[T](cls: type[T]):

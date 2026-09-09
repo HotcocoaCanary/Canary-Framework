@@ -50,6 +50,21 @@ assembly or lifecycle.
 
 ### Added
 
+- **`Canary.lifespan`** — the host-facing entry point. Python has exactly two host shapes: take
+  an async context manager (`Callable[[Host], AsyncContextManager]` — ASGI's `lifespan=` in
+  Starlette / FastAPI / Litestar, MCP's `MCPServer(lifespan=)`, FastStream's `lifespan=`), or
+  take paired startup/shutdown callbacks (Quart, Sanic, arq, Dramatiq). The three explicit
+  methods already served the second; `lifespan` serves the first:
+
+      app = FastAPI(lifespan=canary.lifespan)
+      server = MCPServer("demo", lifespan=canary.lifespan)
+
+  It differs from `async with canary` in exactly one way: it yields `None`. The ASGI lifespan
+  protocol treats the yielded value as a mapping to merge into `scope["state"]`, so yielding the
+  container made Starlette call `dict.update(canary)` and leak a `KeyError: 0` with no clue in
+  it. Litestar has no such convention and worked either way — one protocol, two dialects, both
+  covered now. `async with canary` still hands back the container; it serves your own code.
+
 - **Injection moved from `start()` to `init()`.** `@on_init` therefore has a meaning of its own
   for the first time — "dependencies are in place, nothing is running yet" — and assembly errors
   surface during assembly.

@@ -57,14 +57,14 @@ MRO 扫描只有一份实现，一遍走完把三种钩子标记分好桶，结�
 ## 它不认识任何外壳
 
 `Canary` 只做装配与生命周期。HTTP、CLI、定时任务、消息消费者 —— 这些都是**外壳**，由别的
-库负责，Canary 不认识它们中的任何一个。接进去的方式只有一条：让宿主用异步上下文管理器把
-自己的运行期包住。
+库负责，Canary 不认识它们中的任何一个。
+
+接进去只有两种形状，因为 Python 世界只有这两种：宿主收一个异步上下文管理器，或者收成对的
+启动 / 关停回调。
 
 ```python
-@asynccontextmanager
-async def lifespan(_app):
-    async with canary:
-        yield
+app = FastAPI(lifespan=canary.lifespan)      # 形状一：ASGI、MCP、FastStream
+                                             # 形状二：init()/start() 与 stop() 三个显式方法
 ```
 
 这条边界是有意划的。web 层曾经在这个仓库里（`@web_cocoa` + 路由装饰器 + 参数绑定 +
