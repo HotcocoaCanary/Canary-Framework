@@ -15,10 +15,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import logging
-import os
 import types
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -35,6 +33,8 @@ from canary_framework.core.decorator.introspect import (
 )
 from canary_framework.core.infra.naming import to_snake
 from canary_framework.runtime.graph import build_graph, topological_sort
+from canary_framework.runtime.probe import ProbeState, apply_probe, restore_probe
+from canary_framework.runtime.report import assembly_summary
 
 _log = logging.getLogger("canary.runtime")
 
@@ -83,7 +83,7 @@ class Canary:
         # 记录的是“进入”而非“完成”——启动到一半失败的单元同样要被回收。
         self._started: list[type] = []
         # 事件循环探针改动前的旧值，停止时还原；未开启探针时为 None。
-        self._loop_probe: tuple[asyncio.AbstractEventLoop, bool, float] | None = None
+        self._loop_probe: ProbeState = None
 
     # -- read access --------------------------------------------------
     @property
@@ -131,7 +131,7 @@ class Canary:
         self._require(LifecycleState.READY)
         self._state = LifecycleState.STARTING
         try:
-            await self._apply_framework_config()
+            self._loop_probe = await apply_probe(self._loop_probe)
             for t in self._order:
                 for hook in init_hooks(self._graph[t]):
                     await self._invoke_hook(hook)
@@ -148,7 +148,7 @@ class Canary:
         if _log.isEnabledFor(logging.DEBUG):
             # 诊断绝不能反过来弄坏应用：摘要出问题就只报摘要出了问题。
             try:
-                _log.debug("%s", self._assembly_summary())
+                _log.debug("%s", assembly_summary(self.roots, self._order))
             except Exception:  # pragma: no cover - 仅防御
                 _log.debug("assembly summary unavailable", exc_info=True)
 
@@ -163,7 +163,7 @@ class Canary:
         """
         if self._state in _TRANSIENT:
             raise LifecycleError(f"Canary: stop() is illegal while {self._state.name}")
-        self._restore_loop_probe()
+        self._loop_probe = restore_probe(self._loop_probe)
         if not self._started:
             # 没起来过、或已经收干净了：空转，但不抹掉先前的失败。
             if self._state is not LifecycleState.FAILED:
@@ -233,74 +233,6 @@ class Canary:
             plan[name] = (dep.__name__, self._graph[dep])
         for name, (_declared_by, value) in plan.items():
             setattr(node, name, value)
-
-    async def _apply_framework_config(self) -> None:
-        """Apply the ``CANARY_*`` settings. Read from the environment, nothing more.
-
-        框架自有的两个开关，直接读环境变量——框架不提供配置机制，也就不该为自己的
-        两个字段引进一个。
-
-        ``CANARY_LOG_LEVEL`` 只动 ``canary`` 这一棵 logger 的级别：不装 handler、
-        不设 format、不碰 root。未设置时框架完全不干预。
-
-        ``CANARY_SLOW_CALLBACK_SECONDS`` 打开事件循环延迟探针：任何一次占用事件循环
-        超过该秒数的回调都会被 asyncio 记一条 WARNING。拒绝同步 handler 是声明期检查、
-        只看得见签名；这条是运行期检查，抓的是实际发生的阻塞——``async def`` 的函数体
-        里调同步驱动同样会被抓到，两者互补。默认关闭：它会打开 asyncio 的调试模式，
-        有额外开销，属于开发期工具。
-        """
-        level = os.environ.get("CANARY_LOG_LEVEL")
-        if level:
-            logging.getLogger("canary").setLevel(level.upper())
-
-        raw = os.environ.get("CANARY_SLOW_CALLBACK_SECONDS")
-        if not raw:
-            return
-        try:
-            seconds = float(raw)
-        except ValueError as exc:
-            raise LifecycleError(
-                f"CANARY_SLOW_CALLBACK_SECONDS must be a number of seconds, got {raw!r}"
-            ) from exc
-        loop = asyncio.get_running_loop()
-        # 调试模式是整个事件循环的全局状态，停止时必须还原——否则一个开了探针的
-        # 应用会污染同进程后续所有代码。
-        self._loop_probe = (loop, loop.get_debug(), loop.slow_callback_duration)
-        loop.set_debug(True)
-        loop.slow_callback_duration = seconds
-        # 让出一次，否则整个启动期都测不到：asyncio 在回调**开始执行之前**就读过
-        # loop._debug，而我们是在这个回调执行到一半时才把它打开的。让出之后，剩下的
-        # 装配与启动落在新的回调里，阻塞才看得见。
-        await asyncio.sleep(0)
-
-    def _restore_loop_probe(self) -> None:
-        if self._loop_probe is None:
-            return
-        loop, debug, duration = self._loop_probe
-        loop.set_debug(debug)
-        loop.slow_callback_duration = duration
-        self._loop_probe = None
-
-    def _assembly_summary(self) -> str:
-        """Render what the runtime actually assembled — the graph knows, so it should say.
-
-        装配摘要：框架掌握着全部事实（启动顺序、每个单元的依赖），却一直零输出。
-        这里在 DEBUG 级别一次性说清楚，排查"为什么这个单元先启动"时不必再去读框架源码。
-        """
-        lines = [
-            f"Canary assembled {len(self._order)} unit(s)",
-            "  roots: " + ", ".join(r.__name__ for r in self.roots),
-        ]
-        if len(self.roots) > 1:
-            lines.append(
-                "  note: with multiple roots no unit starts last, so there is no "
-                "'after everything started' position; declare one composition root if you need it"
-            )
-        lines.append("  start order (stop runs in reverse):")
-        for i, t in enumerate(self._order, 1):
-            deps = ", ".join(d.__name__ for d in deps_of(t))
-            lines.append(f"    {i}. {t.__name__}" + (f"  <- {deps}" if deps else ""))
-        return "\n".join(lines)
 
     async def _unwind(self) -> list[Exception]:
         """Drain the ledger in reverse, running every ``@on_stop``, collecting failures.

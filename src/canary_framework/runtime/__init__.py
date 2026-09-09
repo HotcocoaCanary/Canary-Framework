@@ -1,8 +1,11 @@
-"""The runtime engine — :class:`Canary` and the graph algorithms.
+"""The runtime engine — assembly, lifecycle, and the pieces around them.
 
-运行时引擎：编排器 :class:`Canary` 与图算法。核心包（``core``）保留声明层原语
-（装饰器 / 命名 / 标记）；服务入口由各单元在 ``start()`` 阶段暴露，``Canary`` 按
-鸭子类型委托给它们，不 import 任何具体扩展。
+运行时：装配与生命周期。四个模块各管一件事——
+
+- :mod:`~canary_framework.runtime.canary` 引擎本身（:class:`Canary`）
+- :mod:`~canary_framework.runtime.graph`  纯图算法（建图、拓扑排序）
+- :mod:`~canary_framework.runtime.probe`  框架自有的两个环境变量开关
+- :mod:`~canary_framework.runtime.report` 装配摘要（诊断，不是引擎）
 """
 
 from canary_framework.runtime.canary import Canary
