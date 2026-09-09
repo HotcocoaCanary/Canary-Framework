@@ -70,14 +70,14 @@ async def test_the_probe_catches_blocking_inside_an_async_body(
 async def test_a_malformed_probe_setting_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CANARY_SLOW_CALLBACK_SECONDS", "very slow")
     with pytest.raises(LifecycleError, match="number of seconds"):
-        await Canary(Bare).init()
+        await Canary(Bare).start()
 
 
 async def test_the_probe_can_see_the_startup_phase(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """从前测不到：asyncio 在回调开始执行前就读过 debug 标志，而探针是在回调执行到
-    一半（init 里）才打开的——整个启动期因此落在那个"还没开启"的回调里。
+    一半才打开的——整个启动期因此落在那个"还没开启"的回调里。
     """
     monkeypatch.setenv("CANARY_SLOW_CALLBACK_SECONDS", "0.05")
 
@@ -85,11 +85,11 @@ async def test_the_probe_can_see_the_startup_phase(
     class Slow:
         @on_init
         def block(self) -> None:
-            time.sleep(0.2)  # 装配期阻塞事件循环
+            time.sleep(0.2)  # 启动期阻塞事件循环
 
     with caplog.at_level(logging.WARNING, logger="asyncio"):
         app = Canary(Slow)
-        await app.init()
+        await app.start()
         await asyncio.sleep(0)  # 让出一次，asyncio 才会把上一个回调的耗时报出来
         await app.stop()
 

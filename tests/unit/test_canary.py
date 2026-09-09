@@ -17,9 +17,7 @@ async def test_lifecycle_state_transitions() -> None:
         pass
 
     canary = Canary(Service)
-    assert canary.state is LifecycleState.NEW
-    await canary.init()
-    assert canary.state is LifecycleState.INITIALIZED
+    assert canary.state is LifecycleState.READY  # 构造即装配，一出生就可用
     await canary.start()
     assert canary.state is LifecycleState.STARTED
     await canary.stop()
@@ -50,18 +48,17 @@ async def test_hooks_run_in_topological_order() -> None:
             calls.append("B.start")
 
     canary = Canary(B)
-    await canary.init()
-    assert calls == ["A.init"]
+    assert calls == []  # 装配不跑任何钩子
 
-    await canary.start()
+    await canary.start()  # 先全部 @on_init，再全部 @on_start
     assert calls == ["A.init", "A.start", "B.start"]
 
     await canary.stop()
     assert calls == ["A.init", "A.start", "B.start", "A.stop"]
 
 
-async def test_dependencies_are_injected_during_init() -> None:
-    """注入属于装配：``init()`` 结束时单元已接好线，``@on_init`` 因此能用依赖。"""
+async def test_dependencies_are_injected_at_construction() -> None:
+    """注入属于装配，而装配在构造函数里：``Canary(...)`` 一返回，线就接好了。"""
     seen: list[object] = []
 
     @cocoa
@@ -75,9 +72,10 @@ async def test_dependencies_are_injected_during_init() -> None:
             seen.append(self.dep)
 
     canary = Canary(Service)
-    await canary.init()
+    assert isinstance(canary[Service].dep, Dep)  # 构造一返回，线就接好了
+    assert seen == []  # 但钩子还没跑——装配不是运行
 
-    assert isinstance(canary[Service].dep, Dep)
+    await canary.start()
     assert seen == [canary[Dep]]  # @on_init 看得到依赖，且拿到的是图上的那个实例
 
 
@@ -99,7 +97,6 @@ async def test_singleton_is_shared_across_the_graph() -> None:
         pass
 
     canary = Canary(Root)
-    await canary.init()
     await canary.start()
     assert canary[Root].a.dep is canary[Root].b.dep is canary[Dep]
 
@@ -122,17 +119,14 @@ async def test_nesting_standalone_and_composition() -> None:
         pass
 
     nested = Canary(App)
-    await nested.init()
     await nested.start()
     assert nested.order == (Config, Database, Repo, App)
 
     standalone = Canary(Database)
-    await standalone.init()
     await standalone.start()
     assert standalone.order == (Config, Database)
 
     composed = Canary(Config, Repo)
-    await composed.init()
     await composed.start()
     assert set(composed.order) == {Config, Database, Repo}
 
@@ -149,7 +143,6 @@ async def test_start_stop_drives_full_lifecycle() -> None:
             self.running = False
 
     canary = Canary(Service)
-    await canary.init()
     await canary.start()
     assert canary.state is LifecycleState.STARTED
     assert canary[Service].running is True
@@ -159,14 +152,21 @@ async def test_start_stop_drives_full_lifecycle() -> None:
     assert canary[Service].running is False
 
 
-async def test_start_requires_init() -> None:
+async def test_the_runtime_is_usable_the_moment_it_is_constructed() -> None:
+    """这个框架要求每个单元"构造完就必须可用"，运行时自己没有理由例外。"""
+
     @cocoa
+    class Dep:
+        pass
+
+    @cocoa(deps=[Dep])
     class Service:
         pass
 
-    canary = Canary(Service)
-    with pytest.raises(LifecycleError):
-        await canary.start()  # 未 init 直接 start → 非法跳转
+    canary = Canary(Service)  # 没有 await
+    assert canary.state is LifecycleState.READY
+    assert canary.order == (Dep, Service)  # 已排好序
+    assert canary[Service].dep is canary[Dep]  # 已注入
 
 
 def test_non_cocoa_root_raises_type_error() -> None:
@@ -188,10 +188,8 @@ async def test_cycle_fails_the_canary() -> None:
 
     A.__cocoa_deps__ = [B]  # close the loop A <-> B
 
-    canary = Canary(A)
     with pytest.raises(CircularDependencyError):
-        await canary.init()
-    assert canary.state is LifecycleState.FAILED
+        Canary(A)  # 装配期错误，在这一行就抛
 
 
 async def test_illegal_transition_raises() -> None:
@@ -200,12 +198,9 @@ async def test_illegal_transition_raises() -> None:
         pass
 
     canary = Canary(Service)
+    await canary.start()
     with pytest.raises(LifecycleError):
-        await canary.start()  # 不能跳过 init 直接启动
-
-    await canary.init()
-    with pytest.raises(LifecycleError):
-        await canary.init()  # 不能重复初始化
+        await canary.start()  # 不能重复启动
 
 
 def test_a_full_lifecycle_pulls_in_no_third_party_package() -> None:

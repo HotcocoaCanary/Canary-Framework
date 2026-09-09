@@ -1,8 +1,11 @@
 """Canary — the runtime that owns a graph of cocoas and drives their lifecycle.
 
 运行时：持有整张单元图并驱动生命周期。``Canary(*roots)`` 支持多根编排，
-让“嵌套”“单独启动”“组合”共用同一条代码路径。引擎是 async 原生：钩子既可以是
-同步函数，也可以是协程函数，运行时按返回值自动判断是否 ``await``。
+让“嵌套”“单独启动”“组合”共用同一条代码路径。
+
+切口划在性质变化的地方：**装配是同步的，在构造函数里完成**（建图、排序、注入）；**运行是
+异步的**，归 ``start`` / ``stop``。引擎是 async 原生：钩子既可以是同步函数，也可以是协程
+函数，运行时按返回值自动判断是否 ``await``。
 
 运行时**只做装配与生命周期**，不认识任何外壳（HTTP、CLI、消息消费者……）。接进宿主有两条
 路，对应 Python 世界仅有的两种宿主协议：``canary.lifespan`` 交给收异步上下文管理器的宿主
@@ -43,11 +46,7 @@ _T = TypeVar("_T")
 _Hook = Callable[[], object]
 
 # 进行中的状态：只可能被并发调用者观察到，此时再驱动生命周期一定是误用。
-_TRANSIENT = (
-    LifecycleState.INITIALIZING,
-    LifecycleState.STARTING,
-    LifecycleState.STOPPING,
-)
+_TRANSIENT = (LifecycleState.STARTING, LifecycleState.STOPPING)
 
 
 class Canary:
@@ -58,13 +57,28 @@ class Canary:
     """
 
     def __init__(self, *roots: type) -> None:
+        """Assemble the graph. Synchronous, and complete — the runtime is usable when it returns.
+
+        构造即装配：建图（每个类型无参构造一次）、拓扑排序、注入依赖。这三件都是同步的、
+        确定性的、不跑任何使用者的运行期代码，也不需要事件循环。
+
+        为什么放在构造函数里：这个框架对每个单元立的规矩是"构造完就必须可用"——运行时
+        自己没有理由例外。装配放在这里之后，``Canary(Root)`` 一返回，``canary[Database]``
+        就能取到已注入依赖的实例，装配类的错误（``ConstructionError`` / ``InjectionError``
+        / ``CircularDependencyError``）也在你写下这一行的地方抛出，而不是等到某个 await。
+
+        剩下的两件事——跑 ``@on_init`` 和 ``@on_start``——才是"运行"，它们要跑使用者的代码、
+        可能是异步的、可能有副作用，归 :meth:`start`。切口划在性质变化的地方。
+        """
         for root in roots:
             if not is_cocoa(root):
                 raise TypeError(f"'{root.__name__}' is not decorated with @cocoa")
         self.roots = roots
-        self._state = LifecycleState.NEW
-        self._graph: dict[type, object] = {}
-        self._order: list[type] = []
+        self._graph: dict[type, object] = build_graph(list(roots))
+        self._order: list[type] = topological_sort(self._graph)
+        for t in self._order:
+            self._inject(self._graph[t])
+        self._state = LifecycleState.READY
         # 已进入 ``@on_start`` 的单元，按进入顺序；回收时逆序消费。
         # 记录的是“进入”而非“完成”——启动到一半失败的单元同样要被回收。
         self._started: list[type] = []
@@ -100,47 +114,30 @@ class Canary:
         return cast(_T, self._graph[cls])
 
     # -- lifecycle ----------------------------------------------------
-    async def init(self) -> None:
-        """``NEW -> INITIALIZED``: build the graph, inject, and run ``@on_init`` in order.
-
-        建图 + 拓扑排序，按拓扑序**注入依赖**并执行 ``@on_init``。注入属于装配而非启动，
-        所以放在这里：``@on_init`` 因此能看到自己的依赖，装配类错误（撞名、缺依赖）也
-        在装配阶段就暴露，不必等到 ``start()``。
-
-        失败时不回滚——此时还没有任何 ``@on_start`` 跑过，也就没有资源需要回收。
-        """
-        self._require(LifecycleState.NEW)
-        self._state = LifecycleState.INITIALIZING
-        try:
-            await self._apply_framework_config()
-            self._graph = build_graph(list(self.roots))
-            self._order = topological_sort(self._graph)
-            for t in self._order:
-                node = self._graph[t]
-                self._inject(node)
-                for hook in init_hooks(node):
-                    await self._invoke_hook(hook)
-        except Exception:
-            self._state = LifecycleState.FAILED
-            raise
-        self._state = LifecycleState.INITIALIZED
-
     async def start(self) -> None:
-        """``INITIALIZED -> STARTED``: run every ``@on_start`` in topological order.
+        """``READY -> STARTED``: run every ``@on_init``, then every ``@on_start``.
 
-        按拓扑序执行 ``@on_start``（依赖已在 ``init()`` 注入完毕）。
+        按拓扑序跑两轮钩子：先全部 ``@on_init``（依赖已在构造期注入完毕，此时还没有任何
+        东西开始运行），再全部 ``@on_start``（获取资源、起后台任务）。
 
-        不变式：**要么全部启动，要么什么都没启动。** 任一环节抛出时，已进入
-        ``@on_start`` 的单元（含失败的那一个）会按逆序执行 ``@on_stop`` 回收，
-        随后原样抛出最初的异常；回收过程中的异常作为 note 附在其上，不改变异常类型。
+        不变式：**要么全部启动，要么什么都没启动。** 台账记录的是"进入过 ``@on_start``"
+        的单元——``@on_init`` 按契约不获取资源，也就没有东西需要回收。任一环节抛出时，
+        台账里的单元（含失败的那一个）按逆序执行 ``@on_stop``，随后原样抛出最初的异常；
+        回收过程中的异常作为 note 附在其上，不改变异常类型。
+
+        于是失败规则只剩一条：**``stop()`` 收台账里的一切。** ``@on_init`` 阶段失败时台账
+        是空的，回滚自然是空转，不需要为它单写一条规则。
         """
-        self._require(LifecycleState.INITIALIZED)
+        self._require(LifecycleState.READY)
         self._state = LifecycleState.STARTING
         try:
+            await self._apply_framework_config()
             for t in self._order:
-                node = self._graph[t]
+                for hook in init_hooks(self._graph[t]):
+                    await self._invoke_hook(hook)
+            for t in self._order:
                 self._started.append(t)
-                for hook in start_hooks(node):
+                for hook in start_hooks(self._graph[t]):
                     await self._invoke_hook(hook)
         except Exception as exc:
             self._state = LifecycleState.FAILED
@@ -208,7 +205,6 @@ class Canary:
             yield
 
     async def __aenter__(self) -> Self:
-        await self.init()
         await self.start()
         return self
 
@@ -291,8 +287,10 @@ class Canary:
         装配摘要：框架掌握着全部事实（启动顺序、每个单元的依赖），却一直零输出。
         这里在 DEBUG 级别一次性说清楚，排查"为什么这个单元先启动"时不必再去读框架源码。
         """
-        lines = [f"Canary assembled {len(self._order)} unit(s)"]
-        lines.append("  roots: " + ", ".join(r.__name__ for r in self.roots))
+        lines = [
+            f"Canary assembled {len(self._order)} unit(s)",
+            "  roots: " + ", ".join(r.__name__ for r in self.roots),
+        ]
         if len(self.roots) > 1:
             lines.append(
                 "  note: with multiple roots no unit starts last, so there is no "

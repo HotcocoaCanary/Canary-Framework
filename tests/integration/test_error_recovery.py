@@ -15,7 +15,9 @@ from canary_framework import (
 pytestmark = pytest.mark.integration
 
 
-async def test_init_failure_propagates_and_marks_failed() -> None:
+async def test_an_on_init_failure_propagates_and_marks_failed() -> None:
+    """``@on_init`` 阶段失败时台账还是空的，所以回滚是空转——不需要为它单写一条规则。"""
+
     @cocoa
     class Broken:
         @on_init
@@ -24,7 +26,7 @@ async def test_init_failure_propagates_and_marks_failed() -> None:
 
     canary = Canary(Broken)
     with pytest.raises(RuntimeError, match="init exploded"):
-        await canary.init()
+        await canary.start()
 
     assert canary.state is LifecycleState.FAILED
     # 失败态是不可逆的——后续 start 直接拒绝。
@@ -58,7 +60,6 @@ async def test_start_failure_rolls_back_everything_started() -> None:
             log.append("second.stop")
 
     canary = Canary(Second)
-    await canary.init()
     with pytest.raises(RuntimeError, match="start exploded"):
         await canary.start()
 
@@ -77,7 +78,6 @@ async def test_stop_is_legal_and_idempotent_from_failed() -> None:
             raise RuntimeError("start exploded")
 
     canary = Canary(Broken)
-    await canary.init()
     with pytest.raises(RuntimeError):
         await canary.start()
 
@@ -111,7 +111,6 @@ async def test_stop_failure_does_not_abort_the_remaining_units() -> None:
             log.append("outermost.stop")
 
     canary = Canary(Outermost)
-    await canary.init()
     await canary.start()
 
     with pytest.raises(ExceptionGroup) as caught:

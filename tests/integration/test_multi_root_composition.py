@@ -25,7 +25,6 @@ async def test_composed_roots_share_singletons() -> None:
         pass
 
     canary = Canary(UserRepo, OrderRepo)
-    await canary.init()
     await canary.start()
 
     assert set(canary.order) == {Config, Database, UserRepo, OrderRepo}
@@ -53,7 +52,6 @@ async def test_standalone_leaf_runs_without_a_dependency_graph() -> None:
             events.append("leaf.start")
 
     canary = Canary(Leaf)
-    await canary.init()
     await canary.start()
     assert canary.order == (Leaf,)
     assert canary.state.name == "STARTED"

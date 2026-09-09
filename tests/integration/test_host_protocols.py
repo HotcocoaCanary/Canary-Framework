@@ -83,7 +83,7 @@ async def test_a_host_that_takes_a_context_manager_factory() -> None:
 async def test_a_host_that_takes_paired_callbacks() -> None:
     """形状二：宿主收成对回调（Quart、Sanic、arq、Dramatiq）—— 用三个显式方法。"""
     canary = Canary(Db)
-    on_startup: list[Callable[[], Any]] = [canary.init, canary.start]
+    on_startup: list[Callable[[], Any]] = [canary.start]
     on_shutdown: list[Callable[[], Any]] = [canary.stop]
 
     for hook in on_startup:

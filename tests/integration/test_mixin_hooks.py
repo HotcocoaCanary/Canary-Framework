@@ -22,7 +22,6 @@ async def test_mixin_hooks_run_before_the_class_hooks() -> None:
             calls.append(f"{type(self).__name__}.start")
 
     canary = Canary(UserService)
-    await canary.init()
     await canary.start()
     await canary.stop()
 
@@ -51,7 +50,6 @@ async def test_one_mixin_composes_across_many_services() -> None:
             calls.append(f"{type(self).__name__}.start")
 
     canary = Canary(UserService, OrderService)
-    await canary.init()
     await canary.start()
     await canary.stop()
 

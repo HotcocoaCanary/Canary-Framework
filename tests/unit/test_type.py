@@ -17,19 +17,18 @@ def test_lifecycle_state_inherits_state() -> None:
     assert issubclass(LifecycleState, State)
 
 
-def test_lifecycle_state_has_eight_string_values() -> None:
-    assert len(LifecycleState) == 8
+def test_lifecycle_state_has_six_string_values() -> None:
+    """起点是 READY 而不是 NEW：装配在构造函数里就做完了，一出生就可用。"""
+    assert len(LifecycleState) == 6
     assert {s.name for s in LifecycleState} == {
-        "NEW",
-        "INITIALIZING",
-        "INITIALIZED",
+        "READY",
         "STARTING",
         "STARTED",
         "STOPPING",
         "STOPPED",
         "FAILED",
     }
-    assert LifecycleState.NEW.value == "new"
+    assert LifecycleState.READY.value == "ready"
     assert LifecycleState.FAILED.value == "failed"
 
 

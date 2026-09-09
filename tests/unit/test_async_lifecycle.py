@@ -32,7 +32,6 @@ async def test_start_awaits_all_phases_in_order() -> None:
             events.append("disconnect")
 
     canary = Canary(Service)
-    await canary.init()
     await canary.start()
     assert canary.state is LifecycleState.STARTED
     assert events == ["prepare", "connect"]
@@ -56,7 +55,6 @@ async def test_mixed_sync_and_async_hooks_run_in_order() -> None:
             calls.append("sync")
 
     canary = Canary(Service)
-    await canary.init()
     await canary.start()
     await canary.stop()
 
@@ -70,10 +68,7 @@ async def test_manual_methods_transition_state() -> None:
         pass
 
     canary = Canary(Service)
-    assert canary.state is LifecycleState.NEW
-
-    await canary.init()
-    assert canary.state is LifecycleState.INITIALIZED
+    assert canary.state is LifecycleState.READY
 
     await canary.start()
     assert canary.state is LifecycleState.STARTED
@@ -90,7 +85,6 @@ async def test_async_hook_failure_marks_failed_and_propagates() -> None:
             raise RuntimeError("connect exploded")
 
     canary = Canary(Service)
-    await canary.init()
     with pytest.raises(RuntimeError, match="connect exploded"):
         await canary.start()
     assert canary.state is LifecycleState.FAILED
@@ -127,7 +121,6 @@ async def test_deps_injected_before_async_start_hook() -> None:
             seen.append(self.config)  # 依赖在钩子执行前已注入
 
     canary = Canary(Database)
-    await canary.init()
     await canary.start()
     assert seen == [canary[Config]]
     await canary.stop()

@@ -24,9 +24,8 @@ class Consumer:
 
 
 async def test_a_unit_that_needs_arguments_says_what_to_do() -> None:
-    canary = Canary(Consumer)
     with pytest.raises(ConstructionError, match="constructed with no arguments") as caught:
-        await canary.init()
+        Canary(Consumer)  # 装配期错误，在构造这一行就抛
 
     message = str(caught.value)
     assert "@cocoa(deps=" in message  # 报错要指出唯一的出路
@@ -71,7 +70,7 @@ async def test_an_error_inside_a_constructor_is_not_disguised() -> None:
             raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError, match="boom"):
-        await Canary(Explodes).init()
+        Canary(Explodes)
 
 
 async def test_a_type_error_from_inside_the_constructor_is_not_relabelled() -> None:
@@ -87,7 +86,7 @@ async def test_a_type_error_from_inside_the_constructor_is_not_relabelled() -> N
             raise TypeError("raised by my own body")
 
     with pytest.raises(TypeError, match="raised by my own body") as caught:
-        await Canary(Explodes).init()
+        Canary(Explodes)
     assert not isinstance(caught.value, ConstructionError)
 
 
