@@ -1,7 +1,24 @@
 # 0.9.3 新特性
 
-0.9.3 是一次**收敛**：把失败路径补完整，把心智模型理顺，并砍掉那些"看起来该有、其实使用者
-自己十行就能写"的东西。它包含多处破坏性变更 —— 0.9.x 仍在快速定型阶段。
+0.9.3 是一次**收敛**：把这个框架收回到它真正差异化的那一件事上 —— **依赖装配与生命周期** ——
+并把失败路径补完整。它包含多处破坏性变更，其中最大的一条是删掉了整个 web 扩展。
+
+## 它现在是什么
+
+> **Canary 是一个运行时容器，不是 web 框架。**
+
+它负责把一堆对象按依赖关系装配起来、按序启动、按逆序回收。至于这些对象最后被什么外壳
+驱动 —— HTTP、CLI、定时任务、消息消费者 —— 那是外壳的事。
+
+```python
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with canary:          # 这就是全部的接线
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
+```
 
 ## 一条贯穿全框架的规则
 
@@ -11,80 +28,73 @@
 （`@on_start` 有 `@on_stop` 配对，"构造"却没有"析构"），把需要输入的事推迟到生命周期里，
 等于让每一件事都落进一个有台账、能逆序回收的阶段。
 
+## 删除 `canary_framework.web`
+
+**这是这一版最大的变化。** web 扩展（`@web_cocoa` + 路由装饰器 + 参数绑定 + OpenAPI，
+约 1300 行）整个删掉了，连同 `Canary` 的 ASGI 面（`__call__`、lifespan 协议、冷启动、
+路由收集，约 100 行）。
+
+理由不是它做得不好 —— 它的请求路径实测比 FastAPI 快 2.4–3.3 倍。理由是**它做的不是我们
+该做的事**：
+
+- 它和 FastAPI / Starlette 做同一件事，而那不是这个框架的差异化所在。
+- 一旦走上这条路，就得在 WebSocket、文件上传、中间件、认证这些方向上永远追赶。
+- 它占了框架一半以上的代码，却贡献了绝大多数的 bug。
+
+而且**它想保住的那个好处并不需要它**：路由是"已注入依赖的单元上的方法"，这一点直接把
+绑定方法交给 FastAPI 就有了 —— 绑定方法的签名里没有 `self`，FastAPI 照常做参数绑定、
+校验和文档，而 `self.repo` 因为实例是 Canary 装配的，本来就在。
+
+```python
+unit = canary[LibraryApi]                       # 普通 @cocoa，零 web 标记
+app.get("/books/{book_id}")(unit.get_book)      # FastAPI 全都认
+```
+
+框架因此从 2300 行降到 **842 行**，而且剩下的每一行都在做依赖装配和生命周期。
+
 ## 新增
 
 - **注入提前到 `init()`。** `@on_init` 因此第一次有了独立含义 —— "依赖已就位，但还没有
   任何东西开始运行"。装配类的错误也在装配阶段就暴露。
 - **`ConstructionError`** —— 需要构造参数的单元给出可操作的错误，而不是裸 `TypeError`，
   并说清唯一的出路：把构造参数变成依赖。
-- **`DeclarationError`** —— `@get` 写在普通 `@cocoa` 上从前是静默失效的（装饰器打上了、
-  不报错、路由也不见了），现在装配期直接拒绝。
 - **`InjectionError`** —— 两个依赖的 snake_case 撞名不再"后写的赢"。
-- **装配摘要** —— `CANARY_LOG_LEVEL=DEBUG` 时在启动末尾打印启动顺序、依赖与路由。
+- **装配摘要** —— `CANARY_LOG_LEVEL=DEBUG` 时在启动末尾打印启动顺序与依赖。
 - **`CANARY_SLOW_CALLBACK_SECONDS`** —— 可选的事件循环延迟探针，抓 `async def` 函数体里
   的同步阻塞；`stop()` 时还原，不污染同进程后续代码。
-- **`status_code`** —— `@post(..., status_code=201)`、`@delete(..., status_code=204)`。
-  从前只能自己造 `Response`，那样会同时丢掉返回类型校验和文档里的响应 schema。
-- **文档元数据** —— `tags`（单元级 + 路由级两层）、`summary`、`deprecated`；
-  `description` 直接取 handler 的 docstring。
-- **返回值校验** —— 返回的东西不符合返回注解时走 500。`/docs` 照着注解向调用方承诺了
-  响应的形状，框架就该当真。
 
 ## 变更（破坏性）
 
+- **删除 `canary_framework.web` 与 `Canary` 的 ASGI 面**（见上）。`Canary` 不再是 ASGI
+  应用；接进宿主用 `async with canary:`。
 - **删除 `Canary(provide=...)`。** 它与"单元必须能无参构造"这条规则互相咬。测试里替换
   依赖直接给属性赋值即可（`svc.database = FakeDb()`）—— 注入本来就只是 setattr。
-  `ProvisionError` 一并退场。
-- **删除 `@on_request_error` 与异常映射登记。** 异常只剩三条固定出路：请求绑不上 → 422、
-  `HTTPError` → 自带状态码、其余 → JSON 500。业务上"预期内的失败"应该由 handler 以返回值
-  表达，而不是抛出去让框架翻译成状态码。
-- **前缀不再沿依赖链嵌套。** `@web_cocoa(prefix=...)` 现在是**绝对**前缀。依赖关系说的是
-  启动顺序，URL 说的是资源命名 —— 两件事不该互相决定。想要 `/api/admin` 就直接写全。
-- **删除 `Query` / `Path` / `Body` 三个参数标记。** 推断规则（标量走 query，名字命中占位符
-  走 path，其余走 body）已经给出同样的答案。保留 `Header` 与 `Cookie` —— 只有这两处是推断
-  够不着的。
-- **参数标记只能写在 `Annotated` 里。** `x: int = Query(10)` 那种写法让"默认值"这个位置
-  同时表示两件事，现在装配期拒绝。
-- **handler 必须是 `async def`。** 同步函数会阻塞整个进程而不只是它自己那个请求；框架不替
-  你偷偷挪进线程池，而是在声明期拒绝。
-- **删除 `/redoc`。** 两个文档 UI 留一个。
 - **`stop()` 是唯一的回收路径。** 从任何终态都能调用，重复调用是幂等的 —— `finally:
   await app.stop()` 永远安全。
 
 ## 修复
 
-- **`start()` 失败会漏掉已启动的单元。** 现在按台账逆序回收（含失败的那一个），再原样抛出
-  最初的异常。
+- **`start()` 失败会漏掉已启动的单元。** 现在按台账逆序回收（含失败的那一个），再原样
+  抛出最初的异常。
 - **一个 `@on_stop` 抛出会中断整个关停。** 现在收集异常继续回收，最后抛 `ExceptionGroup`。
-- **lifespan 启动失败会让进程挂起。** 发完 `lifespan.startup.failed` 之后要抛出，否则完整
-  实现 lifespan 协议的调用方会认为启动成功，并在关停时永久挂起。关停失败同理。
-- **无 lifespan 时并发冷启动会崩。** 五个并发首请求从前是 1 个成功 + 4 个 `RuntimeError`。
-- **请求体的失败路径全掉 500。** 空 body、JSON 语法错、发成表单现在都是 422；
-  `item: Item | None = None` 这种可选请求体也写得出来了。
-- **`Annotated` 里的约束被无声丢掉。** `Annotated[int, Field(gt=0)]` 从前既不校验也不进
-  文档。
-- **两个请求体形参各拿整份 body。** 现在装配期拒绝。
-- **`prefix="api"`（缺斜杠）抛裸 `AssertionError`。** 现在和路由路径一样自动归一化。
-- **一个描述不了的类型会带崩整份 OpenAPI 文档。** 现在退化成"未约束"，并在**启动时**记一条
-  WARNING 点名是哪个 handler。
-- **`{name:path}` 转换器泄漏进 OpenAPI 文档。**
-- **handler 不能返回 `Response`。** SSE、文件下载、自定义状态码、后台任务现在都可以。
-- **校验器抛 `ValueError` 会把自己的 422 变成 500。**
-- **慢回调探针看不见启动期。** asyncio 在回调开始执行前就读了 debug 标志，而探针是在 `init()`
-  里打开的。
+- **近千节的依赖链会撞 `RecursionError`。** 依赖链的深度是使用者的数据，不该受 Python
+  递归上限约束。建图改成显式栈，现在 50000 节照常。
+- **慢回调探针看不见启动期。** asyncio 在回调开始执行前就读了 debug 标志，而探针是在
+  `init()` 里打开的。
 
 ## 性能
 
-签名在装配期编译成一份取值计划，请求路径上不再有任何反射（不重跑 `get_type_hints`、不重建
-`inspect.signature`、不重造 `TypeAdapter`）：
-
-```text
-纯框架请求路径   125 us  →  16.5 us     约 7.5x
+```
+1000 单元建图 + 注入 + @on_init    37.7ms → 2.4ms      15.6x
+MRO 扫描（5000 单元自身时间）        55ms  → 5ms        11x
+框架自身模块的导入耗时                              0.0ms
+1000 单元的图                                    约 3.9 MiB
 ```
 
-同一份计划也供 OpenAPI 生成使用 —— 分发与文档读同一个对象，两者不可能不一致。
+那 15.6 倍来自一处顺序错误：`inspect.signature` 站在**成功路径**上，而它只为了在失败时
+说清楚话。改成先构造、出了 `TypeError` 再回头看签名。
 
-## 核心零依赖
+## 零依赖
 
-`pip install canary-framework` 不再拉进任何第三方包；starlette 与 pydantic 只属于 `[web]`
-扩展。
+`pip install canary-framework` 不拉进任何第三方包，只用标准库。这条有测试守着：跑完一整轮
+生命周期后，`sys.modules` 里不该出现任何来自 site-packages 的东西。

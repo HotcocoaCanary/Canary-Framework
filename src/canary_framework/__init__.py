@@ -26,7 +26,6 @@ from canary_framework.common.error import (
     CanaryError,
     CircularDependencyError,
     ConstructionError,
-    DeclarationError,
     InjectionError,
     LifecycleError,
 )
@@ -39,7 +38,6 @@ __all__ = [
     "CanaryError",
     "CircularDependencyError",
     "ConstructionError",
-    "DeclarationError",
     "InjectionError",
     "LifecycleError",
     "LifecycleState",

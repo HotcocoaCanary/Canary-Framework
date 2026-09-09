@@ -11,16 +11,13 @@ common   — shared types, exceptions and metadata markers (no framework logic)
 core     — declaration primitives: @cocoa, @on_init/@on_start/@on_stop, introspection
    ▲
 runtime  — the engine: Canary, graph building, topological sort
-   ▲
-web      — optional extension: @web_cocoa, route decorators, dispatch, OpenAPI
 ```
 
-The dependency direction is strictly acyclic: `web → runtime → core → common`. Each layer knows
-only the one below it.
+The dependency direction is strictly acyclic: `runtime → core → common`. Each layer knows only
+the one below it.
 
 Inside the package every import uses the full module path — the `__init__.py` files carry only a
-docstring and re-export nothing. There are exactly two public entry points:
-`canary_framework` and `canary_framework.web`.
+docstring and re-export nothing. There is exactly one public entry point: `canary_framework`.
 
 ## Markers, not magic
 
@@ -32,20 +29,19 @@ classes and methods, and the runtime reads them back. Every marker is collected 
 |---|---|---|
 | `COCOA_ATTR` | `@cocoa` | runtime (is this a unit? what does it depend on?) |
 | `ON_INIT` / `ON_START` / `ON_STOP` | the hook decorators | runtime (which hooks to run) |
-| `ROUTE_ATTR` | `@get` / `@post` / … | web extension (method, path, status code, doc metadata) |
-| `WEB_ATTR` | `@web_cocoa` | runtime (which units carry routes) and the web extension (prefix, title, tags) |
 
 A decorator only `setattr`s a marker; it never rewrites the class. That keeps units plain and
 introspection cheap and side-effect free.
 
-There is exactly one MRO scan (`core.decorator.introspect.marked_members`): lifecycle hooks and
-HTTP routes are the same question — methods on a class carrying a marker — and differ only in the
-payload. Its result is cached per class, because it cannot change after the class is created.
+There is exactly one MRO scan: it walks the chain once and buckets all three hook markers, and
+its result is **cached per class** because it cannot change once the class exists — while a full
+lifecycle scans three times (init / start / stop). `object` is skipped: it has two dozen callable
+members, none of which can ever carry our markers, and it sits at the end of every MRO.
 
 ## Two phases
 
-1. **Declaration** — `@cocoa(deps=[...])` records dependencies, the hook decorators record hooks,
-   `@get` records routes. Nothing runs.
+1. **Declaration** — `@cocoa(deps=[...])` records dependencies and the hook decorators record
+   hooks. Nothing runs.
 2. **Interpretation** — `Canary` reads the markers, builds the graph, sorts it, injects, and
    drives the lifecycle. This split is what lets the pure graph algorithms be tested on their own.
 
@@ -53,38 +49,37 @@ payload. Its result is cached per class, because it cannot change after the clas
 
 `Canary.__init__` only validates the roots. `init()` builds the graph (each type constructed once,
 with no arguments), runs Kahn's topological sort, injects dependencies and runs `@on_init` in
-order; `start()` runs `@on_start` and merges the serving app; `stop()` runs `@on_stop` in reverse.
-The order is deterministic and cycles surface as `CircularDependencyError`.
+order; `start()` runs `@on_start`; `stop()` runs `@on_stop` in reverse. The order is
+deterministic and cycles surface as `CircularDependencyError`.
+
+The graph is built with an explicit stack rather than recursion — how deep a dependency chain
+goes is the user's data and should not be bounded by Python's recursion limit. Construction calls
+first and only inspects the signature after a `TypeError`: taking a signature exists to explain a
+failure, and should not be charged to every unit that constructs fine (it used to be 90% of graph
+building).
 
 Every instance on the graph is built **by the framework** — there is no second source. So "where
 did this unit come from" always has one answer, and construction failures and lifecycle failures
 have one way of being handled.
 
-## Serving: merged into one app
+## It knows about no shell
 
-`Canary` is an ASGI app. At the end of `start()` it picks the units carrying `WEB_ATTR` and hands
-them to the web extension, which collects and merges them into **one** Starlette app — so the
-whole composition exposes a single `/openapi.json` and `/docs`, and every non-`lifespan` scope is
-delegated to it.
+`Canary` does assembly and lifecycle, nothing else. HTTP, CLIs, schedulers, message consumers —
+those are **shells**, owned by other libraries, and Canary knows about none of them. There is one
+way in: let the host wrap its own runtime in the async context manager.
 
-**The runtime does no path arithmetic**: what a URL looks like is the web extension's business,
-and the runtime only knows which units exist. `prefix` is each unit's absolute prefix and is
-joined into the full path inside the extension's `collect_routes`.
+```python
+@asynccontextmanager
+async def lifespan(_app):
+    async with canary:
+        yield
+```
 
-The merge itself is done by the web extension (`build_serve_app`), which `Canary` imports
-**lazily** — it never happens when the graph has no web unit, so a pure `@cocoa` composition does
-not need `canary-framework[web]` installed.
-
-## The request path: compiled at assembly, no reflection per request
-
-At assembly time the web extension compiles every handler's signature into a `HandlerPlan`: where
-each parameter comes from, which validator to use, whether it has a default, how to serialise the
-return value. When a request arrives the framework walks a tuple, pulls values from their sources
-and runs validators that already exist — no `get_type_hints`, no `inspect.signature`, no
-`TypeAdapter` construction.
-
-The same plan feeds OpenAPI generation. **Dispatch and the document read the same object**, so an
-inconsistency like "the document says query, the code reads the body" is structurally impossible.
+That boundary is deliberate. A web layer used to live in this repository (`@web_cocoa`, route
+decorators, parameter binding, OpenAPI — about 1300 lines), but it did the same job as FastAPI
+and Starlette, and that is not where this framework differs — the difference is in dependency
+assembly and lifecycle. Rebuilding it only forces a permanent chase after WebSocket, file
+uploads and middleware, and that half is where nearly every bug came from.
 
 ## Design principles
 
@@ -93,11 +88,11 @@ inconsistency like "the document says query, the code reads the body" is structu
 2. **Decorators declare, they do not transform.** Units stay plain classes.
 3. **The framework only builds empty shells.** Anything needing outside input happens in the
    lifecycle — because only what happens there has a matching reclamation step.
-4. **The lifecycle is explicit.** `init()` / `start()` / `stop()` are called by you or by the ASGI
-   lifespan.
+4. **The lifecycle is explicit.** `init()` / `start()` / `stop()` are called by you or by the
+   host's lifespan.
 5. **Silent failure must be made loud.** "Written, no error, no effect" is the hardest kind of
    problem to find, so assembly would rather refuse.
 6. **A capability belongs in the framework only when users cannot build it themselves.** Something
    you can write in ten lines does not deserve a public entry point.
-7. **Markers are collected in one place; extensions load on demand.** The contract is defined once,
-   and `Canary` imports an extension only when it really needs it.
+7. **Do not rebuild what others already did well.** Stand on the existing Python ecosystem
+   instead of competing with it.

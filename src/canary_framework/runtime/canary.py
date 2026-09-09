@@ -4,8 +4,8 @@
 让“嵌套”“单独启动”“组合”共用同一条代码路径。引擎是 async 原生：钩子既可以是
 同步函数，也可以是协程函数，运行时按返回值自动判断是否 ``await``。
 
-``Canary`` 本身也是一个 ASGI 应用：``__call__`` 处理 lifespan 驱动生命周期，并把
-http/websocket 等 scope 委托给所有 ``@web_cocoa`` 单元合并后的统一服务入口。
+运行时**只做装配与生命周期**，不认识任何外壳（HTTP、CLI、消息消费者……）。要把它接进
+一个宿主，用 ``async with canary:`` 包住宿主的运行期即可。
 """
 
 from __future__ import annotations
@@ -16,24 +16,19 @@ import logging
 import os
 import types
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, Self, TypeVar, cast
+from typing import Literal, Self, TypeVar, cast
 
-from canary_framework.common.error import DeclarationError, InjectionError, LifecycleError
-from canary_framework.common.markers import ROUTE_ATTR, WEB_ATTR
-from canary_framework.common.type import LifecycleState, Receive, Scope, Send
+from canary_framework.common.error import InjectionError, LifecycleError
+from canary_framework.common.type import LifecycleState
 from canary_framework.core.decorator.introspect import (
     deps_of,
     init_hooks,
     is_cocoa,
-    marked_members,
     start_hooks,
     stop_hooks,
 )
 from canary_framework.core.infra.naming import to_snake
 from canary_framework.runtime.graph import build_graph, topological_sort
-
-if TYPE_CHECKING:  # 仅供类型标注——运行时对 web 的 import 始终是延迟的
-    from canary_framework.web.core.app import Route
 
 _log = logging.getLogger("canary.runtime")
 
@@ -56,8 +51,7 @@ class Canary:
     """A runtime that owns a graph of cocoas and drives their lifecycle.
 
     编排器：解析依赖图、按拓扑序驱动 ``init`` / ``start`` / ``stop``。
-    异步原生——同步钩子直接调用，异步钩子自动 ``await``。带服务单元时，``Canary``
-    自身就是 ASGI 应用，可直接 ``uvicorn app:app``。
+    异步原生——同步钩子直接调用，异步钩子自动 ``await``。
     """
 
     def __init__(self, *roots: type) -> None:
@@ -68,16 +62,11 @@ class Canary:
         self._state = LifecycleState.NEW
         self._graph: dict[type, object] = {}
         self._order: list[type] = []
-        self._serve_app: Any | None = None
-        self._route_entries: list[Route] = []
         # 已进入 ``@on_start`` 的单元，按进入顺序；回收时逆序消费。
         # 记录的是“进入”而非“完成”——启动到一半失败的单元同样要被回收。
         self._started: list[type] = []
         # 事件循环探针改动前的旧值，停止时还原；未开启探针时为 None。
         self._loop_probe: tuple[asyncio.AbstractEventLoop, bool, float] | None = None
-        # 冷启动锁：没有 lifespan 时，第一个请求会顺手把应用启起来。并发的首批请求
-        # 必须在这里排队，否则后到的会看见"正在启动"就直奔一个还不存在的服务入口。
-        self._booting = asyncio.Lock()
 
     # -- read access --------------------------------------------------
     @property
@@ -123,7 +112,6 @@ class Canary:
             await self._apply_framework_config()
             self._graph = build_graph(list(self.roots))
             self._order = topological_sort(self._graph)
-            self._reject_routes_outside_web_units()
             for t in self._order:
                 node = self._graph[t]
                 self._inject(node)
@@ -135,10 +123,9 @@ class Canary:
         self._state = LifecycleState.INITIALIZED
 
     async def start(self) -> None:
-        """``INITIALIZED -> STARTED``: inject deps, run ``@on_start``, collect serve app.
+        """``INITIALIZED -> STARTED``: run every ``@on_start`` in topological order.
 
-        按拓扑序执行 ``@on_start``（依赖已在 ``init()`` 注入完毕），随后收集所有
-        ``@web_cocoa`` 单元的路由并合并为统一的服务入口。
+        按拓扑序执行 ``@on_start``（依赖已在 ``init()`` 注入完毕）。
 
         不变式：**要么全部启动，要么什么都没启动。** 任一环节抛出时，已进入
         ``@on_start`` 的单元（含失败的那一个）会按逆序执行 ``@on_stop`` 回收，
@@ -152,7 +139,6 @@ class Canary:
                 self._started.append(t)
                 for hook in start_hooks(node):
                     await self._invoke_hook(hook)
-            self._serve_app = self._collect_serve_app()
         except Exception as exc:
             self._state = LifecycleState.FAILED
             for err in await self._unwind():
@@ -189,100 +175,6 @@ class Canary:
             self._state = LifecycleState.FAILED
             raise ExceptionGroup(f"Canary: {len(errors)} error(s) while stopping", errors)
         self._state = LifecycleState.STOPPED
-
-    # -- ASGI ---------------------------------------------------------
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """Serve ASGI: lifespan drives the lifecycle, everything else delegates.
-
-        ``lifespan`` 交给 :meth:`_lifespan`；其余 scope（http/websocket/…）在确保已
-        启动后委托给合并出的统一服务入口。
-        """
-        if scope["type"] == "lifespan":
-            await self._lifespan(receive, send)
-            return
-        if self._serve_app is None:
-            # 判据是"服务入口在不在"，不是"状态是不是 NEW"：后者在并发首批请求下会漏——
-            # 第二个请求看到的是 STARTING，于是跳过启动，直奔一个还没建好的入口。
-            await self._ensure_started()
-        if self._serve_app is None:
-            raise RuntimeError(self._why_it_cannot_serve(str(scope["type"])))
-        await self._serve_app(scope, receive, send)
-
-    async def _lifespan(self, receive: Receive, send: Send) -> None:
-        while True:
-            message = await receive()
-            if message["type"] == "lifespan.startup":
-                try:
-                    await self._ensure_started()
-                    await send({"type": "lifespan.startup.complete"})
-                except Exception as exc:
-                    # 先如实汇报，再把异常抛出去。只 return 会让 lifespan 任务正常结束，
-                    # 而完整实现了 lifespan 协议的调用方（Starlette 的 TestClient）靠
-                    # task.result() 传播失败——那样它会认为一个根本没启动的应用启动成功，
-                    # 并在关停时永久挂起。参照 Starlette 自己的 Router.lifespan：发完再抛。
-                    await send({"type": "lifespan.startup.failed", "message": str(exc)})
-                    raise
-            elif message["type"] == "lifespan.shutdown":
-                try:
-                    await self.stop()
-                except Exception as exc:
-                    # 同理：关停失败要如实汇报再抛出，否则回收失败会被完全隐藏。
-                    await send({"type": "lifespan.shutdown.failed", "message": str(exc)})
-                    raise
-                await send({"type": "lifespan.shutdown.complete"})
-                return
-
-    async def _ensure_started(self) -> None:
-        """Start once, no matter how many callers arrive at the same time.
-
-        没有 lifespan 时的冷启动入口。锁内**重新**判断状态：并发的首批请求里只有一个
-        真的去启动，其余的在锁上等，醒来时服务入口已经建好。启动失败的话它们会依次拿到
-        同一个说法——而不是各自去撞一个不存在的入口。
-        """
-        async with self._booting:
-            if self._state is LifecycleState.NEW:
-                await self.init()
-                await self.start()
-
-    def _why_it_cannot_serve(self, scope_type: str) -> str:
-        """Say which of the two reasons it is, instead of one message for both.
-
-        走到这里只有两种可能，分开说：启动失败过，或者这张图上根本没有 web 单元。
-        """
-        if self._state is LifecycleState.FAILED:
-            return (
-                f"Canary cannot serve {scope_type!r}: startup failed. "
-                f"The original error was raised where the app was started."
-            )
-        return (
-            f"Canary cannot serve {scope_type!r}: no @web_cocoa unit is reachable "
-            f"from the root(s) {', '.join(r.__name__ for r in self.roots)}."
-        )
-
-    def _collect_serve_app(self) -> Any | None:
-        """Collect the units' route entries and merge them into one serving app.
-
-        运行时在这里只做两件事：**按 ``WEB_ATTR`` 标记挑出哪些单元带路由**，再把它们交给
-        web 扩展。路由怎么收、路径怎么拼、文档怎么生成，全是 web 的事——运行时不做任何
-        路径运算，也不需要认识路由的形状。
-
-        逆拓扑序遍历（依赖者在前），所以文档元数据取的是最外层那个 web 单元的。
-
-        对 web 扩展的 import 是延迟的：没有 web 单元就不会发生，纯 ``@cocoa`` 编排
-        因此无需安装 ``canary-framework[web]``。
-        """
-        web_types = [t for t in reversed(self._order) if hasattr(t, WEB_ATTR)]
-        if not web_types:
-            return None
-
-        from canary_framework.web.core.app import build_serve_app, collect_routes
-
-        self._route_entries = [
-            entry for t in web_types for entry in collect_routes(t, self._graph[t])
-        ]
-        if not self._route_entries:
-            return None
-        return build_serve_app(getattr(web_types[0], WEB_ATTR, {}), self._route_entries)
 
     # -- context manager ----------------------------------------------
     async def __aenter__(self) -> Self:
@@ -363,32 +255,11 @@ class Canary:
         loop.slow_callback_duration = duration
         self._loop_probe = None
 
-    def _reject_routes_outside_web_units(self) -> None:
-        """A route marker on a plain ``@cocoa`` never gets collected — say so.
-
-        ``@get`` 只有写在 ``@web_cocoa`` 单元上才会被收集。写在普通 ``@cocoa`` 上时装饰器
-        确实打上了标记，但没有人去读它——路由静默消失，什么也不报。这类"写了、没报错、
-        也没生效"是最难查的问题，所以在装配期直接拒绝。
-        """
-        for t in self._order:
-            if hasattr(t, WEB_ATTR):
-                continue
-            routes = marked_members(self._graph[t], ROUTE_ATTR)
-            if routes:
-                names = ", ".join(sorted(getattr(fn, "__name__", "?") for _, fn in routes))
-                raise DeclarationError(
-                    t.__name__,
-                    f"{names} carry route markers, but {t.__name__} is a plain @cocoa. "
-                    f"Only @web_cocoa units have their routes collected — "
-                    f"change the decorator to @web_cocoa, or move these methods.",
-                )
-
     def _assembly_summary(self) -> str:
         """Render what the runtime actually assembled — the graph knows, so it should say.
 
-        装配摘要：框架掌握着全部事实（顺序、依赖、路由），
-        却一直零输出。这里在 DEBUG 级别一次性说清楚，排查"为什么这条路由不在"
-        或"为什么这个单元先启动"时不必再去读框架源码。
+        装配摘要：框架掌握着全部事实（启动顺序、每个单元的依赖），却一直零输出。
+        这里在 DEBUG 级别一次性说清楚，排查"为什么这个单元先启动"时不必再去读框架源码。
         """
         lines = [f"Canary assembled {len(self._order)} unit(s)"]
         lines.append("  roots: " + ", ".join(r.__name__ for r in self.roots))
@@ -401,13 +272,6 @@ class Canary:
         for i, t in enumerate(self._order, 1):
             deps = ", ".join(d.__name__ for d in deps_of(t))
             lines.append(f"    {i}. {t.__name__}" + (f"  <- {deps}" if deps else ""))
-        if self._route_entries:
-            lines.append("  routes:")
-            for route in self._route_entries:
-                lines.append(
-                    f"    {route.method:<6} {route.path}  -> "
-                    f"{type(route.instance).__name__}.{getattr(route.fn, '__name__', route.fn)}"
-                )
         return "\n".join(lines)
 
     async def _unwind(self) -> list[Exception]:

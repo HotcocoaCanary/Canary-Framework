@@ -208,19 +208,41 @@ async def test_illegal_transition_raises() -> None:
         await canary.init()  # 不能重复初始化
 
 
-def test_plain_cocoa_composition_does_not_import_the_web_extension() -> None:
-    """web 是可选额外依赖：不带路由的编排不该把 web 扩展（及 starlette）拉进来。"""
+def test_a_full_lifecycle_pulls_in_no_third_party_package() -> None:
+    """核心零依赖不是 pyproject 里的一句声明，是一条可验证的事实。
+
+    跑完一整轮 init / start / stop 之后，sys.modules 里不该出现任何来自 site-packages
+    的东西——框架只用标准库。
+    """
     code = (
-        "import asyncio, sys\n"
-        "from canary_framework import Canary, cocoa\n"
+        "import sys, sysconfig\n"
+        "before = set(sys.modules)\n"  # 解释器自带的（含 virtualenv 引导）不算
+        "import asyncio\n"
+        "from canary_framework import Canary, cocoa, on_init, on_start, on_stop\n"
         "@cocoa\n"
-        "class Unit: ...\n"
+        "class Leaf:\n"
+        "    @on_init\n"
+        "    def a(self): ...\n"
+        "    @on_start\n"
+        "    async def b(self): ...\n"
+        "    @on_stop\n"
+        "    async def c(self): ...\n"
+        "@cocoa(deps=[Leaf])\n"
+        "class Root: ...\n"
         "async def main():\n"
-        "    async with Canary(Unit):\n"
+        "    async with Canary(Root):\n"
         "        pass\n"
         "asyncio.run(main())\n"
-        "assert 'canary_framework.web' not in sys.modules, 'web extension imported'\n"
-        "assert 'starlette' not in sys.modules, 'starlette imported'\n"
+        "site = sysconfig.get_paths()['purelib']\n"
+        "third = sorted(\n"
+        "    name\n"
+        "    for name, mod in sys.modules.items()\n"
+        "    if name not in before\n"
+        "    and getattr(mod, '__file__', None)\n"
+        "    and str(mod.__file__).startswith(site)\n"
+        "    and not name.startswith('canary_framework')\n"
+        ")\n"
+        "assert not third, f'third-party imports: {third}'\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

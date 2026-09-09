@@ -29,7 +29,7 @@ graph is built in `init()`.
 | Method | Transition | What it does |
 |---|---|---|
 | `await app.init()` | `NEW → INITIALIZED` | build, validate, sort, **inject dependencies**, run `@on_init` in order |
-| `await app.start()` | `INITIALIZED → STARTED` | run `@on_start` in order, then merge every `@web_cocoa` unit's routes into one serving app |
+| `await app.start()` | `INITIALIZED → STARTED` | run `@on_start` in order |
 | `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse; idempotent, shared by normal and failed termination |
 
 The engine is async-native: hooks may be sync or async and the runtime awaits only when needed.
@@ -79,8 +79,8 @@ everything is up" position. Declare a single composition root if you need one.
 ## The assembly summary
 
 Set `CANARY_LOG_LEVEL=DEBUG` and the end of startup prints a summary on the `canary.runtime`
-logger — start order, each unit's dependencies, and the mounted routes. No need to read the
-framework's source to find out why a route is missing or why a unit started first:
+logger — start order and each unit's dependencies. No need to read the framework's source to
+find out why a unit started first:
 
 ```text
 Canary assembled 4 unit(s)
@@ -90,31 +90,44 @@ Canary assembled 4 unit(s)
     2. Database  <- Config
     3. BookRepository  <- Database
     4. LibraryApp  <- BookRepository
-  routes:
-    GET    /api/books  -> LibraryApp.list_books
 ```
 
-## Serving ASGI
+## Letting a host drive it
 
-`Canary` is itself an ASGI app. Its `__call__(scope, receive, send)` handles the `lifespan` scope
-to drive `init()` / `start()` / `stop()`, and delegates every other scope (`http`, `websocket`,
-…) to the **single serving app** merged from all `@web_cocoa` units:
+`Canary` knows about no shell — it is neither a web framework nor a CLI framework. To plug it
+into a host, wrap that host's runtime in the async context manager:
 
 ```python
-from canary_framework import Canary
+from contextlib import asynccontextmanager
 
-app = Canary(LibraryAPI)  # `app` is the ASGI app
+from fastapi import FastAPI
 
-# uvicorn examples.library.web:app
+canary = Canary(LibraryApp)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with canary:      # init + start on entry, stop on exit
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
 ```
 
-The whole composition exposes exactly one `/openapi.json` and one `/docs`. The import of the web
-extension is **lazy** — it happens only when the graph actually contains a `@web_cocoa` unit, so
-a pure `@cocoa` composition never needs `canary-framework[web]` installed.
+To reach a unit inside a host's handler, `canary[SomeUnit]` is it — dependencies are already
+injected, so `self.<dep>` just works. With FastAPI's `Depends` that takes a three-line factory:
 
-Without a lifespan (for example when you call `app` directly), the first request starts the app,
-and concurrent first requests queue for that single startup. That path is a fallback; in a real
-deployment let the server's lifespan drive it.
+```python
+def provide[T](cls: type[T]):
+    def dep() -> T:
+        return canary[cls]
+    return dep
 
-How routes are merged and how the lazy import is wired is described in
-[Architecture](architecture.md).
+
+@app.get("/books/{book_id}")
+async def read(book_id: int, svc: Annotated[LibraryApp, Depends(provide(LibraryApp))]):
+    return svc.get_book(book_id)
+```
+
+HTTP, WebSocket, static files, middleware and authentication all belong to the host. Canary only
+guarantees that your objects are assembled correctly, started in order and reclaimed in reverse.

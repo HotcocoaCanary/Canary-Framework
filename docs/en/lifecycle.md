@@ -35,7 +35,7 @@ awaits when it is awaitable, so the two mix freely.
 | Method | Transition | What it does |
 |---|---|---|
 | `await app.init()` | `NEW → INITIALIZED` | build, validate, sort, **inject dependencies**, run `@on_init` in order |
-| `await app.start()` | `INITIALIZED → STARTED` | run `@on_start` in order, then merge the routes of every `@web_cocoa` unit |
+| `await app.start()` | `INITIALIZED → STARTED` | run `@on_start` in order |
 | `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse |
 
 In one line: **`init` assembles the graph so every unit is usable; `start` lets them go to work.**
@@ -118,16 +118,20 @@ always safe, with no state check first.
 A single failing `@on_stop` does not abort the shutdown: errors are collected, the remaining
 units are reclaimed anyway, and everything is raised at the end as one `ExceptionGroup`.
 
-## Under ASGI
+## Letting a host drive it
 
-`Canary` is itself an ASGI app. Under a server like uvicorn the `lifespan` protocol drives the
-same lifecycle: `lifespan.startup` runs `init()` + `start()`, `lifespan.shutdown` runs `stop()`.
-A failed startup is **reported and then raised** (`lifespan.startup.failed`), so a caller can
-never conclude that an app which did not start actually started.
+`Canary` implements the async context manager protocol, so any host only has to wrap its own
+runtime with it:
 
-Without a lifespan (for example when you call `app` directly), the first request starts the app.
-Concurrent first requests queue for that single startup rather than each starting their own or
-hitting a serving app that is not built yet.
+```python
+@asynccontextmanager
+async def lifespan(_app):
+    async with canary:      # init + start on entry, stop on exit
+        yield
+```
+
+FastAPI's and Starlette's `lifespan=`, a Typer command wrapper, your own `main()` — all the same
+shape. The framework knows about none of them specifically.
 
 ## Two environment variables
 

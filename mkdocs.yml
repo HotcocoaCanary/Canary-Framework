@@ -82,8 +82,6 @@ nav:
       - Runtime (Canary): canary.md
       - Lifecycle: lifecycle.md
       - Dependency Injection: dependency-injection.md
-  - Web:
-      - Web Apps: web.md
   - Architecture: architecture.md
   - API Reference: api-reference.md
 

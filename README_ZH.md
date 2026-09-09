@@ -1,8 +1,8 @@
 <h1 align="center">Canary Framework</h1>
 
 <p align="center">
-  一个极简、装饰器驱动的 <strong>依赖注入</strong>、<strong>生命周期</strong> 与
-  <strong>ASGI Web 应用</strong> 框架 —— 纯 Python。
+  一个极简、装饰器驱动的<strong>依赖注入</strong>与<strong>生命周期</strong>运行时
+  —— 纯 Python，零依赖。
 </p>
 
 <p align="center">
@@ -21,9 +21,10 @@
 ## 安装
 
 ```bash
-pip install canary-framework            # 核心（零第三方依赖）
-pip install "canary-framework[web]"     # + web 扩展（ASGI / OpenAPI）
+pip install canary-framework
 ```
+
+不会拉进任何第三方包 —— 框架只用标准库。
 
 需要 Python 3.12+。
 
@@ -31,8 +32,10 @@ pip install "canary-framework[web]"     # + web 扩展（ASGI / OpenAPI）
 
 - **cocoa** 是最小运行单元 —— 一个被 `@cocoa` 标记的普通 Python class。依赖通过
   `deps=[...]` 声明；`@on_init` / `@on_start` / `@on_stop` 声明可选的生命周期行为。
-- **Canary** 是编排器。`Canary(*roots)` 解析依赖图、拓扑排序、驱动完整生命周期 —— 它本身
-  也是一个 ASGI 应用。
+- **Canary** 是编排器。`Canary(*roots)` 解析依赖图、拓扑排序、驱动完整生命周期。
+
+它**不是 web 框架**，是一个运行时容器；你的对象最后被什么外壳驱动（HTTP、CLI、定时任务），
+那是外壳的事。
 
 一条贯穿全框架的规则：
 
@@ -108,42 +111,41 @@ class UserService:
 失败路径是设计的一部分：`start()` 失败会逆序回收已启动的单元；`stop()` 是**唯一**的回收
 路径，正常结束与失败结束都走它，且可重复调用 —— `finally: await app.stop()` 永远安全。
 
-## Web 应用
+## 接进一个宿主
 
-`web` 扩展把 `@cocoa` 服务变成 ASGI 应用，并自动生成 OpenAPI 文档：
+Canary 不认识任何外壳 —— 它既不是 web 框架，也不是 CLI 框架。任何有"启动 / 关停"概念的宿主
+都能驱动它，只要把自己的运行期包住：
 
 ```python
-from pydantic import BaseModel
-from canary_framework import Canary
-from canary_framework.web import get, post, web_cocoa
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+
+canary = Canary(UserService)
 
 
-class BorrowRequest(BaseModel):
-    member_id: int
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with canary:            # 进入时 init + start，退出时 stop
+        yield
 
 
-@web_cocoa(deps=[BookRepository, LibraryService], prefix="/api", tags=["library"])
-class LibraryAPI:
-    @get("/books/{book_id}")
-    async def get_book(self, book_id: int) -> dict: ...
-
-    @post("/books/{book_id}/borrow", status_code=201)
-    async def borrow(self, book_id: int, body: BorrowRequest) -> dict: ...
+app = FastAPI(lifespan=lifespan)
 
 
-app = Canary(LibraryAPI)  # app 本身就是 ASGI 应用
+def provide[T](cls: type[T]):
+    def dep() -> T:
+        return canary[cls]
+    return dep
+
+
+@app.get("/users/{user_id}")
+async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserService))]):
+    return users.get(user_id)
 ```
 
-```bash
-uvicorn examples.library.web:app --reload
-# GET /docs  ·  /openapi.json
-```
-
-参数来源只有一条推断规则：**标量走查询串（名字命中路径占位符则走路径），其余走请求体。**
-请求头与 cookie 推断不到，用 `Annotated[str, Header()]` 显式声明。handler 必须是
-`async def` —— 同步函数会阻塞整个进程，框架在装配期直接拒绝。
-
-签名在**装配期**编译成取值计划，请求路径上没有任何反射。
+HTTP、WebSocket、静态文件、中间件、认证全都归宿主 —— 那些框架已经做得很好了。Canary 只保证
+你的对象被正确装配、按序启动、按逆序回收。
 
 ## 示例
 
@@ -155,7 +157,7 @@ uvicorn examples.library.web:app --reload
 - [快速开始](docs/zh/quickstart.md)
 - [Cocoa 单元](docs/zh/cocoa.md) · [运行时（Canary）](docs/zh/canary.md)
 - [生命周期](docs/zh/lifecycle.md) · [依赖注入](docs/zh/dependency-injection.md)
-- [Web 应用](docs/zh/web.md) · [架构](docs/zh/architecture.md) · [API 参考](docs/zh/api-reference.md)
+- [架构](docs/zh/architecture.md) · [API 参考](docs/zh/api-reference.md)
 
 ## 许可证
 

@@ -1,8 +1,26 @@
 # What's New in 0.9.3
 
-0.9.3 is a **convergence**: it completes the failure paths, straightens out the mental model, and
-removes the things that looked necessary but that any user can write themselves in ten lines. It
-contains several breaking changes — 0.9.x is still taking shape.
+0.9.3 is a **convergence**: it pulls the framework back to the one thing it is actually different
+at — **dependency assembly and lifecycle** — and completes the failure paths. It contains several
+breaking changes, the largest of which is that the entire web extension is gone.
+
+## What it is now
+
+> **Canary is a runtime container, not a web framework.**
+
+It assembles a set of objects according to their dependencies, starts them in order and reclaims
+them in reverse. What shell eventually drives those objects — HTTP, a CLI, a scheduler, a message
+consumer — is that shell's business.
+
+```python
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with canary:          # this is the whole wiring
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
+```
 
 ## One rule that runs through everything
 
@@ -10,97 +28,85 @@ contains several breaking changes — 0.9.x is still taking shape.
 > lifecycle.**
 
 Every instance on the graph is constructed **by the framework, with no arguments** — there is no
-second source. This is not a restriction: a constructor has no counterpart (`@on_start` pairs with
-`@on_stop`; "construction" has no "destruction"), so moving work that needs input into the
+second source. This is not a restriction: a constructor has no counterpart (`@on_start` pairs
+with `@on_stop`; "construction" has no "destruction"), so moving work that needs input into the
 lifecycle puts every one of those steps into a phase that keeps a ledger and unwinds in reverse.
+
+## Removing `canary_framework.web`
+
+**This is the headline change.** The web extension (`@web_cocoa`, route decorators, parameter
+binding, OpenAPI — about 1300 lines) is gone, together with `Canary`'s ASGI surface (`__call__`,
+the lifespan protocol, cold start, route collection — about 100 lines).
+
+The reason is not that it was bad — its request path measured 2.4–3.3× faster than FastAPI. The
+reason is that **it was not our job**:
+
+- It did the same thing as FastAPI and Starlette, and that is not where this framework differs.
+- Once on that road, you chase WebSocket, file uploads, middleware and auth forever.
+- It was more than half the code and produced nearly all of the bugs.
+
+And **the one thing it was protecting turns out not to need it**: routes as methods on a
+dependency-injected unit works by handing the bound method straight to FastAPI — a bound method's
+signature has no `self`, so FastAPI does the binding, validation and documentation as usual,
+while `self.repo` is already there because Canary assembled the instance.
+
+```python
+unit = canary[LibraryApi]                       # a plain @cocoa, no web markers
+app.get("/books/{book_id}")(unit.get_book)      # FastAPI takes it as-is
+```
+
+The framework went from 2300 lines to **842**, and every remaining line does dependency assembly
+or lifecycle.
 
 ## Added
 
 - **Injection moved to `init()`.** `@on_init` therefore has a meaning of its own for the first
-  time — "dependencies are in place, nothing is running yet". Assembly errors now surface during
-  assembly.
+  time — "dependencies are in place, nothing is running yet".
 - **`ConstructionError`** — a unit that needs constructor arguments gets an actionable error
-  instead of a bare `TypeError`, naming the single way out: turn the argument into a dependency.
-- **`DeclarationError`** — `@get` on a plain `@cocoa` used to fail silently (the decorator
-  applied, nothing was reported, the route simply was not there). It is now refused at assembly.
-- **`InjectionError`** — two dependencies with the same snake_case name no longer let the last one
-  win.
+  naming the single way out: turn the argument into a dependency.
+- **`InjectionError`** — two dependencies whose snake_case names collide no longer let the last
+  one win.
 - **The assembly summary** — with `CANARY_LOG_LEVEL=DEBUG`, the end of startup prints the start
-  order, dependencies and routes.
+  order and each unit's dependencies.
 - **`CANARY_SLOW_CALLBACK_SECONDS`** — an optional event-loop lag probe that catches synchronous
-  blocking inside `async def` bodies; restored on `stop()` so it never leaks into the rest of the
-  process.
-- **`status_code`** — `@post(..., status_code=201)`, `@delete(..., status_code=204)`. Previously
-  this required building a `Response` by hand, which lost both return-type validation and the
-  response schema in the document.
-- **Documentation metadata** — `tags` (unit level and route level), `summary`, `deprecated`; the
-  `description` comes straight from the handler's docstring.
-- **Return-value validation** — a return value that does not match its annotation becomes a 500.
-  `/docs` promises callers that shape, so the framework holds you to it.
+  blocking inside `async def` bodies; restored on `stop()`.
 
 ## Changed (breaking)
 
-- **`Canary(provide=...)` removed.** It contradicted the rule that units must be constructible
-  with no arguments. Substituting a dependency in a test is plain attribute assignment
-  (`svc.database = FakeDb()`) — injection never did more than that. `ProvisionError` is gone too.
-- **`@on_request_error` and exception-mapping registration removed.** Exceptions now have three
-  fixed outcomes: the request cannot bind → 422, `HTTPError` → its own status, anything else →
-  a JSON 500. Expected business failures belong in the return value, not thrown for the framework
-  to translate into a status code.
-- **Prefixes no longer nest along the dependency chain.** `@web_cocoa(prefix=...)` is now an
-  **absolute** prefix. Dependencies say what starts first; URLs say how resources are named —
-  neither should decide the other. Want `/api/admin`? Write it out.
-- **`Query` / `Path` / `Body` markers removed.** Inference (scalars → query, a name matching a
-  placeholder → path, everything else → body) already gives the same answer. `Header` and `Cookie`
-  stay — they are the only two sources inference cannot reach.
-- **Parameter markers only inside `Annotated`.** `x: int = Query(10)` made the default-value
-  position mean two things at once; it is now refused at assembly.
-- **Handlers must be `async def`.** A synchronous handler stalls the whole process, not just its
-  own request; the framework refuses at declaration time rather than silently offloading it.
-- **`/redoc` removed.** One documentation UI is enough.
+- **`canary_framework.web` and `Canary`'s ASGI surface removed** (see above). `Canary` is no
+  longer an ASGI app; plug it into a host with `async with canary:`.
+- **`Canary(provide=...)` removed.** It contradicted "units are always constructed with no
+  arguments". Substituting a dependency in a test is plain attribute assignment
+  (`svc.database = FakeDb()`) — injection never did more than that.
 - **`stop()` is the single reclamation path.** Callable from any settled state and idempotent, so
   `finally: await app.stop()` is always safe.
 
 ## Fixed
 
-- **A failing `start()` leaked started units.** It now keeps a ledger, unwinds in reverse
-  (including the unit that failed), and re-raises the original exception.
-- **A failing `@on_stop` aborted the whole shutdown.** Errors are now collected and raised at the
-  end as an `ExceptionGroup`.
-- **A failing lifespan startup hung the process.** After sending `lifespan.startup.failed` the
-  error must be raised, or a caller implementing the protocol fully concludes the app started and
-  hangs forever at shutdown. The same applies to shutdown failures.
-- **Concurrent cold start without a lifespan crashed.** Five concurrent first requests used to
-  produce one success and four `RuntimeError`s.
-- **Every request-body failure became a 500.** An empty body, invalid JSON and a form post are all
-  422 now, and `item: Item | None = None` (an optional body) finally works.
-- **Constraints inside `Annotated` were silently dropped.** `Annotated[int, Field(gt=0)]` neither
-  validated nor documented anything.
-- **Two body parameters each received the whole body.** Refused at assembly now.
-- **`prefix="api"` (no slash) raised a bare `AssertionError`.** Prefixes are normalised the same
-  way route paths always were.
-- **One undescribable type took down the whole OpenAPI document.** It degrades to "unconstrained"
-  and logs a WARNING naming the handler **at startup**.
-- **`{name:path}` converters leaked into the OpenAPI document.**
-- **Handlers could not return a `Response`.** SSE, downloads, custom status codes and background
-  tasks all work.
-- **A validator raising `ValueError` turned its own 422 into a 500.**
-- **The slow-callback probe could not see the startup phase.** asyncio reads the debug flag before
-  a callback runs, and the probe was switched on inside `init()`.
+- **A failing `start()` leaked started units.** It now keeps a ledger and unwinds in reverse
+  (including the unit that failed) before re-raising the original exception.
+- **A failing `@on_stop` aborted the whole shutdown.** Errors are collected and raised at the end
+  as an `ExceptionGroup`.
+- **A dependency chain of ~1000 hit `RecursionError`.** How deep a chain goes is the user's data,
+  not something Python's recursion limit should bound. The graph is now built with an explicit
+  stack; 50 000 links work fine.
+- **The slow-callback probe could not see the startup phase.** asyncio reads the debug flag
+  before a callback runs, and the probe was switched on inside `init()`.
 
 ## Performance
 
-Signatures are compiled at assembly time into a value-fetching plan, so the request path does no
-reflection at all — no `get_type_hints`, no `inspect.signature`, no `TypeAdapter` construction per
-request:
-
-```text
-framework-only request path   125 us  →  16.5 us     ~7.5x
+```
+1000 units: build + inject + @on_init    37.7ms → 2.4ms      15.6x
+MRO scan (5000 units, self time)          55ms  → 5ms        11x
+the framework's own import cost                            0.0ms
+a 1000-unit graph                                       ~3.9 MiB
 ```
 
-The same plan feeds OpenAPI generation, so dispatch and the document cannot drift apart.
+That 15.6× came from one inverted order: `inspect.signature` sat on the **success** path while
+existing only to explain failures. It now constructs first and inspects the signature only after
+a `TypeError`.
 
-## A core with zero dependencies
+## Zero dependencies
 
-`pip install canary-framework` no longer pulls in anything third-party; starlette and pydantic
-belong to the `[web]` extra.
+`pip install canary-framework` pulls in nothing but the standard library. A test guards it: after
+a full lifecycle, nothing from site-packages may appear in `sys.modules`.

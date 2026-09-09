@@ -74,9 +74,8 @@ async def init(self) -> None
 async def start(self) -> None
 ```
 
-`INITIALIZED → STARTED`。按序执行 `@on_start`，随后合并所有 `@web_cocoa` 单元的路由为
-统一服务入口。任一环节失败时，已进入 `@on_start` 的单元（含失败的那个）按逆序回收，然后
-原样抛出最初的异常，回收过程中的异常作为 note 附在其上。
+`INITIALIZED → STARTED`。按序执行 `@on_start`。任一环节失败时，已进入 `@on_start` 的单元
+（含失败的那个）按逆序回收，然后原样抛出最初的异常，回收过程中的异常作为 note 附在其上。
 
 ### `stop`
 
@@ -88,18 +87,17 @@ async def stop(self) -> None
 重复调用是幂等的，没启动过时空转。单个 `@on_stop` 抛出不会中断回收 —— 异常收集完毕后
 合并成一个 `ExceptionGroup` 抛出。
 
-### `__call__` — ASGI
-
-```python
-async def __call__(self, scope, receive, send) -> None
-```
-
-服务 ASGI：`lifespan` 驱动生命周期；其余 scope 委托给合并出的服务入口。没有 lifespan 时
-第一个请求会顺手启动应用，并发的首批请求会排队等同一次启动。
-
 ### `__aenter__` / `__aexit__`
 
-异步上下文管理器协议，封装 `init()` + `start()` / `stop()`。
+异步上下文管理器协议，封装 `init()` + `start()` / `stop()`。这也是把 Canary 接进宿主
+（FastAPI 的 `lifespan=`、CLI 的命令包装、你自己的 `main()`）的唯一方式：
+
+```python
+@asynccontextmanager
+async def lifespan(_app):
+    async with canary:
+        yield
+```
 
 ## 枚举
 
@@ -119,11 +117,11 @@ async def __call__(self, scope, receive, send) -> None
 | `CanaryError` | `Exception` | 所有框架与扩展错误的根基类 |
 | `CircularDependencyError` | `CanaryError` | 依赖成环；`.cycle` 是环上的类型名 |
 | `ConstructionError` | `CanaryError` | 单元需要构造参数，框架无参构造不出来 |
-| `DeclarationError` | `CanaryError` | 声明打在了读不到它的地方（如 `@get` 写在普通 `@cocoa` 上） |
 | `InjectionError` | `CanaryError` | 两个依赖的 snake_case 撞名；`.attribute` / `.claimants` |
 | `LifecycleError` | `CanaryError` | 非法生命周期迁移 |
 
-所有框架与扩展错误都继承 `CanaryError`，因此 `except CanaryError` 可一网打尽。
+所有框架错误都继承 `CanaryError`，因此 `except CanaryError` 可一网打尽。将来的扩展也应
+继承它。
 
 ## 环境变量
 
@@ -138,8 +136,7 @@ async def __call__(self, scope, receive, send) -> None
 |---|---|
 | `is_cocoa(cls)` | `cls` 是否被 `@cocoa` 标记 |
 | `deps_of(cls)` | 声明的依赖（元组） |
-| `marked_members(instance, marker)` | 带该标记的方法，返回 `(载荷, 绑定方法)`，基类优先 |
-| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | 某阶段的钩子 |
+| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | 某阶段的钩子，基类优先 |
 | `to_snake(name)` | （`core.infra.naming`）`UserService` → `user_service` |
 
 ## 图算法（`canary_framework.runtime.graph`）
@@ -148,19 +145,3 @@ async def __call__(self, scope, receive, send) -> None
 |---|---|
 | `build_graph(roots)` | 实例化每个根及其传递依赖，每类型一次，全部无参构造 |
 | `topological_sort(graph)` | 卡恩算法；成环抛 `CircularDependencyError` |
-
-## Web 扩展（`canary_framework.web`）
-
-| 名称 | 作用 |
-|---|---|
-| `@web_cocoa(deps=[...], prefix="", tags=(), title="Canary API", version="0.1.0")` | 把类同时标记为 `@cocoa` 与 HTTP 路由持有者；`prefix` 是**绝对**前缀 |
-| `@get` / `@post` / `@put` / `@patch` / `@delete` `(path, *, status_code=200, tags=(), summary=None, deprecated=False)` | 把方法标记为路由处理器（必须 `async def`） |
-| `@route(method, path, ...)` | 上面五个的通用形式 |
-| `Header(*, description=None, alias=None)` | 请求头参数，写在 `Annotated` 里 |
-| `Cookie(*, description=None, alias=None)` | cookie 参数，写在 `Annotated` 里 |
-| `HTTPError(status_code, detail=None, headers=None)` | 自带 HTTP 语义的错误 |
-| `WebError` | web 扩展错误的根基类（继承 `CanaryError`） |
-| `RouteRegistrationError` | 路由无法注册：重复的 method + path、handler 不是 `async def`、两个请求体形参…… |
-| `RequestValidationError` | 请求绑不上签名，映射为 422 |
-
-用法见 [Web 应用](web.md)。

@@ -33,7 +33,7 @@
 | 方法 | 迁移 | 做什么 |
 |---|---|---|
 | `await app.init()` | `NEW → INITIALIZED` | 建图、校验、拓扑排序、**注入依赖**、按序执行 `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | 按序执行 `@on_start`，随后合并所有 `@web_cocoa` 单元的路由 |
+| `await app.start()` | `INITIALIZED → STARTED` | 按序执行 `@on_start` |
 | `await app.stop()` | 任何终态 `→ STOPPED` | 逆序执行 `@on_stop` |
 
 一句话概括：**`init` 把图装配好，让每个单元处于可用状态；`start` 让它们开始干活。**
@@ -113,14 +113,19 @@ finally:
 单个 `@on_stop` 抛出不会中断回收：异常被逐一收集，其余单元照常回收，最后合并成一个
 `ExceptionGroup` 抛出。
 
-## ASGI 服务下
+## 交给宿主驱动
 
-`Canary` 本身就是 ASGI 应用。在 uvicorn 之类的服务器下，`lifespan` 协议驱动同一套生命
-周期：`lifespan.startup` 执行 `init()` + `start()`，`lifespan.shutdown` 执行 `stop()`。
-启动失败会**如实汇报再抛出**（`lifespan.startup.failed`），不会让调用方以为启动成功。
+`Canary` 实现了异步上下文管理器协议，所以任何宿主只要在自己的运行期把它包住即可：
 
-没有 lifespan 时（比如直接把 `app` 当函数调），第一个请求会顺手把应用启起来。并发的首批
-请求会排队等同一次启动，不会各自启动或撞上一个还没建好的入口。
+```python
+@asynccontextmanager
+async def lifespan(_app):
+    async with canary:      # 进入时 init + start，退出时 stop
+        yield
+```
+
+FastAPI / Starlette 的 `lifespan=`、Typer 的命令包装、你自己的 `main()` —— 都是同一个写法。
+框架不认识任何具体宿主。
 
 ## 两个环境变量
 

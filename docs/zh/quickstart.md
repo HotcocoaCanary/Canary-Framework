@@ -111,34 +111,41 @@ assert app[Database] is app[UserService].database
 
 任意子图都可独立启动 —— `Canary(Database)` 只会启动 `Database` 及其依赖（`Config`）。
 
-## 暴露为 Web 应用
+## 接进一个宿主
 
-安装可选的 `web` 扩展，把单元以 HTTP 暴露：
-
-```bash
-pip install "canary-framework[web]"
-```
+Canary 不关心谁来驱动它 —— 它只需要有人在运行期把它包住。任何支持"启动 / 关停"的宿主都
+可以，比如 FastAPI 的 lifespan：
 
 ```python
-from canary_framework import Canary
-from canary_framework.web import get, web_cocoa
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+
+canary = Canary(UserService)
 
 
-@web_cocoa(deps=[Database], prefix="/api")
-class LibraryAPI:
-    @get("/books")
-    async def list_books(self) -> list[dict]:       # handler 必须是 async def
-        return self.database.all("books")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with canary:           # 启动时 init + start，关停时 stop
+        yield
 
 
-app = Canary(LibraryAPI)  # app 本身就是 ASGI 应用
+app = FastAPI(lifespan=lifespan)
+
+
+def provide[T](cls: type[T]):
+    def dep() -> T:
+        return canary[cls]
+    return dep
+
+
+@app.get("/users/{user_id}")
+async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserService))]):
+    return users.get(user_id)
 ```
 
-```bash
-uvicorn examples.library.web:app --reload
-```
-
-打开 `/docs` 查看交互式 OpenAPI 文档。详见 [Web 应用](web.md)。
+HTTP、WebSocket、静态文件、中间件、认证全都归宿主 —— 那些框架已经做得很好了，Canary 不
+重复造。它只保证你的对象被正确装配、按序启动、按逆序回收。
 
 ## 看看框架装配出了什么
 
@@ -151,6 +158,7 @@ CANARY_LOG_LEVEL=DEBUG python -m examples.library.main
 ## 下一步
 
 - [Cocoa 单元](cocoa.md) —— 声明、构造规则与钩子。
-- [运行时（Canary）](canary.md) —— 编排、多根与 ASGI。
+- [运行时（Canary）](canary.md) —— 编排、多根与接进宿主。
 - [生命周期](lifecycle.md) —— 五个时刻、状态机与失败路径。
 - [依赖注入](dependency-injection.md) —— 注入、共享、成环、撞名。
+- [架构](architecture.md) —— 分层、标记、两个阶段。

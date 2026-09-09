@@ -1,8 +1,8 @@
 <h1 align="center">Canary Framework</h1>
 
 <p align="center">
-  A minimal, decorator-driven framework for <strong>dependency injection</strong>,
-  <strong>lifecycle</strong> and <strong>ASGI web apps</strong> — pure Python.
+  A minimal, decorator-driven runtime for <strong>dependency injection</strong> and
+  <strong>lifecycle</strong> — pure Python, zero dependencies.
 </p>
 
 <p align="center">
@@ -21,9 +21,10 @@
 ## Install
 
 ```bash
-pip install canary-framework            # core (zero third-party dependencies)
-pip install "canary-framework[web]"     # + web extension (ASGI / OpenAPI)
+pip install canary-framework
 ```
+
+Nothing third-party comes with it — the framework only uses the standard library.
 
 Python 3.12+ is required.
 
@@ -33,7 +34,10 @@ Python 3.12+ is required.
   Dependencies are declared with `deps=[...]`; `@on_init` / `@on_start` / `@on_stop` declare
   optional lifecycle behaviour.
 - **Canary** is the orchestrator. `Canary(*roots)` resolves the dependency graph, sorts it
-  topologically and drives the whole lifecycle — and it is an ASGI app itself.
+  topologically and drives the whole lifecycle.
+
+It is **not a web framework**. It is a runtime container; what shell drives your objects — HTTP,
+a CLI, a scheduler — is that shell's business.
 
 One rule runs through everything:
 
@@ -115,45 +119,42 @@ Failure paths are part of the design: a failing `start()` unwinds everything it 
 `stop()` is the **single** reclamation path for both normal and failed termination, callable
 repeatedly — `finally: await app.stop()` is always safe.
 
-## Web apps
+## Plug it into a host
 
-The `web` extension turns `@cocoa` services into an ASGI app with a generated OpenAPI document:
+Canary knows about no shell — it is neither a web framework nor a CLI framework. Any host that
+has a startup/shutdown notion can drive it by wrapping its own runtime:
 
 ```python
-from pydantic import BaseModel
-from canary_framework import Canary
-from canary_framework.web import get, post, web_cocoa
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+
+canary = Canary(UserService)
 
 
-class BorrowRequest(BaseModel):
-    member_id: int
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with canary:            # init + start on entry, stop on exit
+        yield
 
 
-@web_cocoa(deps=[BookRepository, LibraryService], prefix="/api", tags=["library"])
-class LibraryAPI:
-    @get("/books/{book_id}")
-    async def get_book(self, book_id: int) -> dict: ...
-
-    @post("/books/{book_id}/borrow", status_code=201)
-    async def borrow(self, book_id: int, body: BorrowRequest) -> dict: ...
+app = FastAPI(lifespan=lifespan)
 
 
-app = Canary(LibraryAPI)  # `app` is the ASGI app
+def provide[T](cls: type[T]):
+    def dep() -> T:
+        return canary[cls]
+    return dep
+
+
+@app.get("/users/{user_id}")
+async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserService))]):
+    return users.get(user_id)
 ```
 
-```bash
-uvicorn examples.library.web:app --reload
-# GET /docs  ·  /openapi.json
-```
-
-Parameter sources follow a single inference rule: **scalars come from the query string (or the
-path when the name matches a placeholder); everything else comes from the body.** Headers and
-cookies cannot be inferred, so declare them with `Annotated[str, Header()]`. Handlers must be
-`async def` — a synchronous one stalls the whole process, and the framework refuses it at
-assembly time.
-
-Signatures are compiled **at assembly time** into a value-fetching plan, so the request path does
-no reflection at all.
+HTTP, WebSocket, static files, middleware and authentication all belong to the host — those
+frameworks already do them well. Canary only guarantees that your objects are assembled
+correctly, started in order and reclaimed in reverse.
 
 ## Examples
 
@@ -165,7 +166,7 @@ injection, lifecycle hooks, multi-root composition and a layered library web app
 - [Quick Start](docs/en/quickstart.md)
 - [Cocoa Units](docs/en/cocoa.md) · [Runtime (Canary)](docs/en/canary.md)
 - [Lifecycle](docs/en/lifecycle.md) · [Dependency Injection](docs/en/dependency-injection.md)
-- [Web Apps](docs/en/web.md) · [Architecture](docs/en/architecture.md) · [API Reference](docs/en/api-reference.md)
+- [Architecture](docs/en/architecture.md) · [API Reference](docs/en/api-reference.md)
 
 ## License
 

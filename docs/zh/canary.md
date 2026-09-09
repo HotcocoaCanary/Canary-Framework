@@ -28,7 +28,7 @@ app = Canary(*roots)
 | 方法 | 状态迁移 | 作用 |
 |---|---|---|
 | `await app.init()` | `NEW → INITIALIZED` | 建图、校验、拓扑排序、**注入依赖**、按序执行 `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | 按序执行 `@on_start`，随后合并所有 `@web_cocoa` 单元的路由为统一服务入口 |
+| `await app.start()` | `INITIALIZED → STARTED` | 按序执行 `@on_start` |
 | `await app.stop()` | 任何终态 `→ STOPPED` | 逆序执行 `@on_stop`；幂等，正常结束与失败结束共用 |
 
 引擎是异步原生的：钩子可同步可异步，运行时按返回值判断是否 `await`。状态机与失败路径见
@@ -77,8 +77,7 @@ await books.start()
 ## 装配摘要
 
 把 `CANARY_LOG_LEVEL` 设成 `DEBUG`，启动末尾会在 `canary.runtime` 上打印一份摘要 ——
-启动顺序、每个单元的依赖、挂了哪些路由。排查"为什么这条路由不在"或"为什么这个单元先
-启动"时不必去读框架源码：
+启动顺序、每个单元的依赖。排查"为什么这个单元先启动"时不必去读框架源码：
 
 ```text
 Canary assembled 4 unit(s)
@@ -88,28 +87,44 @@ Canary assembled 4 unit(s)
     2. Database  <- Config
     3. BookRepository  <- Database
     4. LibraryApp  <- BookRepository
-  routes:
-    GET    /api/books  -> LibraryApp.list_books
 ```
 
-## 服务 ASGI
+## 交给宿主驱动
 
-`Canary` 本身就是一个 ASGI 应用。它的 `__call__(scope, receive, send)` 处理 `lifespan`
-scope 以驱动 `init()` / `start()` / `stop()`，并把其余 scope（`http`、`websocket`、…）委托
-给所有 `@web_cocoa` 单元合并出的**统一服务入口**：
+`Canary` 不认识任何外壳 —— 它既不是 web 框架，也不是 CLI 框架。要把它接进一个宿主，用
+异步上下文管理器把宿主的运行期包住就行：
 
 ```python
-from canary_framework import Canary
+from contextlib import asynccontextmanager
 
-app = Canary(LibraryAPI)  # app 本身就是 ASGI 应用
+from fastapi import FastAPI
 
-# uvicorn examples.library.web:app
+canary = Canary(LibraryApp)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with canary:      # 进入时 init + start，退出时 stop
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
 ```
 
-整个编排只挂一份 `/openapi.json` 与 `/docs`。web 扩展的 import 是**延迟**的 —— 只有图上真
-存在 `@web_cocoa` 单元时才会发生，所以纯 `@cocoa` 编排无需安装 `canary-framework[web]`。
+需要在宿主的处理函数里拿到某个单元时，`canary[SomeUnit]` 就是它 —— 依赖已经注入好了，
+`self.<dep>` 直接可用。配合 FastAPI 的 `Depends` 只要一个三行的工厂：
 
-没有 lifespan 时（比如直接把 `app` 当函数调用），第一个请求会顺手把应用启起来；并发的
-首批请求会排队等同一次启动。这条路径只是兜底，正式部署请交给服务器的 lifespan。
+```python
+def provide[T](cls: type[T]):
+    def dep() -> T:
+        return canary[cls]
+    return dep
 
-路由合并与延迟加载的接线方式见 [架构](architecture.md)。
+
+@app.get("/books/{book_id}")
+async def read(book_id: int, svc: Annotated[LibraryApp, Depends(provide(LibraryApp))]):
+    return svc.get_book(book_id)
+```
+
+HTTP、WebSocket、静态文件、中间件、认证全归宿主。Canary 只保证你的对象被正确装配、按序
+启动、按逆序回收。

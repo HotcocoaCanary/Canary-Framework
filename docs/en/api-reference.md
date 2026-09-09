@@ -76,10 +76,9 @@ sorts, **injects dependencies** and runs `@on_init` in order. On failure the sta
 async def start(self) -> None
 ```
 
-`INITIALIZED → STARTED`. Runs `@on_start` in order, then merges every `@web_cocoa` unit's routes
-into one serving app. If any step fails, every unit that entered `@on_start` (including the one
-that failed) is reclaimed in reverse, and the original exception is re-raised with any unwind
-failures attached as notes.
+`INITIALIZED → STARTED`. Runs `@on_start` in order. If any step fails, every unit that entered
+`@on_start` (including the one that failed) is reclaimed in reverse, and the original exception
+is re-raised with any unwind failures attached as notes.
 
 ### `stop`
 
@@ -91,19 +90,17 @@ Runs `@on_stop` in reverse topological order. **The single reclamation path**: c
 `STARTED` and from `FAILED`, idempotent, a no-op when nothing ever started. A failing `@on_stop`
 does not abort the rest — the errors are collected and raised together as an `ExceptionGroup`.
 
-### `__call__` — ASGI
-
-```python
-async def __call__(self, scope, receive, send) -> None
-```
-
-Serves ASGI: `lifespan` drives the lifecycle, every other scope is delegated to the merged serving
-app. Without a lifespan the first request starts the app, and concurrent first requests queue for
-that single startup.
-
 ### `__aenter__` / `__aexit__`
 
-The async context manager protocol, wrapping `init()` + `start()` / `stop()`.
+The async context manager protocol, wrapping `init()` + `start()` / `stop()`. It is also the only
+way to plug Canary into a host (FastAPI's `lifespan=`, a CLI command wrapper, your own `main()`):
+
+```python
+@asynccontextmanager
+async def lifespan(_app):
+    async with canary:
+        yield
+```
 
 ## Enums
 
@@ -123,12 +120,11 @@ checks.
 | `CanaryError` | `Exception` | the root of every framework and extension error |
 | `CircularDependencyError` | `CanaryError` | a cycle in the graph; `.cycle` lists the type names |
 | `ConstructionError` | `CanaryError` | the unit needs constructor arguments and cannot be built |
-| `DeclarationError` | `CanaryError` | a declaration sits where nothing reads it (e.g. `@get` on a plain `@cocoa`) |
 | `InjectionError` | `CanaryError` | two dependencies claim the same attribute; `.attribute` / `.claimants` |
 | `LifecycleError` | `CanaryError` | an illegal lifecycle transition |
 
-Everything inherits `CanaryError`, so a single `except CanaryError` catches the framework and all
-its extensions.
+Everything inherits `CanaryError`, so a single `except CanaryError` catches them all. Future
+extensions should inherit it too.
 
 ## Environment variables
 
@@ -143,8 +139,7 @@ its extensions.
 |---|---|
 | `is_cocoa(cls)` | whether `cls` is marked with `@cocoa` |
 | `deps_of(cls)` | the declared dependencies (a tuple) |
-| `marked_members(instance, marker)` | `(payload, bound method)` for every marked method, base-first |
-| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | the hooks of one phase |
+| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | the hooks of one phase, base-first |
 | `to_snake(name)` | (`core.infra.naming`) `UserService` → `user_service` |
 
 ## Graph algorithms (`canary_framework.runtime.graph`)
@@ -153,19 +148,3 @@ its extensions.
 |---|---|
 | `build_graph(roots)` | instantiate every root and its transitive dependencies, once each, with no arguments |
 | `topological_sort(graph)` | Kahn's algorithm; raises `CircularDependencyError` on a cycle |
-
-## Web extension (`canary_framework.web`)
-
-| Name | Purpose |
-|---|---|
-| `@web_cocoa(deps=[...], prefix="", tags=(), title="Canary API", version="0.1.0")` | mark a class as both a `@cocoa` and a route holder; `prefix` is **absolute** |
-| `@get` / `@post` / `@put` / `@patch` / `@delete` `(path, *, status_code=200, tags=(), summary=None, deprecated=False)` | mark a method as a request handler (must be `async def`) |
-| `@route(method, path, ...)` | the generic form of the five above |
-| `Header(*, description=None, alias=None)` | a header parameter, written inside `Annotated` |
-| `Cookie(*, description=None, alias=None)` | a cookie parameter, written inside `Annotated` |
-| `HTTPError(status_code, detail=None, headers=None)` | an error that already is an HTTP concept |
-| `WebError` | the root of the extension's errors (inherits `CanaryError`) |
-| `RouteRegistrationError` | a route cannot be registered: duplicate method + path, a non-async handler, two body parameters, … |
-| `RequestValidationError` | the request cannot satisfy the signature; mapped to 422 |
-
-See [Web Apps](web.md) for usage.

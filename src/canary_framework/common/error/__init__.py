@@ -1,16 +1,15 @@
 """Framework exceptions — all inherit :class:`CanaryError`.
 
-框架异常：全部继承 :class:`CanaryError`，便于一次 ``except`` 兜底。扩展包
-（web / agent / …）的错误也应继承 :class:`CanaryError`，这样用户
-``except CanaryError`` 就能统一捕获框架与所有扩展的错误。
+框架异常：全部继承 :class:`CanaryError`，便于一次 ``except`` 兜底。将来的扩展也应
+继承它，这样使用者 ``except CanaryError`` 就能统一捕获。
 """
 
 
 class CanaryError(Exception):
     """Base class for every framework error — and the extension point.
 
-    框架与扩展包所有错误的根基类。扩展包先定义自己的子基类（如 ``WebError``），
-    再派生具体错误，即可与核心错误统一捕获。
+    框架所有错误的根基类。将来的扩展先定义自己的子基类，再派生具体错误，即可与核心
+    错误统一捕获。
     """
 
 
@@ -72,17 +71,3 @@ class ConstructionError(CanaryError):
             f"arguments — declare what it needs in @cocoa(deps=[...]) and read the values "
             f"from those dependencies in @on_init or @on_start."
         )
-
-
-class DeclarationError(CanaryError):
-    """Raised when a declaration is attached to something that cannot honour it.
-
-    声明打在了读不到它的地方时抛出。典型例子：``@get`` 写在普通 ``@cocoa`` 上——装饰器
-    确实打上了标记，但只有 ``@web_cocoa`` 单元的路由会被收集，于是那条路由静默消失。
-
-    静默失效是这个框架一直在消灭的东西：写了、没报错、也没生效，是最难查的一类问题。
-    """
-
-    def __init__(self, unit: str, detail: str) -> None:
-        self.unit = unit
-        super().__init__(f"{unit}: {detail}")

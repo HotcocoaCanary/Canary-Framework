@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import pytest
 
-from canary_framework import Canary, LifecycleError, cocoa
+from canary_framework import Canary, LifecycleError, cocoa, on_init
 
 pytestmark = pytest.mark.integration
 
@@ -70,3 +71,27 @@ async def test_a_malformed_probe_setting_says_so(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("CANARY_SLOW_CALLBACK_SECONDS", "very slow")
     with pytest.raises(LifecycleError, match="number of seconds"):
         await Canary(Bare).init()
+
+
+async def test_the_probe_can_see_the_startup_phase(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """从前测不到：asyncio 在回调开始执行前就读过 debug 标志，而探针是在回调执行到
+    一半（init 里）才打开的——整个启动期因此落在那个"还没开启"的回调里。
+    """
+    monkeypatch.setenv("CANARY_SLOW_CALLBACK_SECONDS", "0.05")
+
+    @cocoa
+    class Slow:
+        @on_init
+        def block(self) -> None:
+            time.sleep(0.2)  # 装配期阻塞事件循环
+
+    with caplog.at_level(logging.WARNING, logger="asyncio"):
+        app = Canary(Slow)
+        await app.init()
+        await asyncio.sleep(0)  # 让出一次，asyncio 才会把上一个回调的耗时报出来
+        await app.stop()
+
+    blocked = [r for r in caplog.records if "took 0.2" in r.getMessage()]
+    assert blocked, "启动期的阻塞应当被探针抓到"

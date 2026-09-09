@@ -114,34 +114,42 @@ assert app[Database] is app[UserService].database
 Any subgraph can be started on its own — `Canary(Database)` starts only `Database` and its
 dependency `Config`.
 
-## Expose it over HTTP
+## Plug it into a host
 
-Install the optional `web` extra:
-
-```bash
-pip install "canary-framework[web]"
-```
+Canary does not care who drives it — it only needs someone to wrap it for the duration of the
+run. Any host with a startup/shutdown notion works; FastAPI's lifespan, for instance:
 
 ```python
-from canary_framework import Canary
-from canary_framework.web import get, web_cocoa
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+
+canary = Canary(UserService)
 
 
-@web_cocoa(deps=[Database], prefix="/api")
-class LibraryAPI:
-    @get("/books")
-    async def list_books(self) -> list[dict]:       # handlers must be async def
-        return self.database.all("books")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with canary:           # init + start on entry, stop on exit
+        yield
 
 
-app = Canary(LibraryAPI)  # `app` is the ASGI app
+app = FastAPI(lifespan=lifespan)
+
+
+def provide[T](cls: type[T]):
+    def dep() -> T:
+        return canary[cls]
+    return dep
+
+
+@app.get("/users/{user_id}")
+async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserService))]):
+    return users.get(user_id)
 ```
 
-```bash
-uvicorn examples.library.web:app --reload
-```
-
-Open `/docs` for the interactive OpenAPI document. See [Web Apps](web.md).
+HTTP, WebSocket, static files, middleware and authentication all belong to the host — those
+frameworks already do them well, and Canary does not rebuild them. It only guarantees that your
+objects are assembled correctly, started in order and reclaimed in reverse.
 
 ## See what the framework assembled
 
@@ -155,6 +163,7 @@ CANARY_LOG_LEVEL=DEBUG python -m examples.library.main
 ## Next
 
 - [Cocoa Units](cocoa.md) — declaration, construction rules, hooks.
-- [Runtime (Canary)](canary.md) — composition, multi-root, ASGI.
+- [Runtime (Canary)](canary.md) — composition, multi-root, plugging into a host.
 - [Lifecycle](lifecycle.md) — five moments, the state machine, failure paths.
 - [Dependency Injection](dependency-injection.md) — injection, sharing, cycles, name clashes.
+- [Architecture](architecture.md) — layers, markers, the two phases.
