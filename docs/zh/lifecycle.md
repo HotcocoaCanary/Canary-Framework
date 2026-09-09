@@ -9,7 +9,7 @@
 | 时刻 | 谁在动 | 手上有什么 |
 |---|---|---|
 | 构造 | 使用者的 `__init__` | 什么都没有（无参构造） |
-| **装配** | **框架** | 建图 → 校验 → 排序 → 注入 |
+| **装配** | **框架**，在 `Canary(...)` 里 | 建图 → 校验 → 排序 → 注入 |
 | 初始化 `@on_init` | 使用者 | 依赖已就位，但还没有任何东西开始运行 |
 | 启动 `@on_start` | 使用者 | 依赖已就位，可以获取资源 |
 | 停止 `@on_stop` | 使用者 | 逆序回收 |
@@ -30,26 +30,28 @@
 
 ## 三个方法各做什么
 
-| 方法 | 迁移 | 做什么 |
+| 何时 | 迁移 | 做什么 |
 |---|---|---|
-| `await app.init()` | `NEW → INITIALIZED` | 建图、校验、拓扑排序、**注入依赖**、按序执行 `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | 按序执行 `@on_start` |
+| `Canary(*roots)` | —— `→ READY` | 建图、校验、拓扑排序、**注入依赖**。同步，不需要事件循环 |
+| `await app.start()` | `READY → STARTED` | 先全部 `@on_init`，再全部 `@on_start` |
 | `await app.stop()` | 任何终态 `→ STOPPED` | 逆序执行 `@on_stop` |
 
-一句话概括：**`init` 把图装配好，让每个单元处于可用状态；`start` 让它们开始干活。**
+一句话概括：**构造把图装配好，让每个单元处于可用状态；`start` 让它们开始干活。**
 
 ## 状态机
 
 ```
-NEW ─▶ INITIALIZING ─▶ INITIALIZED ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
-        │                            │                    │
-        └───────────────▶ FAILED ◀───┴────────────────────┘
+READY ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
+            │                      │
+            └────▶ FAILED ◀────────┘
 ```
+
+起点是 `READY` 而不是"什么都还没做"：装配在构造函数里已经完成，一个刚造出来的运行时
+**已经可用** —— `canary[SomeUnit]` 立刻能取到已注入依赖的实例，只是还没有人开始运行。
 
 `app.state` 返回当前的 `LifecycleState`。非法迁移抛 `LifecycleError`：
 
 ```python
-await app.init()
 await app.start()
 await app.start()  # LifecycleError: illegal transition from STARTED
 ```
@@ -89,19 +91,22 @@ class Database(LoggingMixin):
 
 失败路径是这个框架有意设计过的部分，三条规则各自不同：
 
-**`init()` 失败不回滚。** 此时还没有任何 `@on_start` 跑过，也就没有资源需要回收。状态置为
-`FAILED`，异常原样抛出。
+**只有一条规则：`stop()` 收台账里的一切。**
 
-**`start()` 失败全部回滚。** 不变式是「要么全部启动，要么什么都没启动」。任一环节抛出时，
-已经**进入**过 `@on_start` 的单元（含失败的那一个）会按逆序执行 `@on_stop`，然后原样抛出
-最初的异常；回收过程中的异常作为 note 附在它上面，不改变异常类型。
+台账记的是**进入过 `@on_start`** 的单元。`@on_start` 按契约是唯一获取资源的地方，所以
+只有它需要对应的回收。
+
+`start()` 失败时不变式是「要么全部启动，要么什么都没启动」：台账里的单元（含失败的那一个）
+按逆序执行 `@on_stop`，然后原样抛出最初的异常；回收过程中的异常作为 note 附在它上面，
+不改变异常类型。
+
+`@on_init` 阶段失败时台账还是空的，回滚自然是空转 —— 不需要为它单写一条规则。
 
 **`stop()` 是唯一的回收路径。** 它同时承接正常结束与失败结束：
 
 ```python
 app = Canary(Root)
 try:
-    await app.init()
     await app.start()
 finally:
     await app.stop()   # 从 STARTED 可调，从 FAILED 也可调；重复调用是幂等的
@@ -120,7 +125,7 @@ finally:
 | 宿主收什么 | 用哪个 | 谁是这样 |
 |---|---|---|
 | 一个异步上下文管理器 `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI（Starlette / FastAPI / Litestar）、MCP、FastStream |
-| 成对的启动 / 关停回调 | `init()` / `start()` 与 `stop()` | Quart、Sanic、arq、Dramatiq |
+| 成对的启动 / 关停回调 | `start()` 与 `stop()` | Quart、Sanic、arq、Dramatiq |
 
 ```python
 app = FastAPI(lifespan=canary.lifespan)          # 就这一行

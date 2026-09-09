@@ -10,7 +10,7 @@ cocoa 通过 `@cocoa(deps=[...])` 声明依赖。无需额外 DSL，也无需 `_
 class UserService: ...
 ```
 
-`deps=[...]` 是一个有序的 cocoa 类型列表。在 `init()` 阶段，运行时把每个依赖注入到实例上，
+`deps=[...]` 是一个有序的 cocoa 类型列表。在**构造期**，运行时把每个依赖注入到实例上，
 属性名由类名转 snake_case 得到：
 
 | 依赖类型 | 注入属性 |
@@ -29,9 +29,10 @@ class UserService:
         assert self.database is not None  # @on_init 时已经注入
 ```
 
-**注入属于装配，不属于启动**，所以它发生在 `init()` 而不是 `start()`。这带来两件事：
-`@on_init` 能看到自己的协作者（否则它和 `__init__` 几乎没区别）；装配类的错误（撞名、
-不是 cocoa、成环）在装配阶段就暴露，不必等到 `start()`。
+**注入属于装配，不属于启动**，所以它发生在**构造函数里**：`Canary(Root)` 一返回，线就
+接好了。这带来两件事：`@on_init` 能看到自己的协作者（否则它和 `__init__` 几乎没区别）；
+装配类的错误（撞名、不是 cocoa、成环、需要构造参数）在你写下 `Canary(Root)` 那一行就抛出，
+而不是等到某个 `await`。
 
 不要在 `__init__` 里读注入属性 —— 那时它们还不存在。请用 `@on_init` 或 `@on_start`。
 
@@ -63,7 +64,7 @@ class Database:
 
 ## 解析
 
-`init()` 通过递归遍历每个根的 `deps=[...]` 建图，并把每个类型实例化一次。未被 `@cocoa`
+`Canary(...)` 通过遍历每个根的 `deps=[...]` 建图，并把每个类型实例化一次。未被 `@cocoa`
 标记的类型会抛出 `TypeError`。
 
 依赖按具体类对象解析 —— 没有字符串、没有前向引用：
@@ -95,7 +96,6 @@ class Root: ...
 
 
 app = Canary(Root)
-await app.init()
 assert app[Database].config is app[Cache].config  # 同一个 Config
 ```
 
@@ -106,7 +106,7 @@ assert app[Database].config is app[Cache].config  # 同一个 Config
 
 ## 成环
 
-成环会在 `init()` 阶段被拒绝。拓扑排序检测到环时抛出 `CircularDependencyError`，并通过
+成环会在**构造期**被拒绝。拓扑排序检测到环时抛出 `CircularDependencyError`，并通过
 `.cycle` 暴露环上的类型：
 
 ```python
@@ -118,7 +118,7 @@ class A: ...
 class B: ...
 
 
-await Canary(A).init()  # CircularDependencyError: circular dependency detected: A -> B -> A
+Canary(A)  # CircularDependencyError: circular dependency detected: A -> B -> A
 ```
 
 ## 撞名
@@ -142,7 +142,6 @@ class Collide: ...
 
 ```python
 app = Canary(UserService, ReportService)
-await app.init()
 assert app[UserService].database is app[ReportService].database
 ```
 

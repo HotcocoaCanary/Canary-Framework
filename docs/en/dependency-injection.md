@@ -10,7 +10,7 @@ the dependency graph lives in the decorator.
 class UserService: ...
 ```
 
-`deps=[...]` is an ordered list of cocoa types. During `init()` the runtime injects each
+`deps=[...]` is an ordered list of cocoa types. At construction the runtime injects each
 dependency onto the instance under a name derived from the class name:
 
 | Dependency type | Injected attribute |
@@ -29,8 +29,8 @@ class UserService:
         assert self.database is not None  # already injected by @on_init
 ```
 
-**Injection is assembly, not startup**, which is why it happens in `init()` rather than
-`start()`. Two things follow: `@on_init` can see its collaborators (otherwise it would barely
+**Injection is assembly, not startup**, which is why it happens in the constructor rather than
+in `start()`. Two things follow: `@on_init` can see its collaborators (otherwise it would barely
 differ from `__init__`), and assembly errors — name clashes, "not a cocoa", cycles — surface
 during assembly instead of waiting for `start()`.
 
@@ -67,7 +67,7 @@ IO, so they belong in `@on_start`).
 
 ## Resolution
 
-`init()` builds the graph by walking `deps=[...]` from every root and instantiating each type
+`Canary(...)` builds the graph by walking `deps=[...]` from every root and instantiating each type
 once. A type that is not marked with `@cocoa` raises `TypeError`.
 
 Dependencies are resolved by class object — no strings, no forward references.
@@ -95,7 +95,6 @@ class Root: ...
 
 
 app = Canary(Root)
-await app.init()
 assert app[Database].config is app[Cache].config  # the same Config
 ```
 
@@ -106,7 +105,7 @@ at different servers" cannot be expressed — write two classes if you need two 
 
 ## Cycles
 
-Cycles are rejected during `init()`. The topological sort raises `CircularDependencyError` and
+Cycles are rejected at construction. The topological sort raises `CircularDependencyError` and
 exposes the types on the cycle through `.cycle`:
 
 ```python
@@ -118,7 +117,7 @@ class A: ...
 class B: ...
 
 
-await Canary(A).init()  # CircularDependencyError: circular dependency detected: A -> B -> A
+Canary(A)  # CircularDependencyError: circular dependency detected: A -> B -> A
 ```
 
 ## Name clashes
@@ -144,7 +143,6 @@ instantiated once:
 
 ```python
 app = Canary(UserService, ReportService)
-await app.init()
 assert app[UserService].database is app[ReportService].database
 ```
 

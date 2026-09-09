@@ -69,11 +69,11 @@ A cocoa declares its dependencies with `deps=[...]`:
 ```python
 @cocoa(deps=[Config])
 class Database:
-    # self.config is injected during init()
+    # self.config is injected at construction
     pass
 ```
 
-Injection happens in `init()`: the runtime sets `self.<snake_case name>` for each dependency
+Injection happens at construction: the runtime sets `self.<snake_case name>` for each dependency
 (`Config` → `self.config`, `UserService` → `self.user_service`). Because injection is
 **assembly**, not startup, `@on_init` already sees its collaborators.
 
@@ -132,7 +132,6 @@ from canary_framework import Canary
 
 
 app = Canary(UserService)
-await app.init()
 await app.start()
 assert app[Database].config is app[Config]
 await app.stop()

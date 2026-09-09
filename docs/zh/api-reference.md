@@ -20,8 +20,7 @@ class Config: ...
 class Database: ...
 ```
 
-单元一律由框架**无参构造**：`__init__` 不能有必填参数，否则 `init()` 抛
-`ConstructionError`。
+单元一律由框架**无参构造**：`__init__` 不能有必填参数，否则 `Canary(...)` 抛 `ConstructionError`。
 
 ## `on_init` / `on_start` / `on_stop`
 
@@ -59,23 +58,16 @@ def __getitem__(self, cls: type[T]) -> T
 
 返回图中 `cls` 的共享单例；若不存在则抛出 `KeyError`。
 
-### `init`
-
-```python
-async def init(self) -> None
-```
-
-`NEW → INITIALIZED`。建图（每个类型无参构造一次）、校验、拓扑排序、**注入依赖**、按序
-执行 `@on_init`。失败置 `FAILED` 并抛出，**不回滚**（此时还没有任何 `@on_start` 跑过）。
-
 ### `start`
 
 ```python
 async def start(self) -> None
 ```
 
-`INITIALIZED → STARTED`。按序执行 `@on_start`。任一环节失败时，已进入 `@on_start` 的单元
-（含失败的那个）按逆序回收，然后原样抛出最初的异常，回收过程中的异常作为 note 附在其上。
+`READY → STARTED`。按拓扑序先跑全部 `@on_init`，再跑全部 `@on_start`。
+
+任一环节失败时，**进入过 `@on_start`** 的单元（含失败的那个）按逆序回收，然后原样抛出最初
+的异常，回收过程中的异常作为 note 附在其上。`@on_init` 阶段失败时台账是空的，回滚是空转。
 
 ### `stop`
 
@@ -94,7 +86,7 @@ async def stop(self) -> None
 def lifespan(self, _host: object = None) -> AsyncContextManager[None]
 ```
 
-交给宿主的入口：进入时 `init()` + `start()`，退出时 `stop()`，**交出 `None`**。
+交给宿主的入口：进入时 `start()`，退出时 `stop()`，**交出 `None`**。
 
 `_host` 收下宿主传进来的自己（ASGI 的 `lifespan(app)`、MCP 的 `lifespan(server)`），又给了
 默认值，所以没有宿主时也能直接 `async with canary.lifespan():`。
@@ -110,7 +102,7 @@ server = MCPServer("demo", lifespan=canary.lifespan)
 
 ### `__aenter__` / `__aexit__`
 
-异步上下文管理器协议，封装 `init()` + `start()` / `stop()`，**交出容器自己** —— 它服务的是
+异步上下文管理器协议，封装 `start()` / `stop()`，**交出容器自己** —— 它服务的是
 你自己的代码：
 
 ```python
@@ -122,8 +114,9 @@ async with Canary(Root) as canary:
 
 ### `LifecycleState`
 
-`NEW`、`INITIALIZING`、`INITIALIZED`、`STARTING`、`STARTED`、`STOPPING`、`STOPPED`、
-`FAILED`。
+`READY`、`STARTING`、`STARTED`、`STOPPING`、`STOPPED`、`FAILED`。
+
+起点是 `READY`：装配在 `Canary(...)` 里已经做完。
 
 ### `State`
 

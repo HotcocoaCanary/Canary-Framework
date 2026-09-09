@@ -74,8 +74,7 @@ class UserService: ...
 
 async def main() -> None:
     app = Canary(UserService)
-    await app.init()   # 建图、排序、注入依赖，执行 @on_init
-    await app.start()  # 执行 @on_start
+    await app.start()  # 跑 @on_init，再跑 @on_start
     assert app[Database].config is app[Config]
     await app.stop()   # 逆序执行 @on_stop
 
@@ -114,8 +113,7 @@ class UserService:
 ## 接进一个宿主
 
 Canary 不认识任何外壳。Python 世界的宿主只有两种形状，两种都直接支持：收异步上下文管理器的
-用 `canary.lifespan`（ASGI、MCP、FastStream），收成对回调的用 `init()`/`start()`/`stop()`
-（Quart、Sanic、arq、Dramatiq）。
+用 `canary.lifespan`（ASGI、MCP、FastStream），收成对回调的用 `start()`/`stop()`（Quart、Sanic、arq、Dramatiq）。
 
 ```python
 from fastapi import Depends, FastAPI

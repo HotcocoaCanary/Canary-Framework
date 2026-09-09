@@ -8,7 +8,6 @@ from canary_framework import Canary
 
 
 app = Canary(UserService)
-await app.init()
 await app.start()
 ...
 await app.stop()
@@ -21,14 +20,17 @@ app = Canary(*roots)
 ```
 
 每个根都必须被 `@cocoa` 标记，否则 `Canary` 在构造时抛出 `TypeError`。传入多个根会把它们
-的依赖图合并为一张共享图。`Canary(...)` 本身不做任何事 —— 建图发生在 `init()`。
+的依赖图合并为一张共享图。
 
-## 生命周期方法
+**构造即装配**：`Canary(...)` 一返回，图已经建好、排好序、依赖已注入 —— `canary[SomeUnit]`
+立刻能用。装配是同步的，不需要事件循环；装配类的错误也在这一行抛出。
 
-| 方法 | 状态迁移 | 作用 |
+## 装配与生命周期
+
+| 何时 | 状态迁移 | 作用 |
 |---|---|---|
-| `await app.init()` | `NEW → INITIALIZED` | 建图、校验、拓扑排序、**注入依赖**、按序执行 `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | 按序执行 `@on_start` |
+| `Canary(*roots)` | —— `→ READY` | 建图、校验、拓扑排序、**注入依赖**。同步，不需要事件循环 |
+| `await app.start()` | `READY → STARTED` | 先全部 `@on_init`，再全部 `@on_start` |
 | `await app.stop()` | 任何终态 `→ STOPPED` | 逆序执行 `@on_stop`；幂等，正常结束与失败结束共用 |
 
 引擎是异步原生的：钩子可同步可异步，运行时按返回值判断是否 `await`。状态机与失败路径见
@@ -60,12 +62,10 @@ assert users.database is app[Database]
 ```python
 # 完整应用
 app = Canary(LibraryApp)
-await app.init()
 await app.start()
 
 # 仅数据层，独立启动
 books = Canary(BookRepository)
-await books.init()
 await books.start()
 ```
 
@@ -98,7 +98,7 @@ Canary assembled 4 unit(s)
 | 宿主收什么 | 用哪个 | 谁是这样 |
 |---|---|---|
 | 一个异步上下文管理器 `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI（Starlette / FastAPI / Litestar）、MCP、FastStream |
-| 成对的启动 / 关停回调 | `init()` / `start()` 与 `stop()` | Quart、Sanic、arq、Dramatiq |
+| 成对的启动 / 关停回调 | `start()` 与 `stop()` | Quart、Sanic、arq、Dramatiq |
 
 ```python
 app = FastAPI(lifespan=canary.lifespan)          # 就这一行

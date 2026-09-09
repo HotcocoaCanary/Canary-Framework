@@ -72,7 +72,7 @@ manager, or it takes paired startup/shutdown callbacks.
 
 ```python
 app = FastAPI(lifespan=canary.lifespan)      # shape one: ASGI, MCP, FastStream
-                                             # shape two: init()/start() and stop()
+                                             # shape two: start() and stop()
 ```
 
 That boundary is deliberate. A web layer used to live in this repository (`@web_cocoa`, route
@@ -88,7 +88,7 @@ uploads and middleware, and that half is where nearly every bug came from.
 2. **Decorators declare, they do not transform.** Units stay plain classes.
 3. **The framework only builds empty shells.** Anything needing outside input happens in the
    lifecycle — because only what happens there has a matching reclamation step.
-4. **The lifecycle is explicit.** `init()` / `start()` / `stop()` are called by you or by the
+4. **The lifecycle is explicit.** `Canary(...)` / `start()` / `stop()` are called by you or by the
    host's lifespan.
 5. **Silent failure must be made loud.** "Written, no error, no effect" is the hardest kind of
    problem to find, so assembly would rather refuse.

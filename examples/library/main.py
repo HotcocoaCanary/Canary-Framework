@@ -26,7 +26,6 @@ from examples.library.services import LibraryService
 async def main() -> None:
     print("一、组合 / 嵌套：以 LibraryApp 为根，整张图按拓扑序启动")
     lib = Canary(LibraryApp)
-    await lib.init()
     await lib.start()  # 启动：start
     print("   启动顺序:", [t.__name__ for t in lib.order])
     svc = lib[LibraryApp].library_service  # 懒注入
@@ -41,7 +40,6 @@ async def main() -> None:
 
     print("\n二、单独启动：BookRepository 自己也能飞（连它的 Database + Config 子树）")
     books = Canary(BookRepository)
-    await books.init()
     await books.start()
     print("   启动顺序:", [t.__name__ for t in books.order])
     print("   检索「活着」:", [b["title"] for b in books[BookRepository].search("活着")])

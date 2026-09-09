@@ -10,7 +10,7 @@ is one thing: **what you have in your hands at that moment.**
 | Moment | Who acts | What you have |
 |---|---|---|
 | Construction | your `__init__` | nothing (no arguments) |
-| **Assembly** | **the framework** | build → validate → sort → inject |
+| **Assembly** | **the framework**, inside `Canary(...)` | build → validate → sort → inject |
 | Init `@on_init` | you | dependencies in place, nothing running yet |
 | Start `@on_start` | you | dependencies in place; acquire resources |
 | Stop `@on_stop` | you | reclaim, in reverse |
@@ -32,26 +32,30 @@ awaits when it is awaitable, so the two mix freely.
 
 ## What each method does
 
-| Method | Transition | What it does |
+| When | Transition | What it does |
 |---|---|---|
-| `await app.init()` | `NEW → INITIALIZED` | build, validate, sort, **inject dependencies**, run `@on_init` in order |
-| `await app.start()` | `INITIALIZED → STARTED` | run `@on_start` in order |
+| `Canary(*roots)` | — `→ READY` | build, validate, sort, **inject dependencies**. Synchronous; no event loop needed |
+| `await app.start()` | `READY → STARTED` | every `@on_init`, then every `@on_start` |
 | `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse |
 
-In one line: **`init` assembles the graph so every unit is usable; `start` lets them go to work.**
+In one line: **construction assembles the graph so every unit is usable; `start` lets them go to
+work.**
 
 ## The state machine
 
 ```
-NEW ─▶ INITIALIZING ─▶ INITIALIZED ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
-        │                            │                    │
-        └───────────────▶ FAILED ◀───┴────────────────────┘
+READY ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
+            │                      │
+            └────▶ FAILED ◀────────┘
 ```
+
+It starts at `READY`, not at "nothing has happened yet": assembly is done in the constructor, so
+a freshly built runtime is **already usable** — `canary[SomeUnit]` hands back an instance with
+its dependencies injected; nothing is running yet, that is all.
 
 `app.state` returns the current `LifecycleState`. Illegal transitions raise `LifecycleError`:
 
 ```python
-await app.init()
 await app.start()
 await app.start()  # LifecycleError: illegal transition from STARTED
 ```
@@ -92,20 +96,23 @@ Both `log_start` (mixin) and `connect` (class) run, in that order.
 
 Failure paths are a deliberate part of this framework, and the three rules differ:
 
-**A failing `init()` does not unwind.** No `@on_start` has run yet, so there is nothing to
-reclaim. The state becomes `FAILED` and the exception propagates unchanged.
+**There is one rule: `stop()` reclaims whatever is in the ledger.**
 
-**A failing `start()` unwinds everything.** The invariant is *either everything started, or
-nothing did*. When any step raises, every unit that **entered** `@on_start` (including the one
-that failed) runs its `@on_stop` in reverse, and then the original exception is re-raised;
-failures during that unwind are attached to it as notes, without changing its type.
+The ledger records the units that **entered** `@on_start`. By contract that is the only place
+resources are acquired, so it is the only thing that needs reclaiming.
+
+When `start()` fails the invariant is *either everything started, or nothing did*: every unit in
+the ledger (including the one that failed) runs its `@on_stop` in reverse, and then the original
+exception is re-raised, with any unwind failures attached to it as notes.
+
+A failure during the `@on_init` pass leaves the ledger empty, so the unwind is a no-op — no
+separate rule needed for it.
 
 **`stop()` is the single reclamation path.** It serves both normal and failed termination:
 
 ```python
 app = Canary(Root)
 try:
-    await app.init()
     await app.start()
 finally:
     await app.stop()   # callable from STARTED and from FAILED; idempotent
@@ -125,7 +132,7 @@ Two host protocols, two entry points:
 | What the host takes | Use | Who does this |
 |---|---|---|
 | an async context manager, `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI (Starlette / FastAPI / Litestar), MCP, FastStream |
-| paired startup / shutdown callbacks | `init()` / `start()` and `stop()` | Quart, Sanic, arq, Dramatiq |
+| paired startup / shutdown callbacks | `start()` and `stop()` | Quart, Sanic, arq, Dramatiq |
 
 ```python
 app = FastAPI(lifespan=canary.lifespan)          # that is the whole wiring

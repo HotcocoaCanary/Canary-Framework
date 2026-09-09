@@ -79,8 +79,7 @@ class UserService: ...
 
 async def main() -> None:
     app = Canary(UserService)
-    await app.init()   # build, sort, inject, run @on_init
-    await app.start()  # run @on_start
+    await app.start()  # run @on_init, then @on_start
     assert app[Database].config is app[Config]
     await app.stop()   # run @on_stop in reverse
 
@@ -91,7 +90,7 @@ asyncio.run(main())
 ## Dependency injection
 
 A cocoa declares its dependencies with `deps=[...]` — no `__init__` wiring, no extra DSL. Each
-dependency is injected during `init()` as `self.<snake_case name>`, so `@on_init` already sees
+dependency is injected at construction as `self.<snake_case name>`, so `@on_init` already sees
 its collaborators:
 
 ```python
@@ -123,7 +122,7 @@ repeatedly — `finally: await app.stop()` is always safe.
 
 Canary knows about no shell. There are only two host shapes in Python and both are supported
 directly: hosts taking an async context manager use `canary.lifespan` (ASGI, MCP, FastStream),
-hosts taking paired callbacks use `init()`/`start()`/`stop()` (Quart, Sanic, arq, Dramatiq).
+hosts taking paired callbacks use `start()`/`stop()` (Quart, Sanic, arq, Dramatiq).
 
 ```python
 from fastapi import Depends, FastAPI

@@ -23,9 +23,9 @@
 
 ## 亮点
 
-- **声明式依赖注入** —— 无需 `__init__` 装配；依赖在 `init()` 阶段注入为
+- **声明式依赖注入** —— 无需 `__init__` 装配；依赖在**构造期**注入为
   `self.<snake_case 名>`，所以 `@on_init` 已经能看到自己的协作者。
-- **显式、异步原生生命周期** —— `init()` → `start()` → `stop()`；同步/异步钩子皆可。
+- **显式、异步原生生命周期** —— 装配在构造期，然后 `start()` → `stop()`；同步/异步钩子皆可。
   接进任何宿主只要一行 `async with canary:`。
 - **失败路径是设计的一部分** —— `start()` 失败会逆序回收已启动的单元；`stop()` 是唯一的
   回收路径，正常结束与失败结束都走它，且可重复调用。
@@ -66,8 +66,7 @@ class UserService: ...
 
 async def main() -> None:
     app = Canary(UserService)
-    await app.init()   # 建图、排序、注入依赖，执行 @on_init
-    await app.start()  # 执行 @on_start
+    await app.start()  # 跑 @on_init，再跑 @on_start
     assert app[Database].config is app[Config]
     await app.stop()   # 逆序执行 @on_stop
 

@@ -68,11 +68,11 @@ cocoa 通过 `deps=[...]` 声明依赖：
 ```python
 @cocoa(deps=[Config])
 class Database:
-    # self.config 在 init() 阶段注入
+    # self.config 在构造期注入
     pass
 ```
 
-注入发生在 `init()`：运行时为每个依赖设置 `self.<snake_case 名>`（`Config` → `self.config`，
+注入发生在构造期：运行时为每个依赖设置 `self.<snake_case 名>`（`Config` → `self.config`，
 `UserService` → `self.user_service`）。因为注入属于**装配**而不是启动，`@on_init` 已经能
 看到自己的协作者。
 
@@ -128,7 +128,6 @@ from canary_framework import Canary
 
 
 app = Canary(UserService)
-await app.init()
 await app.start()
 assert app[Database].config is app[Config]
 await app.stop()

@@ -50,6 +50,42 @@ assembly or lifecycle.
 
 ### Added
 
+- **BREAKING: assembly moved into the constructor; `init()` is gone.** `Canary(*roots)` now
+  builds the graph, sorts it and injects dependencies — synchronously, with no event loop, in
+  0.027 ms for a small graph. When it returns, `canary[SomeUnit]` works.
+
+  The trigger was writing an experiment "the way a user would" and forgetting to call `init()`.
+  Getting it wrong is a design signal, not a documentation one. The problem was not that two
+  steps are too many — it was that the seam sat in the wrong place. `init()` did five things of
+  two different natures: build/sort/inject (synchronous, deterministic, runs none of your runtime
+  code) and run `@on_init` (async, your code, side effects). The knife went between `@on_init`
+  and `@on_start` — in the middle of one kind of work, past where the nature actually changes.
+
+  It also had the runtime breaking the rule the framework imposes on every unit: *a unit must be
+  usable once constructed*. `Canary(Root)` used to return an object whose `canary[X]` raised
+  `KeyError`. That was exactly the "exists but unusable" window we forbid elsewhere.
+
+  Nothing is hidden by this: `@on_init` and `@on_start` remain two visible hook phases with
+  distinct meanings — they are *unit* declarations, not runtime methods. What disappeared is a
+  misplaced method seam.
+
+  Consequences, all simplifications:
+  - **The failure rules collapse from two to one.** Instead of "`init()` does not unwind /
+    `start()` unwinds everything", there is only *`stop()` reclaims whatever is in the ledger*.
+    The ledger records units that entered `@on_start`; a failure in the `@on_init` pass leaves it
+    empty, so the unwind is a no-op with no special rule to describe it.
+  - **The state machine went from 8 states to 6** — `INITIALIZING` / `INITIALIZED` describe work
+    that no longer happens during the object's lifetime. `NEW` is renamed **`READY`**: calling a
+    freshly constructed, fully wired runtime "new" would hide what we just made true.
+  - **Assembly errors are raised where you wrote `Canary(Root)`**, not at some later `await`.
+  - The event-loop probe moved into `start()` (it needs a running loop), which also retires the
+    awkward "init does five things and the first one is the odd one out" note in the docs.
+
+- **`runtime` split into four modules, each doing one thing**: `canary.py` (the engine),
+  `graph.py` (pure algorithms), `probe.py` (the framework's own two environment switches — they
+  change *process*-level state, not the graph) and `report.py` (the assembly summary — diagnostics,
+  not engine).
+
 - **`Canary.lifespan`** — the host-facing entry point. Python has exactly two host shapes: take
   an async context manager (`Callable[[Host], AsyncContextManager]` — ASGI's `lifespan=` in
   Starlette / FastAPI / Litestar, MCP's `MCPServer(lifespan=)`, FastStream's `lifespan=`), or

@@ -8,7 +8,6 @@ from canary_framework import Canary
 
 
 app = Canary(UserService)
-await app.init()
 await app.start()
 ...
 await app.stop()
@@ -22,14 +21,14 @@ app = Canary(*roots)
 
 Every root must be marked with `@cocoa`, otherwise `Canary` raises `TypeError` at construction.
 Passing several roots merges their graphs into one. `Canary(...)` itself does nothing — the
-graph is built in `init()`.
+graph is built in the constructor.
 
-## Lifecycle methods
+## Assembly and lifecycle
 
-| Method | Transition | What it does |
+| When | Transition | What it does |
 |---|---|---|
-| `await app.init()` | `NEW → INITIALIZED` | build, validate, sort, **inject dependencies**, run `@on_init` in order |
-| `await app.start()` | `INITIALIZED → STARTED` | run `@on_start` in order |
+| `Canary(*roots)` | — `→ READY` | build, validate, sort, **inject dependencies**. Synchronous; no event loop needed |
+| `await app.start()` | `READY → STARTED` | every `@on_init`, then every `@on_start` |
 | `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse; idempotent, shared by normal and failed termination |
 
 The engine is async-native: hooks may be sync or async and the runtime awaits only when needed.
@@ -62,12 +61,10 @@ any subgraph can be started on its own:
 ```python
 # the whole application
 app = Canary(LibraryApp)
-await app.init()
 await app.start()
 
 # just the data layer
 books = Canary(BookRepository)
-await books.init()
 await books.start()
 ```
 
@@ -101,7 +98,7 @@ Two host protocols, two entry points:
 | What the host takes | Use | Who does this |
 |---|---|---|
 | an async context manager, `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI (Starlette / FastAPI / Litestar), MCP, FastStream |
-| paired startup / shutdown callbacks | `init()` / `start()` and `stop()` | Quart, Sanic, arq, Dramatiq |
+| paired startup / shutdown callbacks | `start()` and `stop()` | Quart, Sanic, arq, Dramatiq |
 
 ```python
 app = FastAPI(lifespan=canary.lifespan)          # that is the whole wiring

@@ -21,7 +21,7 @@ class Database: ...
 ```
 
 Units are always constructed by the framework **with no arguments**: `__init__` may not have
-required parameters, or `init()` raises `ConstructionError`.
+required parameters, or `Canary(...)` raises `ConstructionError`.
 
 ## `on_init` / `on_start` / `on_stop`
 
@@ -60,25 +60,17 @@ def __getitem__(self, cls: type[T]) -> T
 
 Returns the shared singleton for `cls`, or raises `KeyError`.
 
-### `init`
-
-```python
-async def init(self) -> None
-```
-
-`NEW → INITIALIZED`. Builds the graph (each type constructed once, with no arguments), validates,
-sorts, **injects dependencies** and runs `@on_init` in order. On failure the state becomes
-`FAILED` and the exception propagates — **without unwinding**, since no `@on_start` has run yet.
-
 ### `start`
 
 ```python
 async def start(self) -> None
 ```
 
-`INITIALIZED → STARTED`. Runs `@on_start` in order. If any step fails, every unit that entered
-`@on_start` (including the one that failed) is reclaimed in reverse, and the original exception
-is re-raised with any unwind failures attached as notes.
+`READY → STARTED`. Runs every `@on_init` in topological order, then every `@on_start`.
+
+If any step fails, every unit that **entered** `@on_start` (including the one that failed) is
+reclaimed in reverse, and the original exception is re-raised with any unwind failures attached
+as notes. A failure during the `@on_init` pass leaves the ledger empty, so the unwind is a no-op.
 
 ### `stop`
 
@@ -97,7 +89,7 @@ does not abort the rest — the errors are collected and raised together as an `
 def lifespan(self, _host: object = None) -> AsyncContextManager[None]
 ```
 
-The host-facing entry point: `init()` + `start()` on enter, `stop()` on exit, **yielding
+The host-facing entry point: `start()` on enter, `stop()` on exit, **yielding
 `None`**.
 
 `_host` accepts the host a framework passes in (ASGI's `lifespan(app)`, MCP's
@@ -115,7 +107,7 @@ merge into `scope["state"]`.
 
 ### `__aenter__` / `__aexit__`
 
-The async context manager protocol, wrapping `init()` + `start()` / `stop()`, **handing back the
+The async context manager protocol, wrapping `start()` / `stop()`, **handing back the
 container** — it serves your own code:
 
 ```python
@@ -127,7 +119,9 @@ async with Canary(Root) as canary:
 
 ### `LifecycleState`
 
-`NEW`, `INITIALIZING`, `INITIALIZED`, `STARTING`, `STARTED`, `STOPPING`, `STOPPED`, `FAILED`.
+`READY`, `STARTING`, `STARTED`, `STOPPING`, `STOPPED`, `FAILED`.
+
+It starts at `READY`: assembly is already done inside `Canary(...)`.
 
 ### `State`
 

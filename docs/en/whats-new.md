@@ -60,6 +60,18 @@ or lifecycle.
 
 ## Added
 
+- **Assembly moved into the constructor; `init()` is gone.** When `Canary(Root)` returns the
+  graph is built, sorted and injected — `canary[SomeUnit]` works immediately. This is the
+  framework keeping its own rule ("a unit must be usable once constructed"); the runtime had no
+  reason to be the exception.
+
+  The seam now sits where the nature of the work changes: assembly is synchronous, deterministic
+  and runs none of your runtime code; `start()` is the running part (every `@on_init`, then every
+  `@on_start`). Assembly errors are raised on the line where you wrote `Canary(Root)`.
+
+  The failure rules collapse from two into one: **`stop()` reclaims whatever is in the ledger.**
+  The state machine went from 8 states to 6, and its start renamed `NEW` → `READY`.
+
 - **`Canary.lifespan`** — the host-facing entry point; one line plugs it into any mainstream
   framework:
 
@@ -106,7 +118,7 @@ or lifecycle.
   not something Python's recursion limit should bound. The graph is now built with an explicit
   stack; 50 000 links work fine.
 - **The slow-callback probe could not see the startup phase.** asyncio reads the debug flag
-  before a callback runs, and the probe was switched on inside `init()`.
+  before a callback runs, and the probe was switched on halfway through one.
 
 ## Performance
 
