@@ -1,21 +1,17 @@
-"""Canary — a minimal dependency-injection and lifecycle framework.
+"""Canary — a minimal dependency-injection and lifecycle runtime.
 
-``@cocoa`` marks a class as the minimum unit; a :class:`Canary` orchestrates a
-group of them.  It resolves the dependency graph (units nest via ``deps=[...]``),
-topologically sorts it to get the startup order, and drives the lifecycle::
+``@cocoa`` 标记最小单元，:class:`Canary` 编排一组单元：解析依赖图、按拓扑序排序、注入
+依赖，并驱动生命周期::
 
     @cocoa(deps=[Database])
     class UserService: ...
 
-    app = Canary(UserService)                 # compose / nest
-    await app.init()                          # build the graph
-    await app.start()                         # inject deps + run @on_start
-    app[Database]                             # shared singleton
-    app.order                                 # topological startup order
-    await app.stop()
-
-中文版：``@cocoa`` 标记最小单元，:class:`Canary` 编排一组单元——解析依赖图、
-按拓扑序得到启动顺序，并驱动生命周期。
+    canary = Canary(UserService)   # 装配：建图、排序、注入依赖
+    await canary.init()            # 全部 @on_init
+    await canary.start()           # 全部 @on_start
+    canary[Database]               # 共享单例
+    canary.order                   # 拓扑启动顺序
+    await canary.stop()            # 逆序全部 @on_stop
 """
 
 from __future__ import annotations

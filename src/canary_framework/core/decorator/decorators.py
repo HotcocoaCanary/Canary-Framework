@@ -1,7 +1,7 @@
 """Marker decorators — declare a unit and its lifecycle hooks.
 
-标记装饰器：声明最小单元与生命周期钩子。只 ``setattr`` 打标记、不改造类，
-因此单元仍是普通类，可以廉价地继承 / 混入 / 嵌套。
+标记装饰器：声明最小单元与生命周期钩子。只 ``setattr`` 打标记、不改造类，单元因此仍是
+普通类，可以正常继承、混入、嵌套。
 """
 
 from __future__ import annotations
@@ -31,7 +31,8 @@ def cocoa[T](
 ) -> type[T] | Callable[[type[T]], type[T]]:
     """Mark a class as a cocoa (the minimum unit), optionally with dependencies.
 
-    把类标记为最小单元；``deps`` 里的依赖会在 ``init`` 阶段注入为 snake_case 属性。用法::
+    把类标记为最小单元；``deps`` 里的依赖会在装配期（``Canary(...)``）注入为 snake_case
+    属性。用法::
 
         @cocoa
         class Config: ...
@@ -39,8 +40,7 @@ def cocoa[T](
         @cocoa(deps=[Config])          # 注入为 self.config
         class Database: ...
     """
-    # 存成元组：依赖清单在类定义之后就不该再变，而 deps_of 会被建图、拓扑排序、
-    # 注入、摘要反复调用——不可变就能直接返回同一个对象，不必每次拷一份。
+    # 存成元组：不可变，因此 deps_of 可以直接返回它而无需每次复制。
     _deps = tuple(deps or ())
 
     def mark(c: type[T]) -> type[T]:
@@ -51,27 +51,28 @@ def cocoa[T](
 
 
 def on_init[T: Callable[..., object]](fn: T) -> T:
-    """Register *fn* as an ``init`` hook (runs in topological order).
+    """Register *fn* as an ``@on_init`` hook.
 
-    注册初始化钩子，按拓扑序执行。
+    注册初始化钩子，由 ``Canary.init()`` 按拓扑序执行；此时依赖已注入，尚无单元开始运行。
     """
     setattr(fn, ON_INIT, True)
     return fn
 
 
 def on_start[T: Callable[..., object]](fn: T) -> T:
-    """Register *fn* as a ``start`` hook (topological order, deps already injected).
+    """Register *fn* as an ``@on_start`` hook.
 
-    注册启动钩子，按拓扑序执行；此时依赖已注入完成。
+    注册启动钩子，由 ``Canary.start()`` 按拓扑序执行；获取资源、起后台任务归这里，
+    因为只有在此获取的东西才会被 ``@on_stop`` 回收。
     """
     setattr(fn, ON_START, True)
     return fn
 
 
 def on_stop[T: Callable[..., object]](fn: T) -> T:
-    """Register *fn* as a ``stop`` hook (runs in reverse topological order).
+    """Register *fn* as an ``@on_stop`` hook.
 
-    注册停止钩子，按逆拓扑序执行。
+    注册停止钩子，由 ``Canary.stop()`` 按逆拓扑序执行。
     """
     setattr(fn, ON_STOP, True)
     return fn

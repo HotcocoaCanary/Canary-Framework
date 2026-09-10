@@ -1,10 +1,7 @@
-"""The assembly summary — what the runtime built, how long it took, and what would make it faster.
+"""The assembly summary — what the runtime built, how long it took, and what would speed it up.
 
-装配摘要：框架掌握着全部事实（启动顺序、每个单元的依赖、每个单元花了多久），却一直只在
-DEBUG 级别打印前两样。这里把第三样也用上——顺手告诉你**开启并发能省多少**。
-
-它是**诊断**，不是引擎——所以不在 ``canary.py`` 里。纯函数，接收已经装配好的图和一份耗时
-记录，返回一段文本；不碰状态，也不做任何决定。
+装配摘要：渲染启动顺序、逐单元依赖与耗时，并在值得时给出并发建议。纯函数，接收已装配好的
+图与一份耗时记录，返回一段文本，不碰任何状态。
 """
 
 from __future__ import annotations
@@ -49,11 +46,10 @@ def assembly_summary(
 
 
 def _concurrency_hint(order: list[type], timings: dict[type, float]) -> list[str]:
-    """Say what `start_concurrency` would buy, but only when it is worth saying.
+    """Say what ``start_concurrency`` would buy, but only when it is worth saying.
 
-    并发启动的下限是这张图的**关键路径**——按耗时算最长的那条依赖链。顺序启动付的是所有
-    单元的总和，所以能省的就是两者之差；而同时最多要跑几个，等于依赖链上任何一层的最大宽度，
-    这里用一个安全的上界：关键路径以外的单元数。
+    并发启动的下限是关键路径（按耗时算最长的一条依赖链）；顺序启动付的是所有单元之和，
+    两者之差即可省下的时间。建议的并发数取最宽一层的单元数。
     """
     total = sum(timings.values())
     if total < _WORTH_SUGGESTING_MS:

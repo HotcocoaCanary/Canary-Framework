@@ -1,22 +1,22 @@
 """Framework exceptions — all inherit :class:`CanaryError`.
 
-框架异常：全部继承 :class:`CanaryError`，便于一次 ``except`` 兜底。将来的扩展也应
-继承它，这样使用者 ``except CanaryError`` 就能统一捕获。
+框架异常：全部继承 :class:`CanaryError`，可用一次 ``except CanaryError`` 统一捕获。
 """
 
 
 class CanaryError(Exception):
-    """Base class for every framework error — and the extension point.
+    """Base class for every framework error.
 
-    框架所有错误的根基类。将来的扩展先定义自己的子基类，再派生具体错误，即可与核心
-    错误统一捕获。
+    框架所有错误的根基类。扩展可先定义自己的子基类，再派生具体错误。
     """
 
 
 class CircularDependencyError(CanaryError):
     """Raised when the dependency graph contains a cycle.
 
-    依赖图成环时抛出；``cycle`` 记录环上各类型的名字。
+    依赖图成环时抛出。
+
+    :ivar cycle: 环上各类型的名字。
     """
 
     def __init__(self, cycle: list[str]) -> None:
@@ -27,16 +27,19 @@ class CircularDependencyError(CanaryError):
 class LifecycleError(CanaryError):
     """Raised on an illegal lifecycle transition.
 
-    生命周期非法跳转时抛出（例如未初始化就 ``stop``）。
+    生命周期非法跳转时抛出，例如未 ``init()`` 就 ``start()``、或重复 ``start()``。
     """
 
 
 class InjectionError(CanaryError):
-    """Raised when two things claim the same attribute name on one unit.
+    """Raised when two dependencies claim the same attribute name on one unit.
 
-    两个来源抢同一个属性名时抛出（例如 ``KBFileRepository`` 与 ``KbFileRepository``
-    的 snake_case 同名，或依赖名撞上配置/日志的注解名）。旧版是"后写的赢"，
-    静默覆盖掉一个依赖——这类错误必须响。
+    两个依赖的 snake_case 属性名相同时抛出（如 ``KBFileRepository`` 与
+    ``KbFileRepository`` 同为 ``kb_file_repository``）。改名其中一个类即可。
+
+    :ivar unit: 发生冲突的单元名。
+    :ivar attribute: 被争抢的属性名。
+    :ivar claimants: 争抢该属性的依赖类名。
     """
 
     def __init__(self, unit: str, attribute: str, claimants: list[str]) -> None:
@@ -49,19 +52,13 @@ class InjectionError(CanaryError):
 
 
 class ConstructionError(CanaryError):
-    """Raised when the runtime cannot construct a unit because it needs arguments.
+    """Raised when a unit cannot be constructed because it needs arguments.
 
-    单元一律由框架**无参构造**，所以带必填参数的类不能进图。
+    单元一律由框架无参构造，带必填参数的类因此不能进图。出路是把构造参数变成依赖：
+    在 ``@cocoa(deps=[...])`` 里声明协作者，在 ``@on_init`` 或 ``@on_start`` 里从它们
+    读取所需的值。
 
-    这条约束是有意的，不是限制。构造函数没有对手——``@on_start`` 有 ``@on_stop`` 配对，
-    而"构造"没有"析构"：一个在 ``__init__`` 里开了连接的单元，如果后面某个单元构造失败，
-    没有任何机制去关它。把需要外界输入的事情推迟到生命周期钩子里，等于让每一件事都落进
-    一个有台账、能逆序回收的阶段。``__init__`` 也不能是 ``async``，本来就装不下需要 IO
-    的初始化。
-
-    所以出路只有一条：**把构造参数变成依赖**。值从协作者那里读（``self.config.url``），
-    读取动作放在 ``@on_init``（只要依赖，不碰外部资源）或 ``@on_start``（要连接、要起
-    后台任务）里。
+    :ivar unit: 无法构造的单元名。
     """
 
     def __init__(self, unit: str, detail: str) -> None:

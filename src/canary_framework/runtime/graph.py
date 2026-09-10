@@ -1,7 +1,6 @@
 """Pure graph algorithms — building and topologically sorting the unit graph.
 
-纯图算法：建图与拓扑排序。把“扫描”与“装载”分离（借鉴 NestJS 的 scanner/loader），
-算法无副作用、可独立测试，得到的拓扑序就是框架的启动顺序。
+纯图算法：建图与拓扑排序。无副作用、可独立测试，得到的拓扑序就是框架的启动顺序。
 """
 
 from __future__ import annotations
@@ -18,14 +17,11 @@ def build_graph(roots: list[type]) -> dict[type, object]:
 
     递归实例化每个根及其传递依赖；每个类型只实例化一次，那个实例就是整张图共享的单例。
 
-    图上的实例**全部由框架构造**，没有第二条来源。所以"这个单元是怎么来的"永远只有一个
-    答案，也就不存在"有些单元框架能造、有些得你造好交进来"的分裂。需要外界输入的事情
-    一律推迟到生命周期钩子里做（见 :class:`~canary_framework.common.error.ConstructionError`）。
+    图上的实例全部由框架无参构造；需要外界输入的事情推迟到生命周期钩子里做
+    （见 :class:`~canary_framework.common.error.ConstructionError`）。
 
-    遍历用显式栈而不是递归：依赖链的深度是**使用者的数据**，不该受 Python 递归上限的约束。
-    从前一条近千节的依赖链会撞出 ``RecursionError``——那既不是框架的错误体系里的东西，也
-    没告诉任何人发生了什么。访问顺序与递归版完全一致（先序深度优先），因为拓扑排序会以
-    这个顺序为起点，无关节点之间的先后要保持稳定。
+    遍历用显式栈而非递归，依赖链的深度因此不受 Python 递归上限约束。访问顺序是先序深度
+    优先，与拓扑排序的输入顺序一致，保证无关节点之间的先后稳定。
     """
     graph: dict[type, object] = {}
     stack: list[type] = list(reversed(roots))
@@ -43,28 +39,25 @@ def build_graph(roots: list[type]) -> dict[type, object]:
 def _construct(t: type) -> object:
     """Instantiate *t* with no arguments, turning an arity mismatch into a real error.
 
-    先构造，出了 ``TypeError`` 再回头看签名——顺序很重要。反过来（每次先取签名再调用）会
-    把一次 ``inspect.signature`` 摊到**每一个**单元上，而它占了建图九成的时间，却只为了
-    在失败时说清楚话。成功路径上不该为失败路径付钱。
+    先调用，出了 ``TypeError`` 再回头看签名——``inspect.signature`` 只在失败路径上跑。
 
-    回头看签名是为了分辨两件事：签名压根对不上（那是框架的硬约束，报
-    :class:`ConstructionError` 并说清该往哪儿改），还是构造器自己的代码抛了 ``TypeError``
-    （那是使用者的错误，原样传播，不该被框架的错误盖住）。
+    看签名是为了分辨两种 ``TypeError``：签名无法无参调用（框架约束，报
+    :class:`ConstructionError`），还是构造器自身的代码抛出（使用者的错误，原样传播）。
     """
     try:
         return t()
     except TypeError as exc:
         detail = _arity_problem(t)
         if detail is None:
-            raise  # 签名对得上，是构造器自己抛的——不是我们的事
+            raise  # 签名可以无参调用，异常来自构造器自身
         raise ConstructionError(t.__name__, detail) from exc
 
 
 def _arity_problem(t: type) -> str | None:
     """Explain why *t* cannot be called with no arguments, or ``None`` if it can.
 
-    返回"为什么无参调不通"的说明；调得通（说明 ``TypeError`` 来自构造器内部）或者拿不到
-    签名（内建 / C 扩展类型）时返回 ``None``。
+    返回"为什么无参调不通"的说明。调得通（``TypeError`` 来自构造器内部）或取不到签名
+    （内建 / C 扩展类型）时返回 ``None``。
     """
     try:
         signature = inspect.signature(t)

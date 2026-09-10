@@ -1,6 +1,4 @@
-"""The stable core — declaration primitives (decorators, naming, markers).
+"""The core — declaration primitives: decorators, introspection, naming.
 
-稳定核心：声明层原语（装饰器 / 命名 / 标记）。这里不做转发导出——包内一律走全路径
-``canary_framework.core.decorator.decorators`` 这样的模块名，对外的公开 API 只有一处
-出口 :mod:`canary_framework`。少一层转发就少一处会漂的清单。
+声明层原语：``@cocoa`` 与三个生命周期钩子装饰器、读回标记的自省工具、注入属性名的命名规则。
 """
