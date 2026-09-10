@@ -80,8 +80,7 @@ everything is up" position. Declare a single composition root if you need one.
 ## The assembly summary
 
 Set `CANARY_LOG_LEVEL=DEBUG` and the end of startup prints a summary on the `canary.runtime`
-logger — start order and each unit's dependencies. No need to read the framework's source to
-find out why a unit started first:
+logger — start order plus each unit's dependencies and timing:
 
 ```text
 Canary assembled 4 unit(s)

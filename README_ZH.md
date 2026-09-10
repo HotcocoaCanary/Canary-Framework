@@ -34,15 +34,14 @@ pip install canary-framework
   `deps=[...]` 声明；`@on_init` / `@on_start` / `@on_stop` 声明可选的生命周期行为。
 - **Canary** 是编排器。`Canary(*roots)` 解析依赖图、拓扑排序、驱动完整生命周期。
 
-它**不是 web 框架**，是一个运行时容器；你的对象最后被什么外壳驱动（HTTP、CLI、定时任务），
-那是外壳的事。
+它是一个运行时容器；你的对象由什么外壳驱动（HTTP、CLI、定时任务）由你决定。
 
 一条贯穿全框架的规则：
 
 > **框架只造空壳，一切需要外界输入的事都在生命周期里做。**
 
-单元一律由框架**无参构造**，所以 `__init__` 不能有必填参数 —— 需要什么就声明成依赖，值在
-生命周期钩子里从协作者那里读。这样每一件需要输入的事都落在一个有台账、能逆序回收的阶段里。
+单元一律由框架**无参构造**，所以 `__init__` 不能有必填参数：需要什么就声明成依赖，值在
+生命周期钩子里从协作者那里读。
 
 ## 快速开始
 
@@ -108,13 +107,16 @@ class UserService:
 | 启动 | `@on_start` | 可以获取资源、起后台任务 |
 | 停止 | `@on_stop` | 逆序回收 |
 
-失败路径是设计的一部分：`start()` 失败会逆序回收已启动的单元；`stop()` 是**唯一**的回收
-路径，正常结束与失败结束都走它，且可重复调用 —— `finally: await app.stop()` 永远安全。
+失败路径：`start()` 失败会逆序回收已启动的单元；`stop()` 是唯一的回收路径，正常结束与
+失败结束都走它，且可重复调用 —— `finally: await app.stop()` 永远安全。
+
+`Canary(Root, start_concurrency=N)` 让互不依赖的单元同时启动，同时最多 N 个；默认严格顺序。
+详见 [生命周期](docs/zh/lifecycle.md)。
 
 ## 接进一个宿主
 
-Canary 不认识任何外壳。Python 世界的宿主只有两种形状，两种都直接支持：收异步上下文管理器的
-用 `canary.lifespan`（ASGI、MCP、FastStream），收成对回调的用 `start()`/`stop()`（Quart、Sanic、arq、Dramatiq）。
+宿主有两种形状，两种都直接支持：收异步上下文管理器的用 `canary.lifespan`（ASGI、MCP、
+FastStream），收成对启停回调的用 `init()`/`start()`/`stop()`（Quart、Sanic、arq、Dramatiq）。
 
 ```python
 from fastapi import Depends, FastAPI
@@ -134,8 +136,8 @@ async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserS
     return users.get(user_id)
 ```
 
-HTTP、WebSocket、静态文件、中间件、认证全都归宿主 —— 那些框架已经做得很好了。Canary 只保证
-你的对象被正确装配、按序启动、按逆序回收。
+HTTP、WebSocket、静态文件、中间件、认证全部归宿主。Canary 只保证你的对象被正确装配、
+按序启动、按逆序回收。
 
 ## 示例
 

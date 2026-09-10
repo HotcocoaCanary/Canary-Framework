@@ -52,11 +52,9 @@ with no arguments), runs Kahn's topological sort, injects dependencies and runs 
 order; `start()` runs `@on_start`; `stop()` runs `@on_stop` in reverse. The order is
 deterministic and cycles surface as `CircularDependencyError`.
 
-The graph is built with an explicit stack rather than recursion — how deep a dependency chain
-goes is the user's data and should not be bounded by Python's recursion limit. Construction calls
-first and only inspects the signature after a `TypeError`: taking a signature exists to explain a
-failure, and should not be charged to every unit that constructs fine (it used to be 90% of graph
-building).
+The graph is built with an explicit stack rather than recursion, so the depth of a dependency
+chain is not bounded by Python's recursion limit. Construction calls first and only inspects the
+signature after a `TypeError`, keeping `inspect.signature` on the failure path only.
 
 Every instance on the graph is built **by the framework** — there is no second source. So "where
 did this unit come from" always has one answer, and construction failures and lifecycle failures
@@ -75,24 +73,18 @@ app = FastAPI(lifespan=canary.lifespan)      # shape one: ASGI, MCP, FastStream
                                              # shape two: start() and stop()
 ```
 
-That boundary is deliberate. A web layer used to live in this repository (`@web_cocoa`, route
-decorators, parameter binding, OpenAPI — about 1300 lines), but it did the same job as FastAPI
-and Starlette, and that is not where this framework differs — the difference is in dependency
-assembly and lifecycle. Rebuilding it only forces a permanent chase after WebSocket, file
-uploads and middleware, and that half is where nearly every bug came from.
-
-## Design principles
+## Invariants
 
 1. **A cocoa is the minimum runnable unit.** Dependencies, state and lifecycle are marked on one
    class.
-2. **Decorators declare, they do not transform.** Units stay plain classes.
-3. **The framework only builds empty shells.** Anything needing outside input happens in the
-   lifecycle — because only what happens there has a matching reclamation step.
-4. **The lifecycle is explicit.** `Canary(...)` / `start()` / `stop()` are called by you or by the
-   host's lifespan.
-5. **Silent failure must be made loud.** "Written, no error, no effect" is the hardest kind of
-   problem to find, so assembly would rather refuse.
-6. **A capability belongs in the framework only when users cannot build it themselves.** Something
-   you can write in ten lines does not deserve a public entry point.
-7. **Do not rebuild what others already did well.** Stand on the existing Python ecosystem
-   instead of competing with it.
+2. **Decorators declare, they do not transform.** Units stay plain classes and can be subclassed,
+   mixed in and nested.
+3. **Every instance is constructed by the framework with no arguments.** Anything needing outside
+   input happens in a lifecycle hook, because only what happens there has a matching reclamation
+   step.
+4. **Assembly is synchronous and side-effect free.** Building, sorting and injecting run no hooks
+   and need no event loop.
+5. **Anything assembly can detect, assembly raises** — name clashes, cycles, units needing
+   constructor arguments, dependencies that are not cocoas.
+6. **The runtime knows about no shell.** There are two ways in: `lifespan` and the explicit
+   methods.

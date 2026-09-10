@@ -2,158 +2,94 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
-## [0.9.3] — 2026-09-09
+## [0.9.3] — 2026-09-10
 
-A convergence release: it pulls the framework back to the one thing it is actually different at —
-**dependency assembly and lifecycle** — and completes the failure paths. Several breaking
-changes, the largest of which is that the entire web extension is gone.
+Several breaking changes; 0.9.x is still taking shape.
 
-一次收敛：把框架收回到它真正差异化的那一件事上——依赖装配与生命周期——并补完失败路径。
-含多处破坏性变更，最大的一条是删掉了整个 web 扩展。
-
-**What it is now**: Canary is a runtime container, not a web framework. It assembles objects by
-their dependencies, starts them in order and reclaims them in reverse; what shell drives them
-(HTTP, a CLI, a scheduler, a message consumer) is that shell's business. Plugging it into a host
-is one line — `async with canary:`.
-
-### Removed
-
-- **`canary_framework.web` — the entire extension** (`@web_cocoa`, route decorators, parameter
-  binding, OpenAPI generation; ~1300 lines), together with **`Canary`'s ASGI surface**
-  (`__call__`, the lifespan protocol, cold start with its concurrency lock, route collection;
-  ~100 lines). `Canary` is no longer an ASGI app.
-
-  Not because it was bad — its request path measured 2.4–3.3× faster than FastAPI at the ASGI
-  level. Because it was not our job: it did what FastAPI and Starlette already do, it forced a
-  permanent chase after WebSocket / uploads / middleware / auth, it was more than half the code,
-  and it produced nearly all of the bugs.
-
-  And the one thing it was protecting does not need it. "Routes are methods on a
-  dependency-injected unit" works by handing the bound method to FastAPI directly — a bound
-  method's signature has no `self`, so FastAPI binds, validates and documents it as usual, while
-  `self.repo` is already there because Canary assembled the instance:
-
-      unit = canary[LibraryApi]                    # a plain @cocoa, no web markers
-      app.get("/books/{book_id}")(unit.get_book)   # FastAPI takes it as-is
-
-- `Canary(provide=...)` and `ProvisionError` — they contradicted "units are always constructed
-  with no arguments". Substituting a dependency in a test is plain attribute assignment
-  (`svc.database = FakeDb()`); injection never did more than that.
-- `DeclarationError`, the ASGI type aliases in `common.type`, and the `ROUTE_ATTR` / `WEB_ATTR`
-  markers — every one of them existed only for the web layer.
-- The `[web]` and `[test]` extras. The package now has no optional runtime dependencies at all.
-- The re-export layers in seven `__init__.py` files that had no callers (and had already drifted:
-  `common/__init__` forwarded three of six errors).
-
-The framework went from ~2300 lines to **842**, and every remaining line does dependency
-assembly or lifecycle.
-
-### Added
-
-- **BREAKING: assembly moved into the constructor; the four actions map one-to-one.**
-  `Canary(*roots)` now builds the graph, sorts it and injects dependencies — synchronously, with
-  no event loop, running no hooks. When it returns, `canary[SomeUnit]` works, and every assembly
-  error (`ConstructionError`, `InjectionError`, `CircularDependencyError`, `TypeError` for a
-  non-cocoa) is raised on that line rather than at some later `await`.
-
-  It was the runtime breaking the rule the framework imposes on every unit — *a unit must be
-  usable once constructed* — `Canary(Root)` used to return an object whose `canary[X]` raised
-  `KeyError`.
-
-  After construction, each action runs exactly one hook phase and **no method does two things**:
-
-      await canary.init()     every @on_init   — settle in
-      await canary.start()    every @on_start  — go to work, ledgered on entry
-      await canary.stop()     every @on_stop   — reclaim, in reverse
-
-  The barrier between `@on_init` and `@on_start` (the whole graph settles before any unit goes to
-  work; topological order alone cannot express that for siblings) is the boundary between the two
-  methods — nothing hidden inside one call. Skipping `init()` is loud:
-  `LifecycleError: call init() before start()`. `async with canary` and `canary.lifespan` remain
-  the convenience path that does all of it.
-
-  The starting state is renamed `NEW` → **`READY`**: a freshly constructed, fully wired runtime
-  is not "new". The event-loop probe now switches on inside `init()`, so it covers both phases.
-
-- **Concurrent startup: `Canary(*roots, start_concurrency=N)`.** Independent units start
-  together, at most N at once; scheduling is dependency-driven (each unit waits for its own
-  dependencies, not for a topological layer), so it runs at the graph's critical path — 7.1x on
-  50 independent IO units, 1.7x on a typical web shape, 1.0x on a chain. **Off by default**: it
-  opens N connections at once (measured: 20 units against a backend accepting 8 → 12 rejections,
-  failed startup) and breaks sibling declaration order. The bound is not optional. Failure
-  semantics match sequential startup — siblings are cancelled and still reclaimed (they entered
-  the ledger), a lone failure is re-raised as-is, multiple simultaneous failures become an
-  `ExceptionGroup`. The DEBUG assembly summary now records per-unit timings, computes the
-  critical path, and says what `start_concurrency` would save.
-
-- **`runtime` split into four modules, each doing one thing**: `canary.py` (the engine),
-  `graph.py` (pure algorithms), `probe.py` (the framework's own two environment switches — they
-  change *process*-level state, not the graph) and `report.py` (the assembly summary — diagnostics,
-  not engine).
-
-- **`Canary.lifespan`** — the host-facing entry point. Python has exactly two host shapes: take
-  an async context manager (`Callable[[Host], AsyncContextManager]` — ASGI's `lifespan=` in
-  Starlette / FastAPI / Litestar, MCP's `MCPServer(lifespan=)`, FastStream's `lifespan=`), or
-  take paired startup/shutdown callbacks (Quart, Sanic, arq, Dramatiq). The three explicit
-  methods already served the second; `lifespan` serves the first:
-
-      app = FastAPI(lifespan=canary.lifespan)
-      server = MCPServer("demo", lifespan=canary.lifespan)
-
-  It differs from `async with canary` in exactly one way: it yields `None`. The ASGI lifespan
-  protocol treats the yielded value as a mapping to merge into `scope["state"]`, so yielding the
-  container made Starlette call `dict.update(canary)` and leak a `KeyError: 0` with no clue in
-  it. Litestar has no such convention and worked either way — one protocol, two dialects, both
-  covered now. `async with canary` still hands back the container; it serves your own code.
-
-- **Injection moved from `start()` to `init()`.** `@on_init` therefore has a meaning of its own
-  for the first time — "dependencies are in place, nothing is running yet" — and assembly errors
-  surface during assembly.
-- `ConstructionError` — a unit that needs constructor arguments gets an actionable error naming
-  the single way out (turn the argument into a dependency), instead of a bare `TypeError` that
-  neither points at the rule nor inherits `CanaryError`.
-- `InjectionError` — two dependencies whose snake_case names collide no longer let the last one
-  silently win.
-- Assembly summary on the `canary.runtime` logger at DEBUG: start order and each unit's
-  dependencies.
-- `CANARY_SLOW_CALLBACK_SECONDS` — an optional event-loop lag probe that catches synchronous
-  blocking inside `async def` bodies, restored on `stop()` so it never leaks into the rest of the
-  process.
+含多处破坏性变更；0.9.x 仍在快速定型阶段。
 
 ### Changed
 
+- **BREAKING: assembly moved into the constructor.** `Canary(*roots)` builds the graph, sorts it
+  topologically and injects dependencies — synchronously, with no event loop, running no hooks.
+  When it returns, `canary[SomeUnit]` works. Every assembly error (`ConstructionError`,
+  `InjectionError`, `CircularDependencyError`, `TypeError` for a non-cocoa) is raised on that
+  line rather than at a later `await`.
+- **BREAKING: each lifecycle method runs exactly one hook phase.**
+
+      await canary.init()     every @on_init
+      await canary.start()    every @on_start, ledgered on entry
+      await canary.stop()     every @on_stop, in reverse
+
+  Between `init()` and `start()` is a barrier: every `@on_init` completes before any `@on_start`
+  runs. Calling `start()` from `READY` raises `LifecycleError: call init() before start()`.
+  `async with canary` and `canary.lifespan` remain the convenience path that does all of it.
+- **BREAKING: `LifecycleState.NEW` renamed `READY`.**
 - **BREAKING: `stop()` is the single reclamation path** — callable from `STARTED` and from
-  `FAILED`, idempotent, a no-op when nothing ever started. `finally: await app.stop()` is always
-  safe.
-- Core dependencies are none, and a test guards it: after a full lifecycle, nothing from
-  site-packages may appear in `sys.modules`.
+  `FAILED`, idempotent, a no-op when nothing ever started. One rule replaces the previous two:
+  `stop()` reclaims whatever is in the ledger. The ledger records units that entered
+  `@on_start`; a failure during `init()` leaves it empty.
+- **BREAKING: handlers, markers and everything else in `canary_framework.web` are gone** (see
+  *Removed*).
+- `deps_of()` returns a tuple instead of a list.
+- The event-loop probe now switches on inside `init()`, covering both hook phases.
+- Core dependencies are none; a test asserts that a full lifecycle imports nothing from
+  site-packages.
+
+### Added
+
+- **`Canary(*roots, start_concurrency=N)`** — independent units start together, at most N at
+  once. Scheduling is dependency-driven, so elapsed time tracks the graph's critical path
+  (measured: 3009ms → 423ms on 50 independent 60ms units; 260ms → 152ms on a typical web shape;
+  unchanged on a chain). The default, `None`, is strictly sequential. Failure semantics match
+  sequential startup: siblings are cancelled and still reclaimed, a lone failure is re-raised
+  as-is, several simultaneous failures become an `ExceptionGroup`.
+- **`Canary.lifespan`** — the host-facing entry point, shaped as
+  `Callable[[Host], AsyncContextManager[None]]`: ASGI's `lifespan=` (Starlette, FastAPI,
+  Litestar), MCP's `MCPServer(lifespan=)`, FastStream's `lifespan=`. It yields `None`, which the
+  ASGI lifespan protocol requires (the yielded value is merged into `scope["state"]`);
+  `async with canary` still hands back the container.
+- `ConstructionError` — an actionable error when a unit needs constructor arguments.
+- `InjectionError` — raised when two dependencies produce the same snake_case attribute name.
+- The assembly summary on the `canary.runtime` logger at DEBUG: start order, each unit's
+  dependencies and timing, plus a `start_concurrency` suggestion computed from the critical path.
+- `CANARY_SLOW_CALLBACK_SECONDS` — an event-loop lag probe that catches synchronous blocking
+  inside `async def` bodies; restored on `stop()`.
 
 ### Fixed
 
-- **A failing `start()` leaked started units.** It now keeps an explicit ledger and unwinds it in
-  reverse (including the unit that failed), then re-raises the original exception with rollback
+- **A failing `start()` leaked started units.** It now keeps an explicit ledger, unwinds it in
+  reverse (including the unit that failed) and re-raises the original exception with rollback
   failures attached as notes.
 - **A failing `@on_stop` aborted the shutdown.** Errors are collected, the remaining units are
-  reclaimed anyway, and everything is raised at the end as one `ExceptionGroup`.
-- **A dependency chain of ~1000 hit `RecursionError`.** How deep a chain goes is the user's data,
-  not something Python's recursion limit should bound — and `RecursionError` is neither in the
-  framework's error hierarchy nor informative. The graph is now built with an explicit stack
-  (same depth-first visit order); 50 000 links work fine.
+  reclaimed, and everything is raised at the end as one `ExceptionGroup`.
+- **A dependency chain of about 1000 units raised `RecursionError`.** The graph is built with an
+  explicit stack; 50 000 links work.
 - **The slow-callback probe could not see the startup phase.** asyncio reads the debug flag
-  before a callback runs, and the probe was switched on inside `init()` — so init and start,
-  which usually run in that same callback, were never measured.
+  before a callback runs, so the probe now yields once after switching it on.
+- **A failing lifespan startup hung the process** (in the web extension, since removed).
+
+### Removed
+
+- `canary_framework.web` — the whole extension (`@web_cocoa`, route decorators, parameter
+  binding, OpenAPI generation) and `Canary`'s ASGI surface (`__call__`, the lifespan protocol,
+  cold start, route collection). `Canary` is no longer an ASGI app.
+- `Canary(provide=...)` and `ProvisionError` — substituting a dependency in a test is plain
+  attribute assignment.
+- `DeclarationError`, the ASGI type aliases in `common.type`, and the `ROUTE_ATTR` / `WEB_ATTR`
+  markers.
+- The `[web]` and `[test]` extras; the package has no optional runtime dependencies.
+- Re-export layers in seven `__init__.py` files that had no callers.
 
 ### Performance
 
-- **Assembly is 15.6× faster**: `inspect.signature` sat on the success path while existing only
-  to explain failures. Construction now calls first and inspects the signature only after a
-  `TypeError`, which still tells an arity problem (`ConstructionError`) apart from an error
-  raised by the constructor itself (propagated unchanged). 1000 units: 37.7 ms → 2.4 ms.
-- **The MRO scan is 11× faster**: `object` is skipped — it has two dozen callable members, none
-  of which can carry our markers, and it sits at the end of every MRO. Self time over 5000 units:
-  55 ms → 5 ms. The scan itself is one implementation, cached per class.
-- `deps_of` returns the stored tuple instead of copying it on every call.
-- The framework's own modules cost **0.0 ms** to import; a 1000-unit graph is ~3.9 MiB.
+- Assembly is 15.6x faster: `inspect.signature` moved off the success path — construction calls
+  first and inspects the signature only after a `TypeError`, which still distinguishes an arity
+  problem (`ConstructionError`) from an error raised by the constructor itself. 1000 units:
+  37.7ms → 2.4ms.
+- The MRO scan is 11x faster (`object` is skipped) and cached per class: 55ms → 5ms over 5000
+  units.
+- The framework's own modules cost 0.0ms to import; a 1000-unit graph is about 3.9 MiB.
 
 ## [0.9.2] — 2026-08-19
 

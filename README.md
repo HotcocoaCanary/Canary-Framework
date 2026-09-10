@@ -36,8 +36,8 @@ Python 3.12+ is required.
 - **Canary** is the orchestrator. `Canary(*roots)` resolves the dependency graph, sorts it
   topologically and drives the whole lifecycle.
 
-It is **not a web framework**. It is a runtime container; what shell drives your objects — HTTP,
-a CLI, a scheduler — is that shell's business.
+It is a runtime container; which shell drives your objects — HTTP, a CLI, a scheduler — is up to
+you.
 
 One rule runs through everything:
 
@@ -45,9 +45,8 @@ One rule runs through everything:
 > lifecycle.**
 
 Units are always constructed by the framework **with no arguments**, so `__init__` may not have
-required parameters — whatever a unit needs, it declares as a dependency and reads from a
-collaborator in a lifecycle hook. That way every step needing input lands in a phase that keeps a
-ledger and unwinds in reverse.
+required parameters: whatever a unit needs, it declares as a dependency and reads from a
+collaborator in a lifecycle hook.
 
 ## Quick start
 
@@ -115,15 +114,18 @@ Three optional hooks, each sync or async, any number per phase:
 | Start | `@on_start` | acquire resources, start background tasks |
 | Stop | `@on_stop` | reclaim, in reverse |
 
-Failure paths are part of the design: a failing `start()` unwinds everything it started, and
-`stop()` is the **single** reclamation path for both normal and failed termination, callable
-repeatedly — `finally: await app.stop()` is always safe.
+Failure paths: a failing `start()` unwinds everything it started, and `stop()` is the single
+reclamation path for both normal and failed termination, callable repeatedly —
+`finally: await app.stop()` is always safe.
+
+`Canary(Root, start_concurrency=N)` starts independent units together, at most N at once; the
+default is strictly sequential. See [Lifecycle](docs/en/lifecycle.md).
 
 ## Plug it into a host
 
-Canary knows about no shell. There are only two host shapes in Python and both are supported
-directly: hosts taking an async context manager use `canary.lifespan` (ASGI, MCP, FastStream),
-hosts taking paired callbacks use `start()`/`stop()` (Quart, Sanic, arq, Dramatiq).
+Hosts come in two shapes and both are supported directly: those taking an async context manager
+use `canary.lifespan` (ASGI, MCP, FastStream); those taking paired startup/shutdown callbacks use
+`init()`/`start()`/`stop()` (Quart, Sanic, arq, Dramatiq).
 
 ```python
 from fastapi import Depends, FastAPI
@@ -143,9 +145,9 @@ async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserS
     return users.get(user_id)
 ```
 
-HTTP, WebSocket, static files, middleware and authentication all belong to the host — those
-frameworks already do them well. Canary only guarantees that your objects are assembled
-correctly, started in order and reclaimed in reverse.
+HTTP, WebSocket, static files, middleware and authentication all belong to the host. Canary
+only guarantees that your objects are assembled correctly, started in order and reclaimed in
+reverse.
 
 ## Examples
 

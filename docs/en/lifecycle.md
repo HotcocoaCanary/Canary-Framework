@@ -4,8 +4,8 @@
 
 ## Five moments
 
-The framework splits "a unit from nothing to running to gone" into five moments. The criterion
-is one thing: **what you have in your hands at that moment.**
+A unit goes from nothing to running to gone through five moments, differing in **what you have
+in your hands at that moment**:
 
 | Moment | Who acts | What you have |
 |---|---|---|
@@ -15,9 +15,8 @@ is one thing: **what you have in your hands at that moment.**
 | Start `@on_start` | you | dependencies in place; acquire resources |
 | Stop `@on_stop` | you | reclaim, in reverse |
 
-The middle step is **a framework action, not a user hook** — which is exactly why it needs no
-hook: at any instant during assembly you would have nothing that the moments on either side do
-not already give you.
+The middle step is a framework action, not a user hook: it completes synchronously inside
+`Canary(...)`, with no point at which user code could run.
 
 ## Three hooks
 
@@ -101,8 +100,6 @@ Both `log_start` (mixin) and `connect` (class) run, in that order.
 
 ## Failure paths
 
-Failure paths are a deliberate part of this framework, and the three rules differ:
-
 **There is one rule: `stop()` reclaims whatever is in the ledger.** When `init()` fails the ledger
 is empty (`@on_init` acquires nothing by contract), so there is nothing to reclaim and the state
 simply becomes `FAILED`.
@@ -167,7 +164,7 @@ cancelled unit may hold half a resource, so it is ledgered and reclaimed like an
 real failure is re-raised as-is (`except RuntimeError` still works); only when several units fail
 at once is an `ExceptionGroup` raised, hiding none of them.
 
-**Not sure whether to turn it on? The framework tells you.** With `CANARY_LOG_LEVEL=DEBUG`, a
+**The framework suggests a value.** With `CANARY_LOG_LEVEL=DEBUG`, a
 sequential startup's assembly summary records each unit's time, computes the critical path, and
 says what concurrency would buy:
 

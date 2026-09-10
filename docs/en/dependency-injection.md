@@ -29,10 +29,10 @@ class UserService:
         assert self.database is not None  # already injected by @on_init
 ```
 
-**Injection is assembly, not startup**, which is why it happens in the constructor rather than
-in `start()`. Two things follow: `@on_init` can see its collaborators (otherwise it would barely
-differ from `__init__`), and assembly errors — name clashes, "not a cocoa", cycles — surface
-during assembly instead of waiting for `start()`.
+**Injection is assembly, not startup**, which is why it happens in the constructor: when
+`Canary(Root)` returns, the wiring is done. `@on_init` can therefore see its collaborators, and
+assembly errors — name clashes, "not a cocoa", cycles, units needing constructor arguments — are
+raised on the `Canary(Root)` line rather than at some later `await`.
 
 Do not read injected attributes in `__init__`; they do not exist yet. Use `@on_init` or
 `@on_start`.
@@ -57,9 +57,8 @@ class Database:
         self.pool = ConnectionPool(self.config.dsn, timeout=self.config.timeout)
 ```
 
-There is a cost, and it should be named: **every parameterised unit now depends on a
-configuration unit**, and that edge is not a business collaboration — it exists to carry values.
-That is the price of "the framework can construct every unit, and every failure can be unwound".
+This means any unit needing an external value depends on a configuration unit, and that edge
+exists only to carry values.
 
 Configuration itself gets no special treatment — it is an ordinary `@cocoa`, and how it reads
 environment variables, a `.env` file or a remote config service is up to you (remote reads are
@@ -148,7 +147,7 @@ assert app[UserService].database is app[ReportService].database
 
 ## Substituting dependencies in tests
 
-The framework provides **no** substitution entry point. Injection is nothing but attribute
+The framework provides no substitution entry point. Injection is nothing but attribute
 assignment, so a test can do it directly:
 
 ```python

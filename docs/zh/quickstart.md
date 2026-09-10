@@ -56,8 +56,8 @@ class Database:
         await self.pool.close()
 ```
 
-判据：不碰外部资源的准备工作放 `@on_init`，需要获取资源的放 `@on_start` —— 因为只有
-`@on_start` 拿到的东西才会被 `@on_stop` 回收。
+不碰外部资源的准备工作放 `@on_init`，需要获取资源的放 `@on_start`：只有 `@on_start`
+获取的东西才会被 `@on_stop` 回收。
 
 ## 用 `Canary` 运行
 

@@ -138,12 +138,12 @@ assert app[Database].config is app[Config]
 await app.stop()
 ```
 
-## A known boundary
+## Two limitations
 
-Units are indexed **by type**: one type has exactly one instance per graph. So "two `Database`
-instances pointing at different servers" cannot be expressed — write two classes if you need two
-instances. That is the hard edge of choosing "type is identity"; lifecycle hooks do not help here.
+**Type is identity.** Units are indexed by type, so one type has exactly one instance per graph.
+"Two `Database` instances pointing at different servers" cannot be expressed — write two classes
+if you need two instances.
 
-Also, injected attributes only appear at runtime, so a static type checker does not see
-`self.config`. There is currently no way to have both "plain classes" and a happy mypy — this is
-the one question the design has not answered.
+**Injected attributes are invisible to static type checkers.** `self.config` only appears at
+runtime, so mypy and pyright cannot infer it. Add a class-level annotation (`config: Config`) as a
+declaration if you need the checker to pass.

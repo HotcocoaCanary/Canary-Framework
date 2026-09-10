@@ -57,9 +57,8 @@ class Database:
         await self.pool.close()
 ```
 
-The criterion: preparation that touches no external resource goes in `@on_init`; acquiring
-resources goes in `@on_start` — because only what `@on_start` acquired is reclaimed by
-`@on_stop`.
+Preparation that touches no external resource goes in `@on_init`; acquiring resources goes in
+`@on_start`: only what `@on_start` acquired is reclaimed by `@on_stop`.
 
 ## Run it with `Canary`
 

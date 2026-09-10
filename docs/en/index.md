@@ -3,10 +3,9 @@
 A minimal, decorator-driven runtime for **dependency injection** and **lifecycle** — pure
 Python, zero dependencies.
 
-It is **not a web framework**. It is a runtime container: it assembles a set of objects
-according to their dependencies, starts them in order and reclaims them in reverse. What shell
-eventually drives those objects — HTTP, a CLI, a scheduler, a message consumer — is that shell's
-business: FastAPI, Starlette, Typer, or your own `main()`.
+It is a runtime container: it assembles a set of objects according to their dependencies, starts
+them in order and reclaims them in reverse. Which shell drives those objects — HTTP, a CLI, a
+scheduler, a message consumer — is up to you: FastAPI, Starlette, Typer, or your own `main()`.
 
 There are only two concepts:
 
@@ -20,11 +19,9 @@ There are only two concepts:
 > **The framework only builds empty shells. Anything that needs input from outside happens in
 > the lifecycle.**
 
-Every unit is constructed by the framework **with no arguments** — so `__init__` cannot have
+Every unit is constructed by the framework **with no arguments**, so `__init__` cannot have
 required parameters. Whatever a unit needs, it declares as a dependency and reads in `@on_init`
-or `@on_start`. This is not a restriction: a constructor has no counterpart (`@on_start` pairs
-with `@on_stop`; "construction" has no "destruction"), so moving work that needs input into the
-lifecycle puts every one of those steps into a phase that keeps a ledger and unwinds in reverse.
+or `@on_start`.
 
 ## Highlights
 
@@ -37,11 +34,8 @@ lifecycle puts every one of those steps into a phase that keeps a ledger and unw
   idempotent.
 - **Deterministic ordering** — Kahn's topological sort; one shared singleton per type per graph.
 - **Multi-root composition** — nest, mix in, or start any subgraph on its own.
-- **Zero dependencies** — `pip install canary-framework` pulls in nothing but the standard
-  library. A test guards this: after a full lifecycle, nothing from site-packages may appear in
-  `sys.modules`.
-- **Fast assembly** — building, injecting and running `@on_init` over 1000 units takes ~2.4 ms;
-  the framework's own import costs 0.0 ms.
+- **Concurrent startup** — `start_concurrency=N` starts independent units together, with a bound.
+- **Zero dependencies** — `pip install canary-framework` uses nothing but the standard library.
 
 ## Example
 

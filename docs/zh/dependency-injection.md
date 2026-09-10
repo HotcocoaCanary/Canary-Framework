@@ -29,10 +29,9 @@ class UserService:
         assert self.database is not None  # @on_init 时已经注入
 ```
 
-**注入属于装配，不属于启动**，所以它发生在**构造函数里**：`Canary(Root)` 一返回，线就
-接好了。这带来两件事：`@on_init` 能看到自己的协作者（否则它和 `__init__` 几乎没区别）；
-装配类的错误（撞名、不是 cocoa、成环、需要构造参数）在你写下 `Canary(Root)` 那一行就抛出，
-而不是等到某个 `await`。
+**注入属于装配，不属于启动**，所以它发生在构造函数里：`Canary(Root)` 一返回，依赖就已经
+接好。因此 `@on_init` 能看到自己的协作者，装配类的错误（撞名、不是 cocoa、成环、需要构造
+参数）也在 `Canary(Root)` 那一行抛出，而不是等到某个 `await`。
 
 不要在 `__init__` 里读注入属性 —— 那时它们还不存在。请用 `@on_init` 或 `@on_start`。
 
@@ -56,11 +55,10 @@ class Database:
         self.pool = ConnectionPool(self.config.dsn, timeout=self.config.timeout)
 ```
 
-代价要认：**每个参数化的单元因此都依赖一个配置单元**，而这条依赖不是业务上的协作，纯粹
-是用来搬运值的。这是这个设计换来"框架能构造每一个单元、失败时能逆序回收"的代价。
+这意味着需要外部取值的单元都会依赖一个配置单元，那条依赖只用于搬运值。
 
-配置本身没有任何特殊待遇 —— 它就是一个普通的 `@cocoa`，你想怎么读环境变量、`.env`、
-远程配置中心都行（远程的放 `@on_start`，那是 IO）。
+配置本身没有特殊待遇，它就是一个普通的 `@cocoa`：怎么读环境变量、`.env` 或远程配置中心
+都由你决定（远程读取属于 IO，放 `@on_start`）。
 
 ## 解析
 
@@ -147,7 +145,7 @@ assert app[UserService].database is app[ReportService].database
 
 ## 测试时替换依赖
 
-框架**不提供**替换入口。因为注入本来就只是给属性赋值，测试里直接赋值即可：
+框架不提供替换入口。注入就是给属性赋值，测试里直接赋值即可：
 
 ```python
 service = UserService()

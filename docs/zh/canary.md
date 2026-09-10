@@ -81,7 +81,7 @@ await books.start()
 ## 装配摘要
 
 把 `CANARY_LOG_LEVEL` 设成 `DEBUG`，启动末尾会在 `canary.runtime` 上打印一份摘要 ——
-启动顺序、每个单元的依赖。排查"为什么这个单元先启动"时不必去读框架源码：
+启动顺序、每个单元的依赖与耗时：
 
 ```text
 Canary assembled 4 unit(s)
