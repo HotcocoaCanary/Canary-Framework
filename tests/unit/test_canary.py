@@ -18,6 +18,8 @@ async def test_lifecycle_state_transitions() -> None:
 
     canary = Canary(Service)
     assert canary.state is LifecycleState.READY  # 构造即装配，一出生就可用
+    await canary.init()
+    assert canary.state is LifecycleState.INITIALIZED  # 各就各位，还没开工
     await canary.start()
     assert canary.state is LifecycleState.STARTED
     await canary.stop()
@@ -50,6 +52,7 @@ async def test_hooks_run_in_topological_order() -> None:
     canary = Canary(B)
     assert calls == []  # 装配不跑任何钩子
 
+    await canary.init()
     await canary.start()  # 先全部 @on_init，再全部 @on_start
     assert calls == ["A.init", "A.start", "B.start"]
 
@@ -75,6 +78,7 @@ async def test_dependencies_are_injected_at_construction() -> None:
     assert isinstance(canary[Service].dep, Dep)  # 构造一返回，线就接好了
     assert seen == []  # 但钩子还没跑——装配不是运行
 
+    await canary.init()
     await canary.start()
     assert seen == [canary[Dep]]  # @on_init 看得到依赖，且拿到的是图上的那个实例
 
@@ -97,6 +101,7 @@ async def test_singleton_is_shared_across_the_graph() -> None:
         pass
 
     canary = Canary(Root)
+    await canary.init()
     await canary.start()
     assert canary[Root].a.dep is canary[Root].b.dep is canary[Dep]
 
@@ -119,14 +124,17 @@ async def test_nesting_standalone_and_composition() -> None:
         pass
 
     nested = Canary(App)
+    await nested.init()
     await nested.start()
     assert nested.order == (Config, Database, Repo, App)
 
     standalone = Canary(Database)
+    await standalone.init()
     await standalone.start()
     assert standalone.order == (Config, Database)
 
     composed = Canary(Config, Repo)
+    await composed.init()
     await composed.start()
     assert set(composed.order) == {Config, Database, Repo}
 
@@ -143,6 +151,7 @@ async def test_start_stop_drives_full_lifecycle() -> None:
             self.running = False
 
     canary = Canary(Service)
+    await canary.init()
     await canary.start()
     assert canary.state is LifecycleState.STARTED
     assert canary[Service].running is True
@@ -198,8 +207,10 @@ async def test_illegal_transition_raises() -> None:
         pass
 
     canary = Canary(Service)
+    await canary.init()
     await canary.start()
     with pytest.raises(LifecycleError):
+        await canary.init()
         await canary.start()  # 不能重复启动
 
 
@@ -241,3 +252,36 @@ def test_a_full_lifecycle_pulls_in_no_third_party_package() -> None:
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+async def test_each_action_runs_exactly_one_hook_phase() -> None:
+    """一一对应：init() 只跑 @on_init，start() 只跑 @on_start。栅栏就是两个方法的边界。"""
+    calls: list[str] = []
+
+    @cocoa
+    class Unit:
+        @on_init
+        def prepare(self) -> None:
+            calls.append("init")
+
+        @on_start
+        def go(self) -> None:
+            calls.append("start")
+
+    canary = Canary(Unit)
+    assert calls == []  # 装配不跑钩子
+    await canary.init()
+    assert calls == ["init"]  # 各就各位，没有任何单元开工
+    await canary.start()
+    assert calls == ["init", "start"]
+
+
+async def test_start_before_init_is_refused_loudly() -> None:
+    """忘了 init() 是响的，不是静默失效。"""
+
+    @cocoa
+    class Unit:
+        pass
+
+    with pytest.raises(LifecycleError, match=r"call init\(\) before start\(\)"):
+        await Canary(Unit).start()

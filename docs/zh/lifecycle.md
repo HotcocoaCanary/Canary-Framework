@@ -32,19 +32,24 @@
 
 | 何时 | 迁移 | 做什么 |
 |---|---|---|
-| `Canary(*roots)` | —— `→ READY` | 建图、校验、拓扑排序、**注入依赖**。同步，不需要事件循环 |
-| `await app.start()` | `READY → STARTED` | 先全部 `@on_init`，再全部 `@on_start` |
+| `Canary(*roots)` | —— `→ READY` | 装配：建图、校验、拓扑排序、**注入依赖**。同步，不跑任何钩子 |
+| `await app.init()` | `READY → INITIALIZED` | 各就各位：全部 `@on_init` |
+| `await app.start()` | `INITIALIZED → STARTED` | 开工：全部 `@on_start`，进入即记账 |
 | `await app.stop()` | 任何终态 `→ STOPPED` | 逆序执行 `@on_stop` |
 
-一句话概括：**构造把图装配好，让每个单元处于可用状态；`start` 让它们开始干活。**
+四个动作，四个含义，一一对应：**构造装配、`init` 各就各位、`start` 开工、`stop` 回收。**
+没有一个方法做两件事。`init()` 和 `start()` 之间是一道栅栏 —— 整张图各就各位之后，才允许
+任何单元开工；这道栅栏就是两个方法的边界，不调 `start()`，谁也不会开工。
 
 ## 状态机
 
 ```
-READY ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
-            │                      │
-            └────▶ FAILED ◀────────┘
+READY ─▶ INITIALIZING ─▶ INITIALIZED ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
+             │                            │                       │
+             └──────────────▶ FAILED ◀────┴───────────────────────┘
 ```
+
+三个动作各有一个进行中的状态（`*ING`），它们只可能被并发调用者观察到。
 
 起点是 `READY` 而不是"什么都还没做"：装配在构造函数里已经完成，一个刚造出来的运行时
 **已经可用** —— `canary[SomeUnit]` 立刻能取到已注入依赖的实例，只是还没有人开始运行。
@@ -52,7 +57,9 @@ READY ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
 `app.state` 返回当前的 `LifecycleState`。非法迁移抛 `LifecycleError`：
 
 ```python
+await app.init()
 await app.start()
+await app.init()
 await app.start()  # LifecycleError: illegal transition from STARTED
 ```
 
@@ -91,7 +98,8 @@ class Database(LoggingMixin):
 
 失败路径是这个框架有意设计过的部分，三条规则各自不同：
 
-**只有一条规则：`stop()` 收台账里的一切。**
+**只有一条规则：`stop()` 收台账里的一切。** `init()` 阶段失败时台账是空的（`@on_init`
+按契约不获取资源），所以没有东西要收，状态直接置 `FAILED`。
 
 台账记的是**进入过 `@on_start`** 的单元。`@on_start` 按契约是唯一获取资源的地方，所以
 只有它需要对应的回收。
@@ -107,6 +115,7 @@ class Database(LoggingMixin):
 ```python
 app = Canary(Root)
 try:
+    await app.init()
     await app.start()
 finally:
     await app.stop()   # 从 STARTED 可调，从 FAILED 也可调；重复调用是幂等的
@@ -117,6 +126,44 @@ finally:
 
 单个 `@on_stop` 抛出不会中断回收：异常被逐一收集，其余单元照常回收，最后合并成一个
 `ExceptionGroup` 抛出。
+
+## 并发启动
+
+```python
+Canary(Root, start_concurrency=8)
+```
+
+默认 `None`：严格按拓扑序一个一个启动。给一个正整数，**互不依赖的单元同时启动**，同时最多
+这么多个。加速比 = 顺序总耗时 ÷ 关键路径（按耗时算最长的一条依赖链），完全由图的形状决定：
+
+```
+50 个各 60ms 的独立 IO 单元    3009ms → 423ms     7.1x
+典型 web 形状（DB / Redis / MQ）  260ms → 152ms     1.7x
+一条链                            无变化            1.0x
+```
+
+**默认关着**，两个理由：并发启动会同时向下游发起 N 个连接（连接风暴 —— 实测 20 个单元
+对一个"最多接 8 个连接"的下游，12 次被拒、启动失败）；它也会打破"兄弟按声明序启动"这个
+虽然从未承诺、但可能有人依赖的顺序。
+
+**上限不是可选参数。** 信号量只圈住真正跑钩子的那段，等依赖的时候不占名额。调度按依赖
+驱动 —— 每个单元等自己的依赖，不按拓扑层次分组（分组会让一个单元白等同层里最慢的那个）。
+
+**失败语义与顺序启动一致。** 一个单元失败时同批的其它单元被取消；被取消的单元同样持有半个
+资源，同样进了台账、同样被回收。只有一个真实失败时原样抛出（`except RuntimeError` 照旧管用）；
+多个单元同时失败才抛 `ExceptionGroup`，一个都不隐瞒。
+
+**不知道该不该开？框架会自己告诉你。** `CANARY_LOG_LEVEL=DEBUG` 时，顺序启动的装配摘要会
+记下每个单元的耗时、算出关键路径，并说明开并发能省多少：
+
+```
+Canary assembled 8 unit(s), started in 260ms
+  ...
+  critical path is 150ms of the 260ms spent starting units
+  start_concurrency=3 could bring that down to about 150ms (1.7x)
+```
+
+耗时太短或图太窄时它不吭声。
 
 ## 交给宿主驱动
 

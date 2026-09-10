@@ -8,6 +8,7 @@ from canary_framework import Canary
 
 
 app = Canary(UserService)
+await app.init()
 await app.start()
 ...
 await app.stop()
@@ -29,8 +30,9 @@ app = Canary(*roots)
 
 | 何时 | 状态迁移 | 作用 |
 |---|---|---|
-| `Canary(*roots)` | —— `→ READY` | 建图、校验、拓扑排序、**注入依赖**。同步，不需要事件循环 |
-| `await app.start()` | `READY → STARTED` | 先全部 `@on_init`，再全部 `@on_start` |
+| `Canary(*roots)` | —— `→ READY` | 装配：建图、校验、拓扑排序、**注入依赖**。同步，不跑任何钩子 |
+| `await app.init()` | `READY → INITIALIZED` | 各就各位：全部 `@on_init` |
+| `await app.start()` | `INITIALIZED → STARTED` | 开工：全部 `@on_start`，进入即记账 |
 | `await app.stop()` | 任何终态 `→ STOPPED` | 逆序执行 `@on_stop`；幂等，正常结束与失败结束共用 |
 
 引擎是异步原生的：钩子可同步可异步，运行时按返回值判断是否 `await`。状态机与失败路径见
@@ -62,10 +64,12 @@ assert users.database is app[Database]
 ```python
 # 完整应用
 app = Canary(LibraryApp)
+await app.init()
 await app.start()
 
 # 仅数据层，独立启动
 books = Canary(BookRepository)
+await books.init()
 await books.start()
 ```
 

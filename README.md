@@ -79,7 +79,8 @@ class UserService: ...
 
 async def main() -> None:
     app = Canary(UserService)
-    await app.start()  # run @on_init, then @on_start
+    await app.init()   # settle in: @on_init
+    await app.start()  # go to work: @on_start
     assert app[Database].config is app[Config]
     await app.stop()   # run @on_stop in reverse
 

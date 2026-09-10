@@ -70,7 +70,7 @@ async def test_the_probe_catches_blocking_inside_an_async_body(
 async def test_a_malformed_probe_setting_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CANARY_SLOW_CALLBACK_SECONDS", "very slow")
     with pytest.raises(LifecycleError, match="number of seconds"):
-        await Canary(Bare).start()
+        await Canary(Bare).init()  # 探针在 init() 里打开
 
 
 async def test_the_probe_can_see_the_startup_phase(
@@ -89,6 +89,7 @@ async def test_the_probe_can_see_the_startup_phase(
 
     with caplog.at_level(logging.WARNING, logger="asyncio"):
         app = Canary(Slow)
+        await app.init()
         await app.start()
         await asyncio.sleep(0)  # 让出一次，asyncio 才会把上一个回调的耗时报出来
         await app.stop()

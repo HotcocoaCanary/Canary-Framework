@@ -26,7 +26,7 @@ async def test_an_on_init_failure_propagates_and_marks_failed() -> None:
 
     canary = Canary(Broken)
     with pytest.raises(RuntimeError, match="init exploded"):
-        await canary.start()
+        await canary.init()  # 在 init() 就抛，start() 根本轮不到
 
     assert canary.state is LifecycleState.FAILED
     # 失败态是不可逆的——后续 start 直接拒绝。
@@ -61,6 +61,7 @@ async def test_start_failure_rolls_back_everything_started() -> None:
 
     canary = Canary(Second)
     with pytest.raises(RuntimeError, match="start exploded"):
+        await canary.init()
         await canary.start()
 
     assert canary.state is LifecycleState.FAILED
@@ -79,6 +80,7 @@ async def test_stop_is_legal_and_idempotent_from_failed() -> None:
 
     canary = Canary(Broken)
     with pytest.raises(RuntimeError):
+        await canary.init()
         await canary.start()
 
     # 从 FAILED 调用合法；台账已在回滚时清空，这里是空转，且不抹掉失败态。
@@ -111,6 +113,7 @@ async def test_stop_failure_does_not_abort_the_remaining_units() -> None:
             log.append("outermost.stop")
 
     canary = Canary(Outermost)
+    await canary.init()
     await canary.start()
 
     with pytest.raises(ExceptionGroup) as caught:

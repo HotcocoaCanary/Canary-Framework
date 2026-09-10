@@ -36,10 +36,15 @@ def on_stop(fn) -> fn
 ## `Canary`
 
 ```python
-class Canary(*roots: type)
+class Canary(*roots: type, start_concurrency: int | None = None)
 ```
 
-编排器。若某个根未被 `@cocoa` 标记，抛出 `TypeError`。构造本身不做任何事。
+编排器。构造即装配：建图（每个类型无参构造一次）、拓扑排序、注入依赖，全部同步完成；
+装配类错误（`ConstructionError` / `InjectionError` / `CircularDependencyError`、非 cocoa 的
+`TypeError`）在这一行抛出。
+
+`start_concurrency`：`None`（默认）严格顺序；给一个正整数则让互不依赖的单元同时启动，同时
+最多这么多个。见 [生命周期 · 并发启动](lifecycle.md#并发启动)。
 
 ### 属性
 
@@ -58,16 +63,28 @@ def __getitem__(self, cls: type[T]) -> T
 
 返回图中 `cls` 的共享单例；若不存在则抛出 `KeyError`。
 
+### `init`
+
+```python
+async def init(self) -> None
+```
+
+`READY → INITIALIZED`。跑全部 `@on_init` —— 各就各位。依赖已在构造期注入，这里让每个单元
+做"只需要依赖、不碰外部资源"的准备。失败置 `FAILED` 并抛出；台账为空，无需回收。
+
+它是一道栅栏：全部 `@on_init` 完成之后，才允许任何 `@on_start`。栅栏就是本方法的返回。
+
 ### `start`
 
 ```python
 async def start(self) -> None
 ```
 
-`READY → STARTED`。按拓扑序先跑全部 `@on_init`，再跑全部 `@on_start`。
+`INITIALIZED → STARTED`。跑全部 `@on_start` —— 开工。进入 `@on_start` 的单元立刻记账。
+在 `READY` 态调用（忘了 `init()`）会抛 `LifecycleError: call init() before start()`。
 
 任一环节失败时，**进入过 `@on_start`** 的单元（含失败的那个）按逆序回收，然后原样抛出最初
-的异常，回收过程中的异常作为 note 附在其上。`@on_init` 阶段失败时台账是空的，回滚是空转。
+的异常，回收过程中的异常作为 note 附在其上。
 
 ### `stop`
 
@@ -114,9 +131,9 @@ async with Canary(Root) as canary:
 
 ### `LifecycleState`
 
-`READY`、`STARTING`、`STARTED`、`STOPPING`、`STOPPED`、`FAILED`。
-
-起点是 `READY`：装配在 `Canary(...)` 里已经做完。
+`READY`、`INITIALIZING`、`INITIALIZED`、`STARTING`、`STARTED`、`STOPPING`、`STOPPED`、
+`FAILED`。三个动作各有一个进行中状态与一个完成态；起点是 `READY`：装配在 `Canary(...)`
+里已经做完。
 
 ### `State`
 

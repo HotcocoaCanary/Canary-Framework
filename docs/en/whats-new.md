@@ -60,17 +60,25 @@ or lifecycle.
 
 ## Added
 
-- **Assembly moved into the constructor; `init()` is gone.** When `Canary(Root)` returns the
-  graph is built, sorted and injected — `canary[SomeUnit]` works immediately. This is the
-  framework keeping its own rule ("a unit must be usable once constructed"); the runtime had no
-  reason to be the exception.
+- **Assembly moved into the constructor; four actions, one-to-one.** When `Canary(Root)` returns
+  the graph is built, sorted and injected — `canary[SomeUnit]` works immediately, and assembly
+  errors are raised on that line. This is the framework keeping its own rule ("a unit must be
+  usable once constructed"); the runtime had no reason to be the exception.
 
-  The seam now sits where the nature of the work changes: assembly is synchronous, deterministic
-  and runs none of your runtime code; `start()` is the running part (every `@on_init`, then every
-  `@on_start`). Assembly errors are raised on the line where you wrote `Canary(Root)`.
+  After that, each action runs exactly one hook phase — **no method does two things**: `init()`
+  runs only `@on_init` (settling in), `start()` only `@on_start` (going to work), `stop()` only
+  `@on_stop` (reclaiming). The barrier between `init()` and `start()` is the method boundary
+  itself. Forgetting `init()` is loud: `LifecycleError: call init() before start()`.
 
-  The failure rules collapse from two into one: **`stop()` reclaims whatever is in the ledger.**
-  The state machine went from 8 states to 6, and its start renamed `NEW` → `READY`.
+  The starting state is renamed `NEW` → `READY` — calling a freshly built, already-wired runtime
+  "new" would hide what was just made true.
+
+- **Concurrent startup.** `Canary(Root, start_concurrency=8)` starts independent units together,
+  with a bound. 7.1x on an IO-heavy graph, 1.7x on a typical web shape, 1.0x on a chain — the
+  graph's shape decides. Off by default (connection storms, sibling order); a sequential startup's
+  assembly summary computes the critical path and says what turning it on would save. Failure
+  semantics match sequential startup: a lone failure is re-raised as-is, cancelled units are still
+  reclaimed.
 
 - **`Canary.lifespan`** — the host-facing entry point; one line plugs it into any mainstream
   framework:

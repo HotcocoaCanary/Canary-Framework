@@ -56,6 +56,7 @@ async def test_async_full_lifecycle_order_and_sharing() -> None:
             events.append("service.stop")
 
     canary = Canary(Service)
+    await canary.init()
     await canary.start()
     assert canary.state is LifecycleState.STARTED
     # 全图共享同一批单例，依赖在异步钩子前注入。

@@ -37,11 +37,17 @@ number of hooks, and mixin hooks run before the class's own.
 ## `Canary`
 
 ```python
-class Canary(*roots: type)
+class Canary(*roots: type, start_concurrency: int | None = None)
 ```
 
-The orchestrator. Raises `TypeError` if a root is not marked with `@cocoa`. Construction itself
-does nothing.
+The orchestrator. Construction is assembly: build the graph (each type constructed once, with no
+arguments), sort it, inject dependencies — all synchronously. Assembly errors
+(`ConstructionError` / `InjectionError` / `CircularDependencyError`, `TypeError` for a
+non-cocoa) are raised on this line.
+
+`start_concurrency`: `None` (default) is strictly sequential; a positive integer lets independent
+units start together, at most that many at once. See
+[Lifecycle · Concurrent startup](lifecycle.md#concurrent-startup).
 
 ### Properties
 
@@ -60,17 +66,33 @@ def __getitem__(self, cls: type[T]) -> T
 
 Returns the shared singleton for `cls`, or raises `KeyError`.
 
+### `init`
+
+```python
+async def init(self) -> None
+```
+
+`READY → INITIALIZED`. Runs every `@on_init` — settling in. Dependencies were injected at
+construction; here each unit does the preparation that needs only its dependencies and no
+external resource. On failure the state becomes `FAILED` and the exception propagates; the ledger
+is empty, so nothing is reclaimed.
+
+It is a barrier: only once every `@on_init` has completed may any `@on_start` run. The barrier
+is this method's return.
+
 ### `start`
 
 ```python
 async def start(self) -> None
 ```
 
-`READY → STARTED`. Runs every `@on_init` in topological order, then every `@on_start`.
+`INITIALIZED → STARTED`. Runs every `@on_start` — going to work. A unit is ledgered the moment
+it enters `@on_start`. Calling it from `READY` (having skipped `init()`) raises
+`LifecycleError: call init() before start()`.
 
 If any step fails, every unit that **entered** `@on_start` (including the one that failed) is
 reclaimed in reverse, and the original exception is re-raised with any unwind failures attached
-as notes. A failure during the `@on_init` pass leaves the ledger empty, so the unwind is a no-op.
+as notes.
 
 ### `stop`
 
@@ -119,9 +141,9 @@ async with Canary(Root) as canary:
 
 ### `LifecycleState`
 
-`READY`, `STARTING`, `STARTED`, `STOPPING`, `STOPPED`, `FAILED`.
-
-It starts at `READY`: assembly is already done inside `Canary(...)`.
+`READY`, `INITIALIZING`, `INITIALIZED`, `STARTING`, `STARTED`, `STOPPING`, `STOPPED`, `FAILED`.
+Each action has an in-progress and a settled state; it starts at `READY` because assembly is
+already done inside `Canary(...)`.
 
 ### `State`
 

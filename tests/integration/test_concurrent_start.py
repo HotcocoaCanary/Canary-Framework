@@ -144,6 +144,7 @@ async def test_a_failure_still_reclaims_everything_that_entered() -> None:
 
     canary = Canary(root, start_concurrency=4)
     with pytest.raises(RuntimeError, match="连不上下游"):
+        await canary.init()
         await canary.start()
 
     assert canary.state.name == "FAILED"
@@ -167,7 +168,9 @@ async def test_two_simultaneous_failures_are_both_reported() -> None:
     root = cocoa(deps=[boomer("A", [config]), boomer("B", [config])])(type("App", (), {}))
 
     with pytest.raises(ExceptionGroup) as caught:
-        await Canary(root, start_concurrency=4).start()
+        canary_ = Canary(root, start_concurrency=4)
+        await canary_.init()
+        await canary_.start()
     messages = {str(exc) for exc in caught.value.exceptions}
     assert messages == {"A 挂了", "B 挂了"}
 
@@ -185,7 +188,9 @@ async def test_a_lone_failure_looks_exactly_like_the_sequential_one() -> None:
     root = cocoa(deps=[boomer("Only", [config])])(type("App", (), {}))
 
     with pytest.raises(RuntimeError, match="就我一个挂了") as caught:
-        await Canary(root, start_concurrency=4).start()
+        canary_ = Canary(root, start_concurrency=4)
+        await canary_.init()
+        await canary_.start()
     assert not isinstance(caught.value, ExceptionGroup)
 
 

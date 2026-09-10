@@ -128,6 +128,7 @@ from canary_framework import Canary
 
 
 app = Canary(UserService)
+await app.init()
 await app.start()
 assert app[Database].config is app[Config]
 await app.stop()

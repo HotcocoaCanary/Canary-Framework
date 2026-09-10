@@ -8,6 +8,7 @@ from canary_framework import Canary
 
 
 app = Canary(UserService)
+await app.init()
 await app.start()
 ...
 await app.stop()
@@ -27,8 +28,9 @@ graph is built in the constructor.
 
 | When | Transition | What it does |
 |---|---|---|
-| `Canary(*roots)` | — `→ READY` | build, validate, sort, **inject dependencies**. Synchronous; no event loop needed |
-| `await app.start()` | `READY → STARTED` | every `@on_init`, then every `@on_start` |
+| `Canary(*roots)` | — `→ READY` | assembly: build, validate, sort, **inject dependencies**. Synchronous; runs no hooks |
+| `await app.init()` | `READY → INITIALIZED` | settle in: every `@on_init` |
+| `await app.start()` | `INITIALIZED → STARTED` | go to work: every `@on_start`, ledgered on entry |
 | `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse; idempotent, shared by normal and failed termination |
 
 The engine is async-native: hooks may be sync or async and the runtime awaits only when needed.
@@ -61,10 +63,12 @@ any subgraph can be started on its own:
 ```python
 # the whole application
 app = Canary(LibraryApp)
+await app.init()
 await app.start()
 
 # just the data layer
 books = Canary(BookRepository)
+await books.init()
 await books.start()
 ```
 

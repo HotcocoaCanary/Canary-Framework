@@ -77,6 +77,7 @@ class UserService: ...
 
 async def main() -> None:
     app = Canary(UserService)
+    await app.init()
     await app.start()
     try:
         users = app[UserService]
@@ -105,6 +106,7 @@ asyncio.run(main())
 
 ```python
 app = Canary(UserService, ReportService)
+await app.init()
 await app.start()
 assert app[Database] is app[UserService].database
 ```

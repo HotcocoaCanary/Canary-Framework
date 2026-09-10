@@ -34,20 +34,25 @@ awaits when it is awaitable, so the two mix freely.
 
 | When | Transition | What it does |
 |---|---|---|
-| `Canary(*roots)` | — `→ READY` | build, validate, sort, **inject dependencies**. Synchronous; no event loop needed |
-| `await app.start()` | `READY → STARTED` | every `@on_init`, then every `@on_start` |
+| `Canary(*roots)` | — `→ READY` | assembly: build, validate, sort, **inject dependencies**. Synchronous; runs no hooks |
+| `await app.init()` | `READY → INITIALIZED` | settle in: every `@on_init` |
+| `await app.start()` | `INITIALIZED → STARTED` | go to work: every `@on_start`, ledgered on entry |
 | `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse |
 
-In one line: **construction assembles the graph so every unit is usable; `start` lets them go to
-work.**
+Four actions, four meanings, one-to-one: **construction assembles, `init` settles in, `start` goes
+to work, `stop` reclaims.** No method does two things. Between `init()` and `start()` there is a
+barrier — the whole graph settles before any unit goes to work — and that barrier *is* the method
+boundary: until you call `start()`, nothing goes to work.
 
 ## The state machine
 
 ```
-READY ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
-            │                      │
-            └────▶ FAILED ◀────────┘
+READY ─▶ INITIALIZING ─▶ INITIALIZED ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
+             │                            │                       │
+             └──────────────▶ FAILED ◀────┴───────────────────────┘
 ```
+
+Each action has an in-progress state (`*ING`) that only a concurrent caller can ever observe.
 
 It starts at `READY`, not at "nothing has happened yet": assembly is done in the constructor, so
 a freshly built runtime is **already usable** — `canary[SomeUnit]` hands back an instance with
@@ -56,7 +61,9 @@ its dependencies injected; nothing is running yet, that is all.
 `app.state` returns the current `LifecycleState`. Illegal transitions raise `LifecycleError`:
 
 ```python
+await app.init()
 await app.start()
+await app.init()
 await app.start()  # LifecycleError: illegal transition from STARTED
 ```
 
@@ -96,7 +103,9 @@ Both `log_start` (mixin) and `connect` (class) run, in that order.
 
 Failure paths are a deliberate part of this framework, and the three rules differ:
 
-**There is one rule: `stop()` reclaims whatever is in the ledger.**
+**There is one rule: `stop()` reclaims whatever is in the ledger.** When `init()` fails the ledger
+is empty (`@on_init` acquires nothing by contract), so there is nothing to reclaim and the state
+simply becomes `FAILED`.
 
 The ledger records the units that **entered** `@on_start`. By contract that is the only place
 resources are acquired, so it is the only thing that needs reclaiming.
@@ -113,6 +122,7 @@ separate rule needed for it.
 ```python
 app = Canary(Root)
 try:
+    await app.init()
     await app.start()
 finally:
     await app.stop()   # callable from STARTED and from FAILED; idempotent
@@ -124,6 +134,51 @@ always safe, with no state check first.
 
 A single failing `@on_stop` does not abort the shutdown: errors are collected, the remaining
 units are reclaimed anyway, and everything is raised at the end as one `ExceptionGroup`.
+
+## Concurrent startup
+
+```python
+Canary(Root, start_concurrency=8)
+```
+
+The default, `None`, starts units strictly one at a time in topological order. A positive integer
+lets **independent units start together**, at most that many at once. The speed-up is the
+sequential total divided by the critical path (the longest dependency chain by time) — entirely a
+property of the graph's shape:
+
+```
+50 independent 60ms IO units            3009ms → 423ms     7.1x
+a typical web shape (DB / Redis / MQ)    260ms → 152ms     1.7x
+a single chain                           unchanged          1.0x
+```
+
+**Off by default**, for two reasons: concurrent startup opens N connections to a backend at once
+(a connection storm — measured: 20 units against a backend that accepts 8 got 12 rejections and a
+failed startup), and it breaks "siblings start in declaration order", which was never promised but
+may be relied upon.
+
+**The limit is not optional.** The semaphore wraps only the hook execution, not the waiting for
+dependencies. Scheduling is dependency-driven — each unit waits for its own dependencies rather
+than for a whole topological layer (layering makes a unit wait for the slowest sibling it has
+nothing to do with).
+
+**Failure semantics match sequential startup.** When one unit fails its siblings are cancelled; a
+cancelled unit may hold half a resource, so it is ledgered and reclaimed like any other. A single
+real failure is re-raised as-is (`except RuntimeError` still works); only when several units fail
+at once is an `ExceptionGroup` raised, hiding none of them.
+
+**Not sure whether to turn it on? The framework tells you.** With `CANARY_LOG_LEVEL=DEBUG`, a
+sequential startup's assembly summary records each unit's time, computes the critical path, and
+says what concurrency would buy:
+
+```
+Canary assembled 8 unit(s), started in 260ms
+  ...
+  critical path is 150ms of the 260ms spent starting units
+  start_concurrency=3 could bring that down to about 150ms (1.7x)
+```
+
+It stays quiet when startup is too short or the graph too narrow to matter.
 
 ## Letting a host drive it
 

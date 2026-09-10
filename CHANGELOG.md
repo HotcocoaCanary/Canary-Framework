@@ -50,36 +50,41 @@ assembly or lifecycle.
 
 ### Added
 
-- **BREAKING: assembly moved into the constructor; `init()` is gone.** `Canary(*roots)` now
-  builds the graph, sorts it and injects dependencies — synchronously, with no event loop, in
-  0.027 ms for a small graph. When it returns, `canary[SomeUnit]` works.
+- **BREAKING: assembly moved into the constructor; the four actions map one-to-one.**
+  `Canary(*roots)` now builds the graph, sorts it and injects dependencies — synchronously, with
+  no event loop, running no hooks. When it returns, `canary[SomeUnit]` works, and every assembly
+  error (`ConstructionError`, `InjectionError`, `CircularDependencyError`, `TypeError` for a
+  non-cocoa) is raised on that line rather than at some later `await`.
 
-  The trigger was writing an experiment "the way a user would" and forgetting to call `init()`.
-  Getting it wrong is a design signal, not a documentation one. The problem was not that two
-  steps are too many — it was that the seam sat in the wrong place. `init()` did five things of
-  two different natures: build/sort/inject (synchronous, deterministic, runs none of your runtime
-  code) and run `@on_init` (async, your code, side effects). The knife went between `@on_init`
-  and `@on_start` — in the middle of one kind of work, past where the nature actually changes.
+  It was the runtime breaking the rule the framework imposes on every unit — *a unit must be
+  usable once constructed* — `Canary(Root)` used to return an object whose `canary[X]` raised
+  `KeyError`.
 
-  It also had the runtime breaking the rule the framework imposes on every unit: *a unit must be
-  usable once constructed*. `Canary(Root)` used to return an object whose `canary[X]` raised
-  `KeyError`. That was exactly the "exists but unusable" window we forbid elsewhere.
+  After construction, each action runs exactly one hook phase and **no method does two things**:
 
-  Nothing is hidden by this: `@on_init` and `@on_start` remain two visible hook phases with
-  distinct meanings — they are *unit* declarations, not runtime methods. What disappeared is a
-  misplaced method seam.
+      await canary.init()     every @on_init   — settle in
+      await canary.start()    every @on_start  — go to work, ledgered on entry
+      await canary.stop()     every @on_stop   — reclaim, in reverse
 
-  Consequences, all simplifications:
-  - **The failure rules collapse from two to one.** Instead of "`init()` does not unwind /
-    `start()` unwinds everything", there is only *`stop()` reclaims whatever is in the ledger*.
-    The ledger records units that entered `@on_start`; a failure in the `@on_init` pass leaves it
-    empty, so the unwind is a no-op with no special rule to describe it.
-  - **The state machine went from 8 states to 6** — `INITIALIZING` / `INITIALIZED` describe work
-    that no longer happens during the object's lifetime. `NEW` is renamed **`READY`**: calling a
-    freshly constructed, fully wired runtime "new" would hide what we just made true.
-  - **Assembly errors are raised where you wrote `Canary(Root)`**, not at some later `await`.
-  - The event-loop probe moved into `start()` (it needs a running loop), which also retires the
-    awkward "init does five things and the first one is the odd one out" note in the docs.
+  The barrier between `@on_init` and `@on_start` (the whole graph settles before any unit goes to
+  work; topological order alone cannot express that for siblings) is the boundary between the two
+  methods — nothing hidden inside one call. Skipping `init()` is loud:
+  `LifecycleError: call init() before start()`. `async with canary` and `canary.lifespan` remain
+  the convenience path that does all of it.
+
+  The starting state is renamed `NEW` → **`READY`**: a freshly constructed, fully wired runtime
+  is not "new". The event-loop probe now switches on inside `init()`, so it covers both phases.
+
+- **Concurrent startup: `Canary(*roots, start_concurrency=N)`.** Independent units start
+  together, at most N at once; scheduling is dependency-driven (each unit waits for its own
+  dependencies, not for a topological layer), so it runs at the graph's critical path — 7.1x on
+  50 independent IO units, 1.7x on a typical web shape, 1.0x on a chain. **Off by default**: it
+  opens N connections at once (measured: 20 units against a backend accepting 8 → 12 rejections,
+  failed startup) and breaks sibling declaration order. The bound is not optional. Failure
+  semantics match sequential startup — siblings are cancelled and still reclaimed (they entered
+  the ledger), a lone failure is re-raised as-is, multiple simultaneous failures become an
+  `ExceptionGroup`. The DEBUG assembly summary now records per-unit timings, computes the
+  critical path, and says what `start_concurrency` would save.
 
 - **`runtime` split into four modules, each doing one thing**: `canary.py` (the engine),
   `graph.py` (pure algorithms), `probe.py` (the framework's own two environment switches — they

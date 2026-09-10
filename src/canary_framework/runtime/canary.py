@@ -3,9 +3,16 @@
 运行时：持有整张单元图并驱动生命周期。``Canary(*roots)`` 支持多根编排，
 让“嵌套”“单独启动”“组合”共用同一条代码路径。
 
-切口划在性质变化的地方：**装配是同步的，在构造函数里完成**（建图、排序、注入）；**运行是
-异步的**，归 ``start`` / ``stop``。引擎是 async 原生：钩子既可以是同步函数，也可以是协程
-函数，运行时按返回值自动判断是否 ``await``。
+四个动作，四个含义，一一对应，没有一个方法做两件事：
+
+    Canary(...)     装配——建图、排序、注入。同步、确定性、不跑任何钩子
+    await init()    各就各位——全部 @on_init
+    await start()   开工——全部 @on_start
+    await stop()    回收——逆序 @on_stop
+
+``async with canary`` 与 ``canary.lifespan`` 是便利路径，定义上就是"进入时做完所有事"；
+显式路径一一对应。引擎是 async 原生：钩子既可以是同步函数，也可以是协程函数，运行时按
+返回值自动判断是否 ``await``。
 
 运行时**只做装配与生命周期**，不认识任何外壳（HTTP、CLI、消息消费者……）。接进宿主有两条
 路，对应 Python 世界仅有的两种宿主协议：``canary.lifespan`` 交给收异步上下文管理器的宿主
@@ -48,7 +55,7 @@ _T = TypeVar("_T")
 _Hook = Callable[[], object]
 
 # 进行中的状态：只可能被并发调用者观察到，此时再驱动生命周期一定是误用。
-_TRANSIENT = (LifecycleState.STARTING, LifecycleState.STOPPING)
+_TRANSIENT = (LifecycleState.INITIALIZING, LifecycleState.STARTING, LifecycleState.STOPPING)
 
 
 def _one_failure(group: BaseExceptionGroup) -> BaseException:
@@ -95,8 +102,8 @@ class Canary:
         就能取到已注入依赖的实例，装配类的错误（``ConstructionError`` / ``InjectionError``
         / ``CircularDependencyError``）也在你写下这一行的地方抛出，而不是等到某个 await。
 
-        剩下的两件事——跑 ``@on_init`` 和 ``@on_start``——才是"运行"，它们要跑使用者的代码、
-        可能是异步的、可能有副作用，归 :meth:`start`。切口划在性质变化的地方。
+        跑钩子的事一件不做——那是 :meth:`init` 与 :meth:`start` 各自的活。切口划在性质变化
+        的地方：装配是同步的、确定性的；钩子是使用者的代码、可能异步、可能有副作用。
 
         ``start_concurrency`` 给启动开并发：``None``（默认）是严格顺序，与从前一致；给一个
         正整数则让**互不依赖的单元同时启动**，同时最多这么多个。默认关着有两个理由——并发
@@ -110,8 +117,9 @@ class Canary:
             raise ValueError(f"start_concurrency must be at least 1, got {start_concurrency}")
         self.roots = roots
         self._concurrency = start_concurrency
-        # 每个单元跑钩子花了多久；用来在摘要里算"开并发能省多少"。
+        # 每个单元跑钩子花了多久，以及 init + start 一共花了多久；摘要靠它们算"开并发能省多少"。
         self._timings: dict[type, float] = {}
+        self._elapsed_ms = 0.0
         self._graph: dict[type, object] = build_graph(list(roots))
         self._order: list[type] = topological_sort(self._graph)
         for t in self._order:
@@ -152,41 +160,61 @@ class Canary:
         return cast(_T, self._graph[cls])
 
     # -- lifecycle ----------------------------------------------------
-    async def start(self) -> None:
-        """``READY -> STARTED``: run every ``@on_init``, then every ``@on_start``.
+    async def init(self) -> None:
+        """``READY -> INITIALIZED``: run every ``@on_init``.
 
-        按拓扑序跑两轮钩子：先全部 ``@on_init``（依赖已在构造期注入完毕，此时还没有任何
-        东西开始运行），再全部 ``@on_start``（获取资源、起后台任务）。
+        各就各位。依赖已在构造期注入完毕，这里让每个单元做它"只需要依赖、不碰外部资源"
+        的准备——校验、建索引、算派生值。跑完之后整张图各就各位，**但还没有任何单元开工**。
 
-        不变式：**要么全部启动，要么什么都没启动。** 台账记录的是"进入过 ``@on_start``"
-        的单元——``@on_init`` 按契约不获取资源，也就没有东西需要回收。任一环节抛出时，
-        台账里的单元（含失败的那一个）按逆序执行 ``@on_stop``，随后原样抛出最初的异常；
-        回收过程中的异常作为 note 附在其上，不改变异常类型。
+        它单独是一个动作，因为它是一道**栅栏**：拓扑序只保证"我的依赖先于我"，管不到兄弟
+        之间；只有"全部 ``@on_init`` 完成之后才允许任何 ``@on_start``"这条，能表达"整张图
+        准备好了才开始对外服务"。这道栅栏就是本方法的返回——不调 :meth:`start`，谁也不会开工。
 
-        于是失败规则只剩一条：**``stop()`` 收台账里的一切。** ``@on_init`` 阶段失败时台账
-        是空的，回滚自然是空转，不需要为它单写一条规则。
+        失败时不回滚：``@on_init`` 按契约不获取资源，台账是空的，没有东西需要回收。
         """
         self._require(LifecycleState.READY)
-        self._state = LifecycleState.STARTING
-        started_at = time.perf_counter()
+        self._state = LifecycleState.INITIALIZING
+        began = time.perf_counter()
         try:
             self._loop_probe = await apply_probe(self._loop_probe)
             await self._run_phase(init_hooks, ledger=False)
+        except Exception:
+            self._state = LifecycleState.FAILED
+            raise
+        self._elapsed_ms += (time.perf_counter() - began) * 1e3
+        self._state = LifecycleState.INITIALIZED
+
+    async def start(self) -> None:
+        """``INITIALIZED -> STARTED``: run every ``@on_start``.
+
+        开工。按拓扑序（或在 ``start_concurrency`` 下按依赖驱动地并发）跑全部 ``@on_start``
+        ——获取资源、起后台任务。进入 ``@on_start`` 的单元立刻记账。
+
+        不变式：**要么全部启动，要么什么都没启动。** 任一环节抛出时，台账里的单元（含失败
+        的那一个）按逆序执行 ``@on_stop``，随后原样抛出最初的异常；回收过程中的异常作为
+        note 附在其上，不改变异常类型。
+        """
+        if self._state is LifecycleState.READY:
+            raise LifecycleError("Canary: call init() before start() — @on_init has not run yet")
+        self._require(LifecycleState.INITIALIZED)
+        self._state = LifecycleState.STARTING
+        began = time.perf_counter()
+        try:
             await self._run_phase(start_hooks, ledger=True)
         except Exception as exc:
             self._state = LifecycleState.FAILED
             for err in await self._unwind():
                 exc.add_note(f"during rollback: {err!r}")
             raise
+        self._elapsed_ms += (time.perf_counter() - began) * 1e3
         self._state = LifecycleState.STARTED
-        elapsed_ms = (time.perf_counter() - started_at) * 1e3
         if _log.isEnabledFor(logging.DEBUG):
             # 诊断绝不能反过来弄坏应用：摘要出问题就只报摘要出了问题。
             try:
                 _log.debug(
                     "%s",
                     assembly_summary(
-                        self.roots, self._order, self._timings, elapsed_ms, self._concurrency
+                        self.roots, self._order, self._timings, self._elapsed_ms, self._concurrency
                     ),
                 )
             except Exception:  # pragma: no cover - 仅防御
@@ -219,7 +247,7 @@ class Canary:
     # -- context manager ----------------------------------------------
     @asynccontextmanager
     async def lifespan(self, _host: object = None) -> AsyncIterator[None]:
-        """The host-facing entry point: start on enter, stop on exit, yield nothing.
+        """The host-facing entry point: init + start on enter, stop on exit, yield nothing.
 
         交给宿主的入口。它和 ``async with canary`` 只差一件事：**交出 None 而不是自己**。
 
@@ -245,6 +273,7 @@ class Canary:
             yield
 
     async def __aenter__(self) -> Self:
+        await self.init()
         await self.start()
         return self
 
@@ -261,9 +290,8 @@ class Canary:
     async def _run_phase(self, hooks_of: Callable[[object], list[_Hook]], *, ledger: bool) -> None:
         """Run one whole pass of hooks over the graph, sequentially or concurrently.
 
-        跑完一整轮钩子（一轮 ``@on_init`` 或一轮 ``@on_start``）。两轮之间是**硬同步点**：
-        整张图各就各位之后，才允许任何单元开工——并发启动的正确性正是靠这道栅栏，否则
-        A 已经在对外服务时 B 还没登记完。
+        跑完一整轮钩子——:meth:`init` 的一轮 ``@on_init``，或 :meth:`start` 的一轮
+        ``@on_start``。两轮之间的栅栏就是两个方法之间的边界。
 
         并发模式下不按"拓扑层次"分组，而是**每个单元等自己的依赖**：层次分组会让一个单元
         白等同层里最慢的那个，哪怕它俩毫无关系。所以调度是依赖驱动的，跑出来的时间贴着

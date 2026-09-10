@@ -15,17 +15,21 @@ class State(Enum):
 
 
 class LifecycleState(State):
-    """The six states a runtime walks through, in order.
+    """The states a runtime walks through, one per lifecycle action.
 
-    运行时按序经过的六个状态；非法跳转由 ``LifecycleError`` 拦截。
+    运行时的状态，和三个动作一一对应：``init()`` 走 ``READY → INITIALIZED``，``start()``
+    走 ``INITIALIZED → STARTED``，``stop()`` 走到 ``STOPPED``。每个动作各有一个进行中的
+    状态（``*ING``），只可能被并发调用者观察到；非法跳转由 ``LifecycleError`` 拦截。
 
     起点是 ``READY`` 而不是"什么都还没做"：装配（建图、排序、注入）在
     :class:`~canary_framework.runtime.canary.Canary` 的构造函数里就完成了，所以一个刚
     造出来的运行时**已经可用** —— ``canary[SomeUnit]`` 立刻能取到已注入依赖的实例，
-    只是还没有人开始运行。
+    只是还没有任何钩子跑过。
     """
 
     READY = "ready"
+    INITIALIZING = "initializing"
+    INITIALIZED = "initialized"
     STARTING = "starting"
     STARTED = "started"
     STOPPING = "stopping"

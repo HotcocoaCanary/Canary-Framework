@@ -65,6 +65,7 @@ async def test_full_library_lifecycle() -> None:
     app_type = _build_library()
 
     canary = Canary(app_type)
+    await canary.init()
     await canary.start()
     svc = canary[app_type].library_service
 
@@ -82,6 +83,7 @@ async def test_full_library_lifecycle() -> None:
 async def test_repository_can_run_standalone() -> None:
     app_type = _build_library()
     canary = Canary(app_type)
+    await canary.init()
     await canary.start()
     book_repo = canary[app_type].library_service.book_repository
     await canary.stop()
@@ -89,6 +91,7 @@ async def test_repository_can_run_standalone() -> None:
     # 单独启动一个仓库，只拉起它自己的子树
     repo_type = type(book_repo)
     solo = Canary(repo_type)
+    await solo.init()
     await solo.start()
     assert [t.__name__ for t in solo.order] == ["Config", "Database", "BookRepository"]
     await solo.stop()

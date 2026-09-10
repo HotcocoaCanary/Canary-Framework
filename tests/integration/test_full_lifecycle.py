@@ -65,6 +65,7 @@ async def test_full_lifecycle_order_and_singleton_sharing() -> None:
             events.append("app.banner")
 
     canary = Canary(App)
+    await canary.init()
     await canary.start()
     assert canary.state is LifecycleState.STARTED
     assert canary.order == (Config, Database, Repository, Service, App)
@@ -101,6 +102,7 @@ async def test_instances_and_getitem() -> None:
         pass
 
     canary = Canary(Database)
+    await canary.init()
     await canary.start()
 
     # instances 与 order 同序，__getitem__ 按类型取回对应单例。
@@ -117,6 +119,7 @@ async def test_getitem_raises_key_error_for_unknown_type() -> None:
         pass
 
     canary = Canary(Known)
+    await canary.init()
     await canary.start()
 
     with pytest.raises(KeyError):

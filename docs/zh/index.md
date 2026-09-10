@@ -66,7 +66,8 @@ class UserService: ...
 
 async def main() -> None:
     app = Canary(UserService)
-    await app.start()  # 跑 @on_init，再跑 @on_start
+    await app.init()   # 各就各位：@on_init
+    await app.start()  # 开工：@on_start
     assert app[Database].config is app[Config]
     await app.stop()   # 逆序执行 @on_stop
 
