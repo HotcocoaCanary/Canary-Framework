@@ -15,8 +15,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
+import time
 import types
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -49,6 +51,32 @@ _Hook = Callable[[], object]
 _TRANSIENT = (LifecycleState.STARTING, LifecycleState.STOPPING)
 
 
+def _one_failure(group: BaseExceptionGroup) -> BaseException:
+    """Unwrap a TaskGroup's ExceptionGroup back to the single real failure, when there is one.
+
+    并发启动失败时 ``TaskGroup`` 会取消同批的其它单元，于是异常组里混着一堆
+    ``CancelledError``——那些是我们自己造成的，不是原因。把它们滤掉之后：
+
+    - 只剩一个 → 原样抛出它，和顺序启动的行为一致（调用方的 ``except RuntimeError`` 照旧管用）
+    - 剩下多个 → 真的有多个单元同时失败，保留 ``ExceptionGroup``，一个都不隐瞒
+    """
+    real = [exc for exc in _flatten(group) if not isinstance(exc, asyncio.CancelledError)]
+    if len(real) == 1:
+        return real[0]
+    ordinary = [exc for exc in real if isinstance(exc, Exception)]
+    if real and len(ordinary) == len(real):
+        return ExceptionGroup(f"{len(real)} unit(s) failed to start", ordinary)
+    return group
+
+
+def _flatten(group: BaseExceptionGroup) -> list[BaseException]:
+    """异常组可以嵌套异常组，摊平成一层。"""
+    out: list[BaseException] = []
+    for exc in group.exceptions:
+        out.extend(_flatten(exc)) if isinstance(exc, BaseExceptionGroup) else out.append(exc)
+    return out
+
+
 class Canary:
     """A runtime that owns a graph of cocoas and drives their lifecycle.
 
@@ -56,7 +84,7 @@ class Canary:
     异步原生——同步钩子直接调用，异步钩子自动 ``await``。
     """
 
-    def __init__(self, *roots: type) -> None:
+    def __init__(self, *roots: type, start_concurrency: int | None = None) -> None:
         """Assemble the graph. Synchronous, and complete — the runtime is usable when it returns.
 
         构造即装配：建图（每个类型无参构造一次）、拓扑排序、注入依赖。这三件都是同步的、
@@ -69,11 +97,21 @@ class Canary:
 
         剩下的两件事——跑 ``@on_init`` 和 ``@on_start``——才是"运行"，它们要跑使用者的代码、
         可能是异步的、可能有副作用，归 :meth:`start`。切口划在性质变化的地方。
+
+        ``start_concurrency`` 给启动开并发：``None``（默认）是严格顺序，与从前一致；给一个
+        正整数则让**互不依赖的单元同时启动**，同时最多这么多个。默认关着有两个理由——并发
+        启动会同时向下游发起 N 个连接（连接风暴），以及它会打破"兄弟按声明序启动"这个虽然
+        从未承诺、但可能有人依赖的顺序。启动完成后框架会在装配摘要里告诉你开了能省多少。
         """
         for root in roots:
             if not is_cocoa(root):
                 raise TypeError(f"'{root.__name__}' is not decorated with @cocoa")
+        if start_concurrency is not None and start_concurrency < 1:
+            raise ValueError(f"start_concurrency must be at least 1, got {start_concurrency}")
         self.roots = roots
+        self._concurrency = start_concurrency
+        # 每个单元跑钩子花了多久；用来在摘要里算"开并发能省多少"。
+        self._timings: dict[type, float] = {}
         self._graph: dict[type, object] = build_graph(list(roots))
         self._order: list[type] = topological_sort(self._graph)
         for t in self._order:
@@ -130,25 +168,27 @@ class Canary:
         """
         self._require(LifecycleState.READY)
         self._state = LifecycleState.STARTING
+        started_at = time.perf_counter()
         try:
             self._loop_probe = await apply_probe(self._loop_probe)
-            for t in self._order:
-                for hook in init_hooks(self._graph[t]):
-                    await self._invoke_hook(hook)
-            for t in self._order:
-                self._started.append(t)
-                for hook in start_hooks(self._graph[t]):
-                    await self._invoke_hook(hook)
+            await self._run_phase(init_hooks, ledger=False)
+            await self._run_phase(start_hooks, ledger=True)
         except Exception as exc:
             self._state = LifecycleState.FAILED
             for err in await self._unwind():
                 exc.add_note(f"during rollback: {err!r}")
             raise
         self._state = LifecycleState.STARTED
+        elapsed_ms = (time.perf_counter() - started_at) * 1e3
         if _log.isEnabledFor(logging.DEBUG):
             # 诊断绝不能反过来弄坏应用：摘要出问题就只报摘要出了问题。
             try:
-                _log.debug("%s", assembly_summary(self.roots, self._order))
+                _log.debug(
+                    "%s",
+                    assembly_summary(
+                        self.roots, self._order, self._timings, elapsed_ms, self._concurrency
+                    ),
+                )
             except Exception:  # pragma: no cover - 仅防御
                 _log.debug("assembly summary unavailable", exc_info=True)
 
@@ -218,6 +258,55 @@ class Canary:
         return False
 
     # -- internals ----------------------------------------------------
+    async def _run_phase(self, hooks_of: Callable[[object], list[_Hook]], *, ledger: bool) -> None:
+        """Run one whole pass of hooks over the graph, sequentially or concurrently.
+
+        跑完一整轮钩子（一轮 ``@on_init`` 或一轮 ``@on_start``）。两轮之间是**硬同步点**：
+        整张图各就各位之后，才允许任何单元开工——并发启动的正确性正是靠这道栅栏，否则
+        A 已经在对外服务时 B 还没登记完。
+
+        并发模式下不按"拓扑层次"分组，而是**每个单元等自己的依赖**：层次分组会让一个单元
+        白等同层里最慢的那个，哪怕它俩毫无关系。所以调度是依赖驱动的，跑出来的时间贴着
+        关键路径。
+
+        ``ledger`` 为真时在跑钩子之前把单元记账。记的是"进入过"而非"完成"——被取消或
+        中途失败的单元同样持有半个资源，同样要回收。并发下记账顺序仍然是一个合法的拓扑序
+        （单元只在依赖**全部完成**之后才进入），所以逆序回收依旧正确。
+        """
+        if self._concurrency is None:
+            for t in self._order:
+                if ledger:
+                    self._started.append(t)
+                await self._run_unit(t, hooks_of)
+            return
+
+        done = {t: asyncio.Event() for t in self._order}
+        limit = asyncio.Semaphore(self._concurrency)
+
+        async def run(t: type) -> None:
+            for dep in deps_of(t):
+                await done[dep].wait()
+            # 信号量只圈住真正干活的那段，等依赖的时候不占名额。
+            async with limit:
+                if ledger:
+                    self._started.append(t)
+                await self._run_unit(t, hooks_of)
+            done[t].set()
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                for t in self._order:
+                    group.create_task(run(t))
+        except BaseExceptionGroup as failures:
+            raise _one_failure(failures) from None
+
+    async def _run_unit(self, t: type, hooks_of: Callable[[object], list[_Hook]]) -> None:
+        """跑一个单元的钩子，顺带记下耗时——摘要靠它算"开并发能省多少"。"""
+        began = time.perf_counter()
+        for hook in hooks_of(self._graph[t]):
+            await self._invoke_hook(hook)
+        self._timings[t] = self._timings.get(t, 0.0) + (time.perf_counter() - began) * 1e3
+
     def _inject(self, node: object) -> None:
         """Inject each declared dependency by its snake_case attribute name.
 
