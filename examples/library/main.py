@@ -1,4 +1,4 @@
-"""入口：组装 Canary，演示 组合 / 嵌套 与 单独启动。
+"""入口：启动一个单元，它的依赖自己就位。
 
 两种运行方式都支持::
 
@@ -17,35 +17,25 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(_ROOT))
     sys.path.insert(0, str(_ROOT / "src"))
 
-from canary_framework import Canary
 from examples.library.app import LibraryApp
 from examples.library.repositories import BookRepository
-from examples.library.services import LibraryService
 
 
 async def main() -> None:
-    print("一、组合 / 嵌套：以 LibraryApp 为根，整张图按拓扑序启动")
-    lib = Canary(LibraryApp)
-    await lib.init()  # 各就各位：@on_init
-    await lib.start()  # 开工：@on_start
-    print("   启动顺序:", [t.__name__ for t in lib.order])
-    svc = lib[LibraryApp].library_service  # 懒注入
-    print("   单例共享:", lib[LibraryApp].library_service is lib[LibraryService])
+    print("一、启动根单元：Config -> Database -> 三个仓库 -> Service -> App 自己按序起来")
+    async with LibraryApp() as app:
+        service = app.library
+        print("   单例共享:", service.books.database is service.loans.database)
+        print("\n   检索「三体」:", service.search("三体"))
+        print("   ", service.borrow(1, 1))
+        print("   ", service.borrow(1, 3))  # 无库存
+        print("   ", service.return_book(1))
+        three_body = service.books.get(1)
+        print("   《三体》剩余库存:", three_body and three_body["stock"])
 
-    print("\n   检索「三体」:", svc.search("三体"))
-    print("   ", svc.borrow(1, 1))
-    print("   ", svc.borrow(1, 3))  # 无库存
-    print("   ", svc.return_book(1))
-    print("   《三体》剩余库存:", lib[BookRepository].get(1)["stock"])
-    await lib.stop()
-
-    print("\n二、单独启动：BookRepository 自己也能飞（连它的 Database + Config 子树）")
-    books = Canary(BookRepository)
-    await books.init()
-    await books.start()
-    print("   启动顺序:", [t.__name__ for t in books.order])
-    print("   检索「活着」:", [b["title"] for b in books[BookRepository].search("活着")])
-    await books.stop()
+    print("\n二、任何单元都能自己当入口：BookRepository 连它的 Database + Config 子树")
+    async with BookRepository() as books:
+        print("   检索「活着」:", [b["title"] for b in books.search("活着")])
 
 
 if __name__ == "__main__":

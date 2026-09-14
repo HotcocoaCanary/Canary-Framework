@@ -1,11 +1,10 @@
 """Config —— 全局配置单元（模拟）。"""
 
-from canary_framework import cocoa, on_init
+from canary_framework import Canary, init
 
 
-@cocoa
-class Config:
-    @on_init
+class Config(Canary):
+    @init
     def load(self) -> None:
         self.settings = {"db_name": "library.db", "overdue_days": 30}
         print("  [Config] 加载配置")

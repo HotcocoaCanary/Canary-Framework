@@ -9,7 +9,7 @@ bug reports are all welcome.
 ```bash
 git clone https://github.com/HotcocoaCanary/Canary-Framework.git
 cd Canary-Framework
-uv sync --extra dev --extra web
+uv sync --extra dev
 ```
 
 ## 开发流程 / Workflow

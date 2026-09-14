@@ -1,44 +1,71 @@
-"""Canary — a minimal dependency-injection and lifecycle runtime.
+"""Canary: dependency injection and lifecycle for plain Python classes.
 
-``@cocoa`` 标记最小单元，:class:`Canary` 编排一组单元：解析依赖图、按拓扑序排序、注入
-依赖，并驱动生命周期::
+继承 ``Canary`` 即为最小单元，``dep(...)`` 声明依赖，三个阶段注解声明行为。启动一个
+单元，它的依赖按依赖顺序就位::
 
-    @cocoa(deps=[Database])
-    class UserService: ...
+    class Config(Canary):
+        @init
+        def load(self) -> None:
+            self.dsn = os.environ["DSN"]
 
-    canary = Canary(UserService)   # 装配：建图、排序、注入依赖
-    await canary.init()            # 全部 @on_init
-    await canary.start()           # 全部 @on_start
-    canary[Database]               # 共享单例
-    canary.order                   # 拓扑启动顺序
-    await canary.stop()            # 逆序全部 @on_stop
+    class Database(Canary):
+        config = dep(Config)
+
+        @start
+        async def connect(self) -> None:
+            self.pool = await open_pool(self.config.dsn)
+
+        @stop
+        async def close(self) -> None:
+            await self.pool.close()
+
+    class UserService(Canary):
+        db = dep(Database)
+
+    async with UserService() as service:     # Config -> Database -> UserService
+        ...                                  # 退出时逆序回收
+
+公开 API 全部从本模块导出，详见 :mod:`canary_framework.core`。
 """
 
 from __future__ import annotations
 
 __version__ = "0.9.3"
 
-from canary_framework.common.error import (
+from canary_framework.core import (
+    Canary,
     CanaryError,
     CircularDependencyError,
     ConstructionError,
-    InjectionError,
+    DeclarationError,
     LifecycleError,
+    Phase,
+    Scope,
+    advance,
+    dep,
+    deps_of,
+    init,
+    scope_of,
+    start,
+    stop,
+    unwind,
 )
-from canary_framework.common.type import LifecycleState
-from canary_framework.core.decorator import cocoa, on_init, on_start, on_stop
-from canary_framework.runtime import Canary
 
 __all__ = [
     "Canary",
     "CanaryError",
     "CircularDependencyError",
     "ConstructionError",
-    "InjectionError",
+    "DeclarationError",
     "LifecycleError",
-    "LifecycleState",
-    "cocoa",
-    "on_init",
-    "on_start",
-    "on_stop",
+    "Phase",
+    "Scope",
+    "advance",
+    "dep",
+    "deps_of",
+    "init",
+    "scope_of",
+    "start",
+    "stop",
+    "unwind",
 ]

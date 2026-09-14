@@ -31,6 +31,4 @@ repos:
     hooks:
       - id: mypy
         args: [--strict]
-        # 0.9.0 起 web 扩展依赖 pydantic / starlette，mypy 需要它们的类型存根。
-        additional_dependencies: [pydantic>=2.7, starlette>=0.37]
         files: ^src/
