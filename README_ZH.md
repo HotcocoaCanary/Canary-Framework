@@ -1,8 +1,8 @@
 <h1 align="center">Canary Framework</h1>
 
 <p align="center">
-  一个极简、装饰器驱动的<strong>依赖注入</strong>与<strong>生命周期</strong>运行时
-  —— 纯 Python，零依赖。
+  面向普通 Python 类的<strong>依赖注入</strong>与<strong>生命周期</strong>框架
+  —— 纯标准库，零依赖。
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 <p align="center">
   <a href="README.md">English</a> ·
-  <a href="https://hotcocoacanary.github.io/Canary-Framework/">中文文档</a> ·
+  <a href="https://hotcocoacanary.github.io/Canary-Framework/">文档</a> ·
   <a href="CHANGELOG.md">变更日志</a>
 </p>
 
@@ -24,133 +24,97 @@
 pip install canary-framework
 ```
 
-不会拉进任何第三方包 —— 框架只用标准库。
+需要 Python 3.12 或更高版本。安装不会引入任何第三方包。
 
-需要 Python 3.12+。
+## 模型
 
-## 核心模型
-
-- **cocoa** 是最小运行单元 —— 一个被 `@cocoa` 标记的普通 Python class。依赖通过
-  `deps=[...]` 声明；`@on_init` / `@on_start` / `@on_stop` 声明可选的生命周期行为。
-- **Canary** 是编排器。`Canary(*roots)` 解析依赖图、拓扑排序、驱动完整生命周期。
-
-它是一个运行时容器；你的对象由什么外壳驱动（HTTP、CLI、定时任务）由你决定。
-
-一条贯穿全框架的规则：
-
-> **框架只造空壳，一切需要外界输入的事都在生命周期里做。**
-
-单元一律由框架**无参构造**，所以 `__init__` 不能有必填参数：需要什么就声明成依赖，值在
-生命周期钩子里从协作者那里读。
-
-## 快速开始
+继承 `Canary` 即为一个**单元**：用 `dep()` 声明它依赖谁，用 `@init` / `@start` / `@stop`
+声明它在各阶段做什么。启动一个单元，它的依赖按依赖顺序就位；退出时逆序回收。
 
 ```python
 import asyncio
 
-from canary_framework import Canary, cocoa, on_init, on_start
+from canary_framework import Canary, dep, init, start, stop
 
 
-@cocoa
-class Config:
-    def __init__(self) -> None:
-        self.database_url = "postgresql://localhost/dev"
+class Config(Canary):
+    @init
+    def load(self) -> None:
+        self.dsn = "postgresql://localhost/dev"
 
 
-@cocoa(deps=[Config])
-class Database:
-    @on_init
-    def build_pool(self) -> None:
-        print(f"准备连接 {self.config.database_url}")   # self.config 已注入
+class Database(Canary):
+    config = dep(Config)
 
-    @on_start
-    async def connect(self) -> None: ...
+    @start
+    async def connect(self) -> None:
+        print(f"连接 {self.config.dsn}")
+
+    @stop
+    async def close(self) -> None:
+        print("断开连接")
 
 
-@cocoa(deps=[Database])
-class UserService: ...
+class UserService(Canary):
+    database = dep(Database)
 
 
 async def main() -> None:
-    app = Canary(UserService)
-    await app.init()   # 各就各位：@on_init
-    await app.start()  # 开工：@on_start
-    assert app[Database].config is app[Config]
-    await app.stop()   # 逆序执行 @on_stop
+    async with UserService() as service:
+        print(service.database.config.dsn)
 
 
 asyncio.run(main())
 ```
 
-## 依赖注入
-
-cocoa 通过 `deps=[...]` 声明依赖 —— 无需 `__init__` 装配，也无需额外 DSL。每个依赖在
-`init()` 阶段注入为 `self.<snake_case 名>`，所以 `@on_init` 已经能看到自己的协作者：
-
-```python
-@cocoa(deps=[Database, Cache])
-class UserService:
-    @on_init
-    def check(self) -> None:
-        assert self.database is not None
+```
+连接 postgresql://localhost/dev
+postgresql://localhost/dev
+断开连接
 ```
 
-两个依赖的 snake_case 撞名会抛 `InjectionError`，而不是"后写的赢"。
+## 两条规则
 
-## 生命周期
+**推进**沿依赖递归：一个单元进入某个阶段之前，它的依赖已经完成该阶段。同一个单元的同一个
+阶段只运行一次，互不依赖的依赖同时推进。
 
-三个可选钩子 —— 各自同步或异步皆可，每个阶段可有任意多个：
+**回收**按台账线性进行：依赖图不是树，因此回收不能沿依赖递归，只能按进入顺序逆序执行。
 
-| 阶段 | 装饰器 | 手上有什么 |
-|---|---|---|
-| 初始化 | `@on_init` | 依赖已就位，但还没有任何东西开始运行 |
-| 启动 | `@on_start` | 可以获取资源、起后台任务 |
-| 停止 | `@on_stop` | 逆序回收 |
+`init` / `start` / `stop` 是这两条规则的三个名字。加第四个阶段只需要一行：
+`Phase("migrate", after=init)`。
 
-失败路径：`start()` 失败会逆序回收已启动的单元；`stop()` 是唯一的回收路径，正常结束与
-失败结束都走它，且可重复调用 —— `finally: await app.stop()` 永远安全。
+## 亮点
 
-`Canary(Root, start_concurrency=N)` 让互不依赖的单元同时启动，同时最多 N 个；默认严格顺序。
-详见 [生命周期](docs/zh/lifecycle.md)。
+- **类型完整。** `self.config` 就是 `Config`，`async with service` 交出你自己的类型，
+  `dep(不是单元的类)` 是一个类型错误。不需要任何插件。
+- **普通类。** 装饰器只在方法上打标记；单元可继承、可混入、可嵌套，生命周期方法也可以
+  覆盖并用 `super()` 组合。
+- **失败路径是设计的一部分。** `start()` 失败会回收已启动的单元；`stop()` 是唯一的回收
+  路径，正常结束与失败结束共用，重复调用幂等。
+- **默认并发。** 互不依赖的单元同时推进，调度由依赖驱动。
+- **零依赖。** 有一条测试断言：跑完一整轮生命周期，不会从 site-packages 导入任何东西。
 
-## 接进一个宿主
+## 接入宿主
 
-宿主有两种形状，两种都直接支持：收异步上下文管理器的用 `canary.lifespan`（ASGI、MCP、
-FastStream），收成对启停回调的用 `init()`/`start()`/`stop()`（Quart、Sanic、arq、Dramatiq）。
+框架不认识任何外壳 —— HTTP、CLI、定时任务、消息消费者都由你决定：
 
 ```python
-from fastapi import Depends, FastAPI
-
-canary = Canary(UserService)
-app = FastAPI(lifespan=canary.lifespan)       # 进入时 init + start，退出时 stop
-
-
-def provide[T](cls: type[T]):
-    def dep() -> T:
-        return canary[cls]
-    return dep
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with service:
+        yield
 
 
-@app.get("/users/{user_id}")
-async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserService))]):
-    return users.get(user_id)
+app = FastAPI(lifespan=lifespan)
 ```
-
-HTTP、WebSocket、静态文件、中间件、认证全部归宿主。Canary 只保证你的对象被正确装配、
-按序启动、按逆序回收。
-
-## 示例
-
-[`examples/`](examples) 下有多个可运行示例，从最小单元逐步到依赖注入、生命周期钩子、
-多根编排，以及一个分层的图书馆 web 应用。
 
 ## 文档
 
-- [快速开始](docs/zh/quickstart.md)
-- [Cocoa 单元](docs/zh/cocoa.md) · [运行时（Canary）](docs/zh/canary.md)
-- [生命周期](docs/zh/lifecycle.md) · [依赖注入](docs/zh/dependency-injection.md)
-- [架构](docs/zh/architecture.md) · [API 参考](docs/zh/api-reference.md)
+完整文档（含 0.9.x 迁移指南）见
+[hotcocoacanary.github.io/Canary-Framework](https://hotcocoacanary.github.io/Canary-Framework/)。
+
+一个五层的完整示例在 [`examples/library/`](examples/library)。
 
 ## 许可证
 
-Apache-2.0。
+Apache-2.0，见 [LICENSE](LICENSE)。

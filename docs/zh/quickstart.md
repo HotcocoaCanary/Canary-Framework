@@ -1,154 +1,125 @@
 # 快速开始
 
-安装框架：
+## 安装
 
 ```bash
 pip install canary-framework
 ```
 
-需要 Python 3.12+。核心零依赖 —— 不会拉进任何第三方包。
+需要 Python 3.12 或更高版本。
 
-## 声明单元
+## 第一个单元
 
-用 `@cocoa` 标记任意普通 class，依赖通过 `deps=[...]` 声明：
+单元是继承了 `Canary` 的普通类。它无参构造，行为写在阶段钩子里。
 
 ```python
-from canary_framework import cocoa
+from canary_framework import Canary, init
 
 
-@cocoa
-class Config:
-    def __init__(self) -> None:      # 无参构造：不能有必填参数
-        self.database_url = "postgresql://localhost/dev"
-
-
-@cocoa(deps=[Config])
-class Database:
-    # self.config 在构造期注入
-    pass
+class Config(Canary):
+    @init
+    def load(self) -> None:
+        self.dsn = "postgresql://localhost/dev"
 ```
 
-单元一律由框架**无参构造**，所以需要什么值就声明成依赖，在生命周期钩子里从协作者那里读 ——
-不要写成构造参数。
+`@init` 标记的方法在 `init` 阶段运行。钩子可以是同步的，也可以是 `async def`，框架按
+返回值判断是否需要等待。
 
-## 添加生命周期行为
+## 声明依赖
 
-使用 `@on_init`、`@on_start`、`@on_stop` —— 均可选，同步或异步皆可：
+用 `dep()` 声明依赖。属性名由你决定：
 
 ```python
-from canary_framework import cocoa, on_init, on_start, on_stop
+from canary_framework import Canary, dep, start, stop
 
 
-@cocoa(deps=[Config])
-class Database:
-    @on_init
-    def setup(self) -> None:
-        # 依赖已就位，但还没有任何东西开始运行
-        self.pool = ConnectionPool(self.config.database_url)
+class Database(Canary):
+    config = dep(Config)
 
-    @on_start
+    @start
     async def connect(self) -> None:
-        # 要连接、要起后台任务的，归这里
-        await self.pool.connect()
+        self.pool = await open_pool(self.config.dsn)
 
-    @on_stop
-    async def disconnect(self) -> None:
+    @stop
+    async def close(self) -> None:
         await self.pool.close()
 ```
 
-不碰外部资源的准备工作放 `@on_init`，需要获取资源的放 `@on_start`：只有 `@on_start`
-获取的东西才会被 `@on_stop` 回收。
+`self.config` 的类型是 `Config`，类型检查器与 IDE 都能识别。
 
-## 用 `Canary` 运行
-
-`Canary(*roots)` 从每个根解析依赖图、拓扑排序，并显式驱动生命周期：
+## 运行
 
 ```python
 import asyncio
 
-from canary_framework import Canary, cocoa
 
-
-@cocoa(deps=[Database])
-class UserService: ...
+class UserService(Canary):
+    database = dep(Database)
 
 
 async def main() -> None:
-    app = Canary(UserService)
-    await app.init()
-    await app.start()
-    try:
-        users = app[UserService]
-        assert users.database is app[Database]
-    finally:
-        await app.stop()      # 从任何终态都能调，幂等
+    async with UserService() as service:
+        rows = await service.database.pool.fetch("select 1")
+        print(rows)
 
 
 asyncio.run(main())
 ```
 
-也可用异步上下文管理器：
+`async with` 进入时依次推进 `init` 与 `start`，退出时回收。整张图（`Config` →
+`Database` → `UserService`）自己按依赖顺序就位。
+
+## 四个动作
+
+需要分步控制时用显式写法，效果与 `async with` 一致：
 
 ```python
-async def main() -> None:
-    async with Canary(UserService) as app:
-        assert app[Database] is app[UserService].database
-
-
-asyncio.run(main())
+service = UserService()
+await service.init()     # 全部 @init
+await service.start()    # 全部 @start
+await service.stop()     # 逆序全部 @stop
 ```
 
-## 组合多个根
+未调用 `init()` 就 `start()` 会抛 `LifecycleError`，而不是静默跳过一个阶段。
 
-`Canary` 接受多个根，把它们的依赖图合并为一张：
+## 在哪个阶段做什么
 
-```python
-app = Canary(UserService, ReportService)
-await app.init()
-await app.start()
-assert app[Database] is app[UserService].database
+- **构造**：不做任何事。单元必须能无参构造，此时依赖尚不可用。
+- **`@init`**：只需要依赖、不获取外部资源的准备工作——校验、建索引、计算派生值。
+- **`@start`**：获取资源、启动后台任务。只有在此获取的东西才会被 `@stop` 回收。
+- **`@stop`**：释放 `@start` 获取的东西。
+
+## 完整示例
+
+仓库的 `examples/library/` 是一个五层的依赖图：
+
+```
+LibraryApp → LibraryService → 三个 Repository → Database → Config
 ```
 
-任意子图都可独立启动 —— `Canary(Database)` 只会启动 `Database` 及其依赖（`Config`）。
-
-## 接进一个宿主
-
-Canary 不关心谁来驱动它 —— 它只需要有人在运行期把它包住。任何支持"启动 / 关停"的宿主都
-可以，比如 FastAPI 的 lifespan：
-
-```python
-from fastapi import Depends, FastAPI
-
-canary = Canary(UserService)
-app = FastAPI(lifespan=canary.lifespan)      # 启动时 init + start，关停时 stop
-
-
-def provide[T](cls: type[T]):
-    def dep() -> T:
-        return canary[cls]
-    return dep
-
-
-@app.get("/users/{user_id}")
-async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserService))]):
-    return users.get(user_id)
-```
-
-HTTP、WebSocket、静态文件、中间件、认证全都归宿主 —— 那些框架已经做得很好了，Canary 不
-重复造。它只保证你的对象被正确装配、按序启动、按逆序回收。
-
-## 看看框架装配出了什么
-
-把日志级别设成 `DEBUG`，启动末尾会打印一份装配摘要（启动顺序、依赖、路由）：
+运行：
 
 ```bash
-CANARY_LOG_LEVEL=DEBUG python -m examples.library.main
+python examples/library/main.py
 ```
 
-## 下一步
+## 接入宿主
 
-- [Cocoa 单元](cocoa.md) —— 声明、构造规则与钩子。
-- [运行时（Canary）](canary.md) —— 编排、多根与接进宿主。
-- [生命周期](lifecycle.md) —— 五个时刻、状态机与失败路径。
-- [依赖注入](dependency-injection.md) —— 注入、共享、成环、撞名。
-- [架构](architecture.md) —— 分层、标记、两个阶段。
+框架不认识任何外壳。接进 ASGI、CLI 或消息消费者都是同一种写法：
+
+```python
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+service = UserService()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with service:
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
+```

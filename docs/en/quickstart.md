@@ -1,158 +1,131 @@
 # Quick Start
 
-Install the framework:
+## Install
 
 ```bash
 pip install canary-framework
 ```
 
-Python 3.12+ is required. The core has zero dependencies — nothing third-party is pulled in.
+Requires Python 3.12 or newer.
 
-## Declare units
+## Your first unit
 
-Mark any plain class with `@cocoa` and declare dependencies with `deps=[...]`:
+A unit is a plain class that subclasses `Canary`. It is constructed with no arguments, and its
+behaviour lives in phase hooks.
 
 ```python
-from canary_framework import cocoa
+from canary_framework import Canary, init
 
 
-@cocoa
-class Config:
-    def __init__(self) -> None:      # no required parameters
-        self.database_url = "postgresql://localhost/dev"
-
-
-@cocoa(deps=[Config])
-class Database:
-    # self.config is injected at construction
-    pass
+class Config(Canary):
+    @init
+    def load(self) -> None:
+        self.dsn = "postgresql://localhost/dev"
 ```
 
-Units are always constructed by the framework **with no arguments**, so whatever value a unit
-needs it declares as a dependency and reads from a collaborator in a lifecycle hook — never as a
-constructor parameter.
+A method marked `@init` runs during the `init` phase. Hooks may be synchronous or
+`async def`; the framework decides whether to await by looking at the return value.
 
-## Add lifecycle behaviour
+## Declare dependencies
 
-Use `@on_init`, `@on_start` and `@on_stop` — all optional, sync or async:
+Use `dep()`. You choose the attribute name:
 
 ```python
-from canary_framework import cocoa, on_init, on_start, on_stop
+from canary_framework import Canary, dep, start, stop
 
 
-@cocoa(deps=[Config])
-class Database:
-    @on_init
-    def setup(self) -> None:
-        # dependencies are in place, nothing is running yet
-        self.pool = ConnectionPool(self.config.database_url)
+class Database(Canary):
+    config = dep(Config)
 
-    @on_start
+    @start
     async def connect(self) -> None:
-        # connections and background tasks belong here
-        await self.pool.connect()
+        self.pool = await open_pool(self.config.dsn)
 
-    @on_stop
-    async def disconnect(self) -> None:
+    @stop
+    async def close(self) -> None:
         await self.pool.close()
 ```
 
-Preparation that touches no external resource goes in `@on_init`; acquiring resources goes in
-`@on_start`: only what `@on_start` acquired is reclaimed by `@on_stop`.
+`self.config` has type `Config` — type checkers and IDEs see it.
 
-## Run it with `Canary`
-
-`Canary(*roots)` resolves the graph from each root, sorts it and drives the lifecycle explicitly:
+## Run it
 
 ```python
 import asyncio
 
-from canary_framework import Canary, cocoa
 
-
-@cocoa(deps=[Database])
-class UserService: ...
+class UserService(Canary):
+    database = dep(Database)
 
 
 async def main() -> None:
-    app = Canary(UserService)
-    await app.init()
-    await app.start()
-    try:
-        users = app[UserService]
-        assert users.database is app[Database]
-    finally:
-        await app.stop()      # callable from any settled state; idempotent
+    async with UserService() as service:
+        rows = await service.database.pool.fetch("select 1")
+        print(rows)
 
 
 asyncio.run(main())
 ```
 
-Or use the async context manager:
+Entering `async with` advances `init` then `start`; leaving reclaims. The whole graph
+(`Config` → `Database` → `UserService`) comes up in dependency order on its own.
+
+## The four actions
+
+For step-by-step control, use the explicit form — it behaves exactly like `async with`:
 
 ```python
-async def main() -> None:
-    async with Canary(UserService) as app:
-        assert app[Database] is app[UserService].database
-
-
-asyncio.run(main())
+service = UserService()
+await service.init()     # every @init
+await service.start()    # every @start
+await service.stop()     # every @stop, in reverse
 ```
 
-## Compose several roots
+Calling `start()` without `init()` raises `LifecycleError` rather than silently skipping a
+phase.
 
-`Canary` accepts several roots and merges their graphs into one:
+## What belongs in which phase
 
-```python
-app = Canary(UserService, ReportService)
-await app.init()
-await app.start()
-assert app[Database] is app[UserService].database
+- **Construction**: nothing. A unit must be constructible with no arguments, and dependencies
+  are not available yet.
+- **`@init`**: preparation that needs only dependencies and acquires nothing external —
+  validation, building indexes, deriving values.
+- **`@start`**: acquire resources, start background tasks. Only what is acquired here is
+  reclaimed by `@stop`.
+- **`@stop`**: release what `@start` acquired.
+
+## A complete example
+
+`examples/library/` in the repository is a five-layer graph:
+
+```
+LibraryApp → LibraryService → three repositories → Database → Config
 ```
 
-Any subgraph can be started on its own — `Canary(Database)` starts only `Database` and its
-dependency `Config`.
-
-## Plug it into a host
-
-Canary does not care who drives it — it only needs someone to wrap it for the duration of the
-run. Any host with a startup/shutdown notion works; FastAPI's lifespan, for instance:
-
-```python
-from fastapi import Depends, FastAPI
-
-canary = Canary(UserService)
-app = FastAPI(lifespan=canary.lifespan)      # init + start on entry, stop on exit
-
-
-def provide[T](cls: type[T]):
-    def dep() -> T:
-        return canary[cls]
-    return dep
-
-
-@app.get("/users/{user_id}")
-async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserService))]):
-    return users.get(user_id)
-```
-
-HTTP, WebSocket, static files, middleware and authentication all belong to the host — those
-frameworks already do them well, and Canary does not rebuild them. It only guarantees that your
-objects are assembled correctly, started in order and reclaimed in reverse.
-
-## See what the framework assembled
-
-Set the log level to `DEBUG` and the end of startup prints an assembly summary — start order,
-dependencies, routes:
+Run it:
 
 ```bash
-CANARY_LOG_LEVEL=DEBUG python -m examples.library.main
+python examples/library/main.py
 ```
 
-## Next
+## Hosting
 
-- [Cocoa Units](cocoa.md) — declaration, construction rules, hooks.
-- [Runtime (Canary)](canary.md) — composition, multi-root, plugging into a host.
-- [Lifecycle](lifecycle.md) — five moments, the state machine, failure paths.
-- [Dependency Injection](dependency-injection.md) — injection, sharing, cycles, name clashes.
-- [Architecture](architecture.md) — layers, markers, the two phases.
+The framework knows nothing about shells. ASGI, a CLI or a message consumer all wire up the
+same way:
+
+```python
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+service = UserService()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with service:
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
+```

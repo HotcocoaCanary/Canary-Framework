@@ -1,135 +1,129 @@
-# Runtime (Canary)
+# Units
 
-`Canary` is the orchestrator that owns a graph of [cocoa](cocoa.md) units and drives their
-lifecycle. It is not a business unit itself — it only resolves, orders and runs.
-
-```python
-from canary_framework import Canary
-
-
-app = Canary(UserService)
-await app.init()
-await app.start()
-...
-await app.stop()
-```
-
-## Construction
+A unit is a plain class that subclasses `Canary`. `Canary` does two things: it puts the class
+into the dependency graph (so others may `dep()` it), and it gives the class four lifecycle
+actions.
 
 ```python
-app = Canary(*roots)
+from canary_framework import Canary, dep, init, start, stop
+
+
+class Database(Canary):
+    config = dep(Config)
+
+    @start
+    async def connect(self) -> None:
+        self.pool = await open_pool(self.config.dsn)
+
+    @stop
+    async def close(self) -> None:
+        await self.pool.close()
 ```
 
-Every root must be marked with `@cocoa`, otherwise `Canary` raises `TypeError` at construction.
-Passing several roots merges their graphs into one. `Canary(...)` itself does nothing — the
-graph is built in the constructor.
+Beyond that it stays a plain Python class: it can be subclassed, mixed in and nested.
 
-## Assembly and lifecycle
+## The four actions
 
-| When | Transition | What it does |
-|---|---|---|
-| `Canary(*roots)` | — `→ READY` | assembly: build, validate, sort, **inject dependencies**. Synchronous; runs no hooks |
-| `await app.init()` | `READY → INITIALIZED` | settle in: every `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | go to work: every `@on_start`, ledgered on entry |
-| `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse; idempotent, shared by normal and failed termination |
+| Action | What it does |
+|---|---|
+| `Unit()` | Construct with no arguments. No hooks run; dependencies are not available yet. |
+| `await unit.init()` | Advance the `init` phase along dependencies. |
+| `await unit.start()` | Advance the `start` phase along dependencies. |
+| `await unit.stop()` | Reclaim the ledger in reverse. |
 
-The engine is async-native: hooks may be sync or async and the runtime awaits only when needed.
-The state machine and the failure paths are described in [Lifecycle](lifecycle.md).
+`async with unit` is the convenience form: entering calls `init()` then `start()`, leaving
+calls `stop()`. All three go through this class's own methods, so a subclass's overrides apply
+on that path too.
 
-`Canary` also implements the async context manager protocol:
+## Construction takes no arguments
+
+Units are always constructed by the framework with no arguments, so `__init__` may not have
+required parameters:
 
 ```python
-async with Canary(UserService) as app:
-    assert app[Database] is app[UserService].database
+class Database(Canary):
+    def __init__(self, dsn: str) -> None:   # not allowed
+        self.dsn = dsn
 ```
 
-## Reaching the instances
+```
+ConstructionError: cannot construct Database: missing a required argument: 'dsn'.
+Units are always constructed with no arguments. Declare what it needs with dep(...)
+and read the values from those dependencies in @init or @start.
+```
 
-Use `__getitem__` to get the shared singleton for a type:
+Turn the constructor argument into a dependency and read the value in a hook:
 
 ```python
-users = app[UserService]
-assert users.database is app[Database]
+class Database(Canary):
+    config = dep(Config)
+
+    @start
+    async def connect(self) -> None:
+        self.pool = await open_pool(self.config.dsn)
 ```
 
-`order` returns the topological start order (dependencies first), `instances` returns the
-instances in the same order, and `state` returns the current `LifecycleState`.
+The constraint is deliberate: `@start` has a matching `@stop`, while construction has no
+matching destructor. Deferring anything that needs the outside world to a lifecycle hook puts
+every such action into a phase that is ledgered and can be reclaimed in reverse.
 
-## Multi-root composition
+## Any unit can be the entry point
 
-Because `Canary` accepts several roots, the same unit can take part in different graphs — and
-any subgraph can be started on its own:
+Any unit in the graph can run on its own, and it is then the root of its own graph:
 
 ```python
-# the whole application
-app = Canary(LibraryApp)
-await app.init()
-await app.start()
-
-# just the data layer
-books = Canary(BookRepository)
-await books.init()
-await books.start()
-```
-
-Dependencies are shared inside one graph, never between two independent `Canary` instances.
-
-Multi-root has one consequence worth knowing: **no unit starts last**, so there is no "after
-everything is up" position. Declare a single composition root if you need one.
-
-## The assembly summary
-
-Set `CANARY_LOG_LEVEL=DEBUG` and the end of startup prints a summary on the `canary.runtime`
-logger — start order plus each unit's dependencies and timing:
-
-```text
-Canary assembled 4 unit(s)
-  roots: LibraryApp
-  start order (stop runs in reverse):
-    1. Config
-    2. Database  <- Config
-    3. BookRepository  <- Database
-    4. LibraryApp  <- BookRepository
-```
-
-## Letting a host drive it
-
-`Canary` knows about no shell — it is neither a web framework nor a CLI framework.
-
-Two host protocols, two entry points:
-
-| What the host takes | Use | Who does this |
-|---|---|---|
-| an async context manager, `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI (Starlette / FastAPI / Litestar), MCP, FastStream |
-| paired startup / shutdown callbacks | `start()` and `stop()` | Quart, Sanic, arq, Dramatiq |
-
-```python
-app = FastAPI(lifespan=canary.lifespan)          # that is the whole wiring
-app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
-server = MCPServer("demo", lifespan=canary.lifespan)
-```
-
-Without a host (a CLI, a script, a test fixture) use it directly:
-
-```python
-async with canary.lifespan():
+async with BookRepository() as books:      # brings up its Database and Config too
     ...
 ```
 
-To reach a unit inside a host's handler, `canary[SomeUnit]` is it — dependencies are already
-injected, so `self.<dep>` just works. With FastAPI's `Depends` that takes a three-line factory:
+## Overriding and composition
+
+Lifecycle methods are ordinary methods; override them and compose with `super()`:
 
 ```python
-def provide[T](cls: type[T]):
-    def dep() -> T:
-        return canary[cls]
-    return dep
+class Traced(Canary):
+    async def start(self) -> None:
+        log.info("starting %s", type(self).__name__)
+        await super().start()
+        log.info("started %s", type(self).__name__)
 
 
-@app.get("/books/{book_id}")
-async def read(book_id: int, svc: Annotated[LibraryApp, Depends(provide(LibraryApp))]):
-    return svc.get_book(book_id)
+class Service(Traced):
+    @start
+    async def go(self) -> None: ...
 ```
 
-HTTP, WebSocket, static files, middleware and authentication all belong to the host. Canary only
-guarantees that your objects are assembled correctly, started in order and reclaimed in reverse.
+Phase hooks may be named anything, as long as the name does not collide with `init`, `start`,
+`stop`, `__aenter__` or `__aexit__`.
+
+## Substitutes
+
+Unit-ness is inherited, so a test double just subclasses what it replaces:
+
+```python
+class FakeDatabase(Database):
+    @start
+    async def connect(self) -> None:
+        self.pool = InMemoryPool()
+```
+
+To swap an instance in the graph, assign the attribute:
+
+```python
+service = UserService()
+await service.init()
+service.database = FakeDatabase()
+```
+
+## `stop()` is a graph action
+
+`init()` and `start()` are unit actions: they advance down the dependencies. `stop()` is
+different — it reclaims the whole scope's ledger, so calling it on any unit in the graph has
+the same effect.
+
+```python
+await service.database.stop()     # reclaims the whole graph, not just database
+```
+
+Reclamation cannot be divided: `Database` may be depended on by several units, and stopping it
+alone would break the ones still using it.

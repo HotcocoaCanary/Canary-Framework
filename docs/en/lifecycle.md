@@ -1,221 +1,178 @@
 # Lifecycle
 
-`Canary` drives every unit through an explicit, async-native timeline.
+## Phases
 
-## Five moments
-
-A unit goes from nothing to running to gone through five moments, differing in **what you have
-in your hands at that moment**:
-
-| Moment | Who acts | What you have |
-|---|---|---|
-| Construction | your `__init__` | nothing (no arguments) |
-| **Assembly** | **the framework**, inside `Canary(...)` | build → validate → sort → inject |
-| Init `@on_init` | you | dependencies in place, nothing running yet |
-| Start `@on_start` | you | dependencies in place; acquire resources |
-| Stop `@on_stop` | you | reclaim, in reverse |
-
-The middle step is a framework action, not a user hook: it completes synchronously inside
-`Canary(...)`, with no point at which user code could run.
-
-## Three hooks
-
-| Declaration | Runs during | Order |
-|---|---|---|
-| `@on_init` | `init()`, after injection | topological (dependencies first) |
-| `@on_start` | `start()` | topological (dependencies first) |
-| `@on_stop` | `stop()` | reverse topological (dependents first) |
-
-All hooks are optional and may be sync or async — the runtime inspects the return value and only
-awaits when it is awaitable, so the two mix freely.
-
-## What each method does
-
-| When | Transition | What it does |
-|---|---|---|
-| `Canary(*roots)` | — `→ READY` | assembly: build, validate, sort, **inject dependencies**. Synchronous; runs no hooks |
-| `await app.init()` | `READY → INITIALIZED` | settle in: every `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | go to work: every `@on_start`, ledgered on entry |
-| `await app.stop()` | any settled state `→ STOPPED` | run `@on_stop` in reverse |
-
-Four actions, four meanings, one-to-one: **construction assembles, `init` settles in, `start` goes
-to work, `stop` reclaims.** No method does two things. Between `init()` and `start()` there is a
-barrier — the whole graph settles before any unit goes to work — and that barrier *is* the method
-boundary: until you call `start()`, nothing goes to work.
-
-## The state machine
-
-```
-READY ─▶ INITIALIZING ─▶ INITIALIZED ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
-             │                            │                       │
-             └──────────────▶ FAILED ◀────┴───────────────────────┘
-```
-
-Each action has an in-progress state (`*ING`) that only a concurrent caller can ever observe.
-
-It starts at `READY`, not at "nothing has happened yet": assembly is done in the constructor, so
-a freshly built runtime is **already usable** — `canary[SomeUnit]` hands back an instance with
-its dependencies injected; nothing is running yet, that is all.
-
-`app.state` returns the current `LifecycleState`. Illegal transitions raise `LifecycleError`:
+A phase is the name of one pass. The framework ships three:
 
 ```python
-await app.init()
-await app.start()
-await app.init()
-await app.start()  # LifecycleError: illegal transition from STARTED
+from canary_framework import init, start, stop
 ```
 
-## Hook order
-
-For the graph `APIService → UserService → Database` (arrow = "depends on"):
-
-- **Init** — `Database` → `UserService` → `APIService`
-- **Start** — `Database` → `UserService` → `APIService`
-- **Stop** — `APIService` → `UserService` → `Database`
-
-Every unit is initialised and started after its dependencies, and stopped before them. The order
-comes from Kahn's algorithm, so it is deterministic.
-
-## Hooks stack
-
-One marker can be shared by several methods — mixin hooks run before the class's own, in
-definition order:
+They are both the decorators that mark hooks and the arguments to `advance()` and `unwind()`.
 
 ```python
-class LoggingMixin:
-    @on_start
-    def log_start(self) -> None:
-        print(f"[{type(self).__name__}] starting")
+class Database(Canary):
+    @init
+    def prepare(self) -> None: ...
 
+    @start
+    async def connect(self) -> None: ...
 
-@cocoa(deps=[Config])
-class Database(LoggingMixin):
-    @on_start
-    async def connect(self) -> None:
-        await self.pool.connect()
+    @stop
+    async def close(self) -> None: ...
 ```
 
-Both `log_start` (mixin) and `connect` (class) run, in that order.
+One class may have several hooks in one phase; they run in definition order. One method may
+belong to several phases. Hooks may be synchronous or `async def` — the framework decides
+whether to await by looking at the return value, so a synchronous function returning a
+coroutine works too.
 
-## Failure paths
+## Advancing recurses along dependencies
 
-**There is one rule: `stop()` reclaims whatever is in the ledger.** When `init()` fails the ledger
-is empty (`@on_init` acquires nothing by contract), so there is nothing to reclaim and the state
-simply becomes `FAILED`.
-
-The ledger records the units that **entered** `@on_start`. By contract that is the only place
-resources are acquired, so it is the only thing that needs reclaiming.
-
-When `start()` fails the invariant is *either everything started, or nothing did*: every unit in
-the ledger (including the one that failed) runs its `@on_stop` in reverse, and then the original
-exception is re-raised, with any unwind failures attached to it as notes.
-
-A failure during the `@on_init` pass leaves the ledger empty, so the unwind is a no-op — no
-separate rule needed for it.
-
-**`stop()` is the single reclamation path.** It serves both normal and failed termination:
+`await unit.init()` advances `init` across the graph: dependencies first, then the unit's own
+hooks.
 
 ```python
-app = Canary(Root)
-try:
-    await app.init()
-    await app.start()
-finally:
-    await app.stop()   # callable from STARTED and from FAILED; idempotent
+class Config(Canary): ...
+
+
+class Database(Canary):
+    config = dep(Config)
+
+
+class Service(Canary):
+    database = dep(Database)
+
+
+await Service().init()      # Config -> Database -> Service
 ```
 
-Calling `stop()` on something that never started is not an error — it is a no-op that settles
-into `STOPPED` (an earlier `FAILED` is not erased). That makes `finally: await app.stop()`
-always safe, with no state check first.
+Two properties:
 
-A single failing `@on_stop` does not abort the shutdown: errors are collected, the remaining
-units are reclaimed anyway, and everything is raised at the end as one `ExceptionGroup`.
+- **One unit runs one phase exactly once**, no matter how many units depend on it.
+- **Independent dependencies advance concurrently**, so elapsed time tracks the graph's
+  critical path rather than the sum of all units.
 
-## Concurrent startup
+## The barrier
+
+The return of `init()` is a barrier: every `@init` completes before any `@start` runs.
+
+```
+Config.init -> Database.init -> Service.init
+          ↓ barrier
+Config.start -> Database.start -> Service.start
+```
+
+This is what actually separates `@init` from `@start`. `@init` acquires nothing external, so a
+failure during its pass over the graph needs no reclamation; `@start` acquires, so it has a
+matching `@stop`.
+
+Calling `start()` without `init()` raises:
+
+```
+LifecycleError: Service: @init has not run, call it before @start
+```
+
+## The ledger and reclamation
+
+A unit is recorded in the ledger as it **enters** `@start`, not when it completes — so a unit
+that fails halfway is reclaimed too.
+
+`stop()` drains the ledger in reverse and is the single reclamation path:
+
+| When called | Behaviour |
+|---|---|
+| Never started | Ledger empty, no-op |
+| Only `init()` ran | `start` ledger empty, no-op |
+| After a normal start | Reclaims in reverse |
+| `start()` failed midway | Reclaims whatever entered `@start`, including the one that failed |
+| Called again | Ledger already drained, no-op |
+
+One rule covers all five cases, which is why there is no state machine.
+
+## Failure
+
+**Startup failure.** When any `@start` raises, the ledger is unwound in reverse and the
+original exception is re-raised unchanged:
 
 ```python
-Canary(Root, start_concurrency=8)
-```
+class Leaf(Canary):
+    @start
+    def go(self) -> None: ...
 
-The default, `None`, starts units strictly one at a time in topological order. A positive integer
-lets **independent units start together**, at most that many at once. The speed-up is the
-sequential total divided by the critical path (the longest dependency chain by time) — entirely a
-property of the graph's shape:
+    @stop
+    def bye(self) -> None:
+        print("leaf reclaimed")
 
-```
-50 independent 60ms IO units            3009ms → 423ms     7.1x
-a typical web shape (DB / Redis / MQ)    260ms → 152ms     1.7x
-a single chain                           unchanged          1.0x
-```
 
-**Off by default**, for two reasons: concurrent startup opens N connections to a backend at once
-(a connection storm — measured: 20 units against a backend that accepts 8 got 12 rejections and a
-failed startup), and it breaks "siblings start in declaration order", which was never promised but
-may be relied upon.
+class Root(Canary):
+    leaf = dep(Leaf)
 
-**The limit is not optional.** The semaphore wraps only the hook execution, not the waiting for
-dependencies. Scheduling is dependency-driven — each unit waits for its own dependencies rather
-than for a whole topological layer (layering makes a unit wait for the slowest sibling it has
-nothing to do with).
+    @start
+    def go(self) -> None:
+        raise RuntimeError("startup failed")
 
-**Failure semantics match sequential startup.** When one unit fails its siblings are cancelled; a
-cancelled unit may hold half a resource, so it is ledgered and reclaimed like any other. A single
-real failure is re-raised as-is (`except RuntimeError` still works); only when several units fail
-at once is an `ExceptionGroup` raised, hiding none of them.
 
-**The framework suggests a value.** With `CANARY_LOG_LEVEL=DEBUG`, a
-sequential startup's assembly summary records each unit's time, computes the critical path, and
-says what concurrency would buy:
-
-```
-Canary assembled 8 unit(s), started in 260ms
-  ...
-  critical path is 150ms of the 260ms spent starting units
-  start_concurrency=3 could bring that down to about 150ms (1.7x)
-```
-
-It stays quiet when startup is too short or the graph too narrow to matter.
-
-## Letting a host drive it
-
-Two host protocols, two entry points:
-
-| What the host takes | Use | Who does this |
-|---|---|---|
-| an async context manager, `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI (Starlette / FastAPI / Litestar), MCP, FastStream |
-| paired startup / shutdown callbacks | `start()` and `stop()` | Quart, Sanic, arq, Dramatiq |
-
-```python
-app = FastAPI(lifespan=canary.lifespan)          # that is the whole wiring
-app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
-server = MCPServer("demo", lifespan=canary.lifespan)
-```
-
-Without a host (a CLI, a script, a test fixture) use it directly:
-
-```python
-async with canary.lifespan():
+async with Root():        # prints "leaf reclaimed", then raises RuntimeError
     ...
 ```
 
-The framework knows about none of them specifically — the table above covers the only two shapes
-that exist in Python.
+If reclamation itself fails, that error is attached as a note on the original exception rather
+than replacing it.
 
-`canary.lifespan` differs from `async with canary` in exactly one way: **it yields `None` rather
-than the container.** The ASGI lifespan protocol treats the yielded value as a mapping to merge
-into `scope["state"]`, so yielding the container makes Starlette call `dict.update(canary)` and
-leak a `KeyError` with no clue in it. `async with canary` serves your own code and still hands
-back the container.
+**Several units failing at once.** Under concurrent advancement, simultaneous failures are
+combined into one `ExceptionGroup`; a lone failure is re-raised as-is, matching sequential
+behaviour.
 
-## Two environment variables
+**Reclamation failure.** One failing `@stop` does not abort the pass; the remaining units are
+reclaimed and everything is raised at the end as one `ExceptionGroup`, even for a single error:
 
-The framework has exactly two knobs of its own, read straight from the environment:
+```
+ExceptionGroup: 1 error(s) while stopping
+  RuntimeError: could not close
+    raised by Database.close
+```
 
-| Variable | Effect |
-|---|---|
-| `CANARY_LOG_LEVEL` | Sets the level of the `canary` logger tree only. No handler, no format, nothing touched on root. `DEBUG` also prints the assembly summary (start order, dependencies, routes). |
-| `CANARY_SLOW_CALLBACK_SECONDS` | Turns on an event-loop lag probe: any callback occupying the loop for longer than this gets an asyncio WARNING. It enables asyncio debug mode and costs something, so it is a development tool and off by default. |
+## Custom phases
 
-The framework provides no configuration mechanism — configuration is just one of your own
-`@cocoa` units, and logging is the standard library's `logging.getLogger(__name__)`.
+`Phase` is public, and adding a phase requires no registration:
+
+```python
+from canary_framework import Phase, advance, init
+
+migrate = Phase("migrate", after=init)
+
+
+class Schema(Canary):
+    @migrate
+    async def apply(self) -> None: ...
+
+
+await unit.init()
+await advance(unit, migrate)
+```
+
+`after` declares a predecessor: advancing a phase whose predecessor has not finished raises
+`LifecycleError` instead of silently skipping it.
+
+To give a new phase a reclamation pass, use `unwind()` — the pairing lives at the call site:
+
+```python
+from canary_framework import scope_of, unwind
+
+errors = await unwind(scope_of(unit), rollback, undoing=migrate)
+```
+
+## Hosting
+
+The framework knows nothing about shells. When the host takes an async context manager:
+
+```python
+@asynccontextmanager
+async def lifespan(_app):
+    async with service:
+        yield
+```
+
+When the host takes paired start/stop callbacks, hand it `service.init`, `service.start` and
+`service.stop` directly.

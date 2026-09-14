@@ -1,83 +1,90 @@
 # Canary Framework
 
-一个极简、装饰器驱动的**依赖注入**与**生命周期**运行时 —— 纯 Python，零依赖。
+面向普通 Python 类的**依赖注入**与**生命周期**框架。纯标准库，零第三方依赖。
 
-它是一个运行时容器：把一组对象按依赖关系装配起来、按序启动、按逆序回收。这些对象由什么
-外壳驱动（HTTP、CLI、定时任务、消息消费者）由你决定 —— FastAPI、Starlette、Typer 或你
-自己的 `main()` 都可以。
-
-框架只有两个概念：
-
-- **cocoa** —— 最小单元。被 `@cocoa` 标记的普通 class；依赖由 `deps=[...]` 声明，行为由
-  `@on_init` / `@on_start` / `@on_stop` 钩子定义。
-- **Canary** —— 编排器。`Canary(*roots)` 解析依赖图、拓扑排序、驱动完整生命周期。
-
-## 一条贯穿全框架的规则
-
-> **框架只造空壳，一切需要外界输入的事都在生命周期里做。**
-
-单元一律由框架**无参构造**，所以 `__init__` 不能有必填参数。需要什么就声明成依赖，值在
-`@on_init` 或 `@on_start` 里从协作者那里读。
-
-## 亮点
-
-- **声明式依赖注入** —— 无需 `__init__` 装配；依赖在**构造期**注入为
-  `self.<snake_case 名>`，所以 `@on_init` 已经能看到自己的协作者。
-- **显式、异步原生生命周期** —— 装配在构造期，然后 `start()` → `stop()`；同步/异步钩子皆可。
-  接进任何宿主只要一行 `async with canary:`。
-- **失败路径是设计的一部分** —— `start()` 失败会逆序回收已启动的单元；`stop()` 是唯一的
-  回收路径，正常结束与失败结束都走它，且可重复调用。
-- **确定性排序** —— 卡恩拓扑排序；每个类型在图内共享同一个单例。
-- **多根编排** —— 嵌套、混入，或独立启动任意子图。
-- **并发启动** —— `start_concurrency=N` 让互不依赖的单元同时启动，带并发上限。
-- **零依赖** —— `pip install canary-framework` 只用标准库，不拉进任何第三方包。
-
-## 示例
+继承 `Canary` 即为一个最小单元：它声明自己依赖谁，也声明自己在各阶段做什么。启动一个
+单元，它的依赖按依赖顺序就位；退出时逆序回收。
 
 ```python
 import asyncio
 
-from canary_framework import Canary, cocoa, on_init, on_start
+from canary_framework import Canary, dep, init, start, stop
 
 
-@cocoa
-class Config:
-    def __init__(self) -> None:  # 无参构造：没有必填参数
-        self.database_url = "postgresql://localhost/dev"
+class Config(Canary):
+    @init
+    def load(self) -> None:
+        self.dsn = "postgresql://localhost/dev"
 
 
-@cocoa(deps=[Config])
-class Database:
-    @on_init
-    def build_pool(self) -> None:
-        self.pool = ConnectionPool(self.config.database_url)  # self.config 已注入
+class Database(Canary):
+    config = dep(Config)
 
-    @on_start
+    @start
     async def connect(self) -> None:
-        await self.pool.connect()
+        print(f"连接 {self.config.dsn}")
+
+    @stop
+    async def close(self) -> None:
+        print("断开连接")
 
 
-@cocoa(deps=[Database])
-class UserService: ...
+class UserService(Canary):
+    database = dep(Database)
 
 
 async def main() -> None:
-    app = Canary(UserService)
-    await app.init()   # 各就各位：@on_init
-    await app.start()  # 开工：@on_start
-    assert app[Database].config is app[Config]
-    await app.stop()   # 逆序执行 @on_stop
+    async with UserService() as service:
+        print(service.database.config.dsn)
 
 
 asyncio.run(main())
 ```
 
-## 导航
+## 两条规则
 
-- [快速开始](quickstart.md)
-- [Cocoa 单元](cocoa.md)
-- [运行时（Canary）](canary.md)
-- [生命周期](lifecycle.md)
-- [依赖注入](dependency-injection.md)
-- [架构](architecture.md)
-- [API 参考](api-reference.md)
+整个框架只有两条规则。
+
+**推进**沿依赖递归：一个单元进入某个阶段之前，它的依赖已经完成该阶段。同一个单元的同一个
+阶段只运行一次，无论有多少单元依赖它；互不依赖的依赖同时推进。
+
+**回收**按台账线性进行：依赖图不是树，一个单元可能被多个单元依赖，因此回收不能沿依赖
+递归，只能按进入顺序逆序执行。
+
+`init` / `start` / `stop` 是这两条规则的三个名字。
+
+## 核心概念
+
+| 名字 | 是什么 |
+|---|---|
+| `Canary` | 单元基类。继承它即为一个单元，并获得四个生命周期动作。 |
+| `dep(Cls)` | 依赖声明。属性名由你决定，与被依赖的类名无关。 |
+| `@init` / `@start` / `@stop` | 阶段标记。标注该方法在哪个阶段运行。 |
+| `Phase` | 阶段本身。`Phase("migrate")` 即是第四个阶段，无需注册。 |
+| `Scope` | 一次运行共享的状态。一个作用域就是一张图。 |
+
+## 不变量
+
+1. **单元一律由框架无参构造。** 需要外界输入的事情发生在生命周期钩子里，因为只有那里的
+   事情才有对应的回收步骤。
+2. **一个作用域内，每个类型只有一个实例。** 两个各自构造的根是两张互不相干的图。
+3. **依赖在 `@init` 之后才可用。** 在 `__init__` 中读取依赖会抛 `LifecycleError`。
+4. **全部 `@init` 完成之后，才有任何 `@start` 运行。**
+5. **`stop()` 是唯一的回收路径。** 正常结束与失败结束共用，重复调用幂等。
+
+## 安装
+
+```bash
+pip install canary-framework
+```
+
+需要 Python 3.12 或更高版本。安装不会引入任何第三方包。
+
+## 下一步
+
+- [快速开始](quickstart.md)：十分钟跑通一个完整的例子。
+- [单元](canary.md)：`Canary` 基类的四个动作。
+- [依赖声明](dependency-injection.md)：`dep()` 与作用域。
+- [生命周期](lifecycle.md)：阶段、栅栏、失败与回收。
+- [架构](architecture.md)：分层与依赖方向。
+- [API 参考](api-reference.md)：全部公开名字。

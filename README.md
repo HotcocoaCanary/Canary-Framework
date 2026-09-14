@@ -1,8 +1,8 @@
 <h1 align="center">Canary Framework</h1>
 
 <p align="center">
-  A minimal, decorator-driven runtime for <strong>dependency injection</strong> and
-  <strong>lifecycle</strong> — pure Python, zero dependencies.
+  <strong>Dependency injection</strong> and <strong>lifecycle</strong> for plain Python
+  classes &mdash; standard library only, zero dependencies.
 </p>
 
 <p align="center">
@@ -24,143 +24,101 @@
 pip install canary-framework
 ```
 
-Nothing third-party comes with it — the framework only uses the standard library.
-
-Python 3.12+ is required.
+Requires Python 3.12 or newer. Installing pulls in no third-party packages.
 
 ## The model
 
-- A **cocoa** is the minimum runnable unit — a plain Python class marked with `@cocoa`.
-  Dependencies are declared with `deps=[...]`; `@on_init` / `@on_start` / `@on_stop` declare
-  optional lifecycle behaviour.
-- **Canary** is the orchestrator. `Canary(*roots)` resolves the dependency graph, sorts it
-  topologically and drives the whole lifecycle.
-
-It is a runtime container; which shell drives your objects — HTTP, a CLI, a scheduler — is up to
-you.
-
-One rule runs through everything:
-
-> **The framework only builds empty shells. Anything that needs input from outside happens in the
-> lifecycle.**
-
-Units are always constructed by the framework **with no arguments**, so `__init__` may not have
-required parameters: whatever a unit needs, it declares as a dependency and reads from a
-collaborator in a lifecycle hook.
-
-## Quick start
+Subclass `Canary` and you have a **unit**: it declares what it depends on with `dep()`, and
+what it does in each phase with `@init` / `@start` / `@stop`. Start one unit and its
+dependencies come up in dependency order; leaving reclaims them in reverse.
 
 ```python
 import asyncio
 
-from canary_framework import Canary, cocoa, on_init, on_start
+from canary_framework import Canary, dep, init, start, stop
 
 
-@cocoa
-class Config:
-    def __init__(self) -> None:
-        self.database_url = "postgresql://localhost/dev"
+class Config(Canary):
+    @init
+    def load(self) -> None:
+        self.dsn = "postgresql://localhost/dev"
 
 
-@cocoa(deps=[Config])
-class Database:
-    @on_init
-    def build_pool(self) -> None:
-        print(f"about to connect to {self.config.database_url}")  # self.config is injected
+class Database(Canary):
+    config = dep(Config)
 
-    @on_start
-    async def connect(self) -> None: ...
+    @start
+    async def connect(self) -> None:
+        print(f"connecting to {self.config.dsn}")
+
+    @stop
+    async def close(self) -> None:
+        print("disconnected")
 
 
-@cocoa(deps=[Database])
-class UserService: ...
+class UserService(Canary):
+    database = dep(Database)
 
 
 async def main() -> None:
-    app = Canary(UserService)
-    await app.init()   # settle in: @on_init
-    await app.start()  # go to work: @on_start
-    assert app[Database].config is app[Config]
-    await app.stop()   # run @on_stop in reverse
+    async with UserService() as service:
+        print(service.database.config.dsn)
 
 
 asyncio.run(main())
 ```
 
-## Dependency injection
-
-A cocoa declares its dependencies with `deps=[...]` — no `__init__` wiring, no extra DSL. Each
-dependency is injected at construction as `self.<snake_case name>`, so `@on_init` already sees
-its collaborators:
-
-```python
-@cocoa(deps=[Database, Cache])
-class UserService:
-    @on_init
-    def check(self) -> None:
-        assert self.database is not None
+```
+connecting to postgresql://localhost/dev
+postgresql://localhost/dev
+disconnected
 ```
 
-Two dependencies whose snake_case names collide raise `InjectionError` instead of letting the
-last one win.
+## Two rules
 
-## Lifecycle
+**Advancing** recurses along dependencies: a unit enters a phase only after its dependencies
+have completed it. One unit runs one phase exactly once no matter how many units depend on it,
+and independent dependencies advance concurrently.
 
-Three optional hooks, each sync or async, any number per phase:
+**Unwinding** is linear: a dependency graph is not a tree, so reclamation runs over a ledger in
+reverse entry order.
 
-| Phase | Decorator | What you have |
-|---|---|---|
-| Init | `@on_init` | dependencies in place, nothing running yet |
-| Start | `@on_start` | acquire resources, start background tasks |
-| Stop | `@on_stop` | reclaim, in reverse |
+`init` / `start` / `stop` are three names for these two rules. Adding a fourth phase is one
+line: `Phase("migrate", after=init)`.
 
-Failure paths: a failing `start()` unwinds everything it started, and `stop()` is the single
-reclamation path for both normal and failed termination, callable repeatedly —
-`finally: await app.stop()` is always safe.
+## Highlights
 
-`Canary(Root, start_concurrency=N)` starts independent units together, at most N at once; the
-default is strictly sequential. See [Lifecycle](docs/en/lifecycle.md).
+- **Typed end to end.** `self.config` is a `Config`, `async with service` yields your type, and
+  `dep(SomethingElse)` is a type error. No plugin required.
+- **Plain classes.** Decorators only mark methods; units stay subclassable, mixable, nestable,
+  and lifecycle methods can be overridden with `super()`.
+- **Failure paths are part of the design.** A failing `start()` reclaims what started; `stop()`
+  is the single reclamation path, shared by success and failure, and is idempotent.
+- **Concurrent by default.** Independent units advance together, scheduled by dependency.
+- **Zero dependencies.** A test asserts that a full lifecycle imports nothing from
+  site-packages.
 
-## Plug it into a host
+## Hosting
 
-Hosts come in two shapes and both are supported directly: those taking an async context manager
-use `canary.lifespan` (ASGI, MCP, FastStream); those taking paired startup/shutdown callbacks use
-`init()`/`start()`/`stop()` (Quart, Sanic, arq, Dramatiq).
+The framework knows nothing about shells — HTTP, CLI, schedulers and consumers are all yours:
 
 ```python
-from fastapi import Depends, FastAPI
-
-canary = Canary(UserService)
-app = FastAPI(lifespan=canary.lifespan)       # init + start on entry, stop on exit
-
-
-def provide[T](cls: type[T]):
-    def dep() -> T:
-        return canary[cls]
-    return dep
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    async with service:
+        yield
 
 
-@app.get("/users/{user_id}")
-async def read(user_id: int, users: Annotated[UserService, Depends(provide(UserService))]):
-    return users.get(user_id)
+app = FastAPI(lifespan=lifespan)
 ```
-
-HTTP, WebSocket, static files, middleware and authentication all belong to the host. Canary
-only guarantees that your objects are assembled correctly, started in order and reclaimed in
-reverse.
-
-## Examples
-
-[`examples/`](examples) contains runnable examples, from a single unit up through dependency
-injection, lifecycle hooks, multi-root composition and a layered library web app.
 
 ## Documentation
 
-- [Quick Start](docs/en/quickstart.md)
-- [Cocoa Units](docs/en/cocoa.md) · [Runtime (Canary)](docs/en/canary.md)
-- [Lifecycle](docs/en/lifecycle.md) · [Dependency Injection](docs/en/dependency-injection.md)
-- [Architecture](docs/en/architecture.md) · [API Reference](docs/en/api-reference.md)
+Full documentation, including migration from 0.9.x, is at
+[hotcocoacanary.github.io/Canary-Framework](https://hotcocoacanary.github.io/Canary-Framework/).
+
+A complete five-layer example lives in [`examples/library/`](examples/library).
 
 ## License
 
-Apache-2.0.
+Apache-2.0. See [LICENSE](LICENSE).

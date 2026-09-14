@@ -1,90 +1,98 @@
 # Architecture
 
-The framework is a thin layering on top of plain Python classes. It separates **declaration**
-(markers on classes) from **interpretation** (the runtime that reads them).
+The framework is a thin layer over plain Python classes. It separates **declaration** (markers
+on a class) from **interpretation** (the engine that reads them and drives).
 
 ## Layers
 
 ```
-common   — shared types, exceptions and metadata markers (no framework logic)
+errors            exceptions, usable by any layer
    ▲
-core     — declaration primitives: @cocoa, @on_init/@on_start/@on_stop, introspection
+declare           declaration: phase / dep / introspect
    ▲
-runtime  — the engine: Canary, graph building, topological sort
+runtime           runtime: scope / invoke / advance / unwind
+   ▲
+canary            facade: the Canary base class and dep()
 ```
 
-The dependency direction is strictly acyclic: `runtime → core → common`. Each layer knows only
-the one below it.
+The dependency direction is strictly one-way: `canary → runtime → declare → errors`. Only
+`canary` depends on both sides, which is exactly a facade's job.
 
-Inside the package every import uses the full module path — the `__init__.py` files carry only a
-docstring and re-export nothing. There is exactly one public entry point: `canary_framework`.
+This is not merely documented — `tests/test_layering.py` parses every module's imports with
+`ast` and asserts the direction, so any reverse dependency fails the test.
 
-## Markers, not magic
+## Modules
 
-The framework communicates through **markers**: decorators stamp small string constants onto
-classes and methods, and the runtime reads them back. Every marker is collected in
-`canary_framework.common.markers`:
+| Module | Contents |
+|---|---|
+| `core/errors.py` | Five exceptions, all inheriting `CanaryError` |
+| `core/declare/phase.py` | `Phase` plus `init` / `start` / `stop` |
+| `core/declare/dep.py` | The `Dep` descriptor |
+| `core/declare/introspect.py` | One MRO walk reading dependencies and hooks, cached per class |
+| `core/runtime/scope.py` | `Scope`, `scope_of`, no-argument construction |
+| `core/runtime/invoke.py` | Calling one hook |
+| `core/runtime/advance.py` | Advancing one phase along dependencies |
+| `core/runtime/unwind.py` | Reclaiming the ledger in reverse |
+| `core/canary.py` | The `Canary` base class and `dep()` |
+
+## Markers, not rewriting
+
+Decorators write one marker on a method and never rewrite the class. Units keep every property
+of a plain class: subclassing, mixins, nesting.
 
 | Marker | Written by | Read by |
 |---|---|---|
-| `COCOA_ATTR` | `@cocoa` | runtime (is this a unit? what does it depend on?) |
-| `ON_INIT` / `ON_START` / `ON_STOP` | the hook decorators | runtime (which hooks to run) |
+| `__canary_phases__` | Phase decorators | `introspect` (which methods belong to which phase) |
+| `_canary_scope` | `Scope.adopt` | `Dep.__get__` (where to resolve a dependency) |
 
-A decorator only `setattr`s a marker; it never rewrites the class. That keeps units plain and
-introspection cheap and side-effect free.
+Dependencies are not expressed with a marker at all: a `Dep` is a class attribute, so it holds
+the class object itself rather than a name.
 
-There is exactly one MRO scan: it walks the chain once and buckets all three hook markers, and
-its result is **cached per class** because it cannot change once the class exists — while a full
-lifecycle scans three times (init / start / stop). `object` is skipped: it has two dozen callable
-members, none of which can ever carry our markers, and it sits at the end of every MRO.
+## Hook resolution
 
-## Two phases
+One MRO walk collects dependencies and marked attribute names together, and the result is
+cached per class — declarations do not change after class creation.
 
-1. **Declaration** — `@cocoa(deps=[...])` records dependencies and the hook decorators record
-   hooks. Nothing runs.
-2. **Interpretation** — `Canary` reads the markers, builds the graph, sorts it, injects, and
-   drives the lifecycle. This split is what lets the pure graph algorithms be tested on their own.
+Hooks resolve by **attribute name**, so the semantics match ordinary methods:
 
-## The engine
+- A subclass overriding a hook of the same name replaces it; use `super()` to compose.
+- A subclass overriding it without re-marking it removes the hook.
+- Mixin hooks under different names all apply, base class first.
 
-`Canary.__init__` only validates the roots. `init()` builds the graph (each type constructed once,
-with no arguments), runs Kahn's topological sort, injects dependencies and runs `@on_init` in
-order; `start()` runs `@on_start`; `stop()` runs `@on_stop` in reverse. The order is
-deterministic and cycles surface as `CircularDependencyError`.
+## The two rules
 
-The graph is built with an explicit stack rather than recursion, so the depth of a dependency
-chain is not bounded by Python's recursion limit. Construction calls first and only inspects the
-signature after a `TypeError`, keeping `inspect.signature` on the failure path only.
+**Advancing** is the only recursion. What is memoised is the advance itself (a future) rather
+than a done-flag, so "not started / in progress / finished" needs no separate state machine:
+key absent, future pending, future done. Cycle detection rides on the same thing — a cycle is
+exactly a unit that is not finished yet and sits on the current path.
 
-Every instance on the graph is built **by the framework** — there is no second source. So "where
-did this unit come from" always has one answer, and construction failures and lifecycle failures
-have one way of being handled.
+Depth-first plus memoisation produces a completion order that is already a valid topological
+order, so there is no separate topological sort in the framework.
 
-## It knows about no shell
+**Unwinding** is the only rule that does not recurse. A dependency graph is not a tree, so
+reclamation runs linearly over the ledger in reverse. This is the one asymmetry in the model:
+construction divides, reclamation does not.
 
-`Canary` does assembly and lifecycle, nothing else. HTTP, CLIs, schedulers, message consumers —
-those are **shells**, owned by other libraries, and Canary knows about none of them.
+## Concurrency
 
-There are two ways in, because Python only has two host shapes: a host takes an async context
-manager, or it takes paired startup/shutdown callbacks.
+A unit's dependencies advance concurrently, scheduled by dependency — each unit waits only on
+its own dependencies. When one fails, its siblings are cancelled and awaited, and the exception
+group is reduced back to the single real failure.
 
-```python
-app = FastAPI(lifespan=canary.lifespan)      # shape one: ASGI, MCP, FastStream
-                                             # shape two: start() and stop()
-```
+Under concurrency the ledger order is still a valid topological order (a unit enters only after
+all of its dependencies have completed), so reverse reclamation remains correct.
+
+A single dependency is awaited directly to save a task, but every so many levels the call stack
+is handed back to the event loop, so dependency-chain depth is not bounded by Python's
+recursion limit.
 
 ## Invariants
 
-1. **A cocoa is the minimum runnable unit.** Dependencies, state and lifecycle are marked on one
-   class.
-2. **Decorators declare, they do not transform.** Units stay plain classes and can be subclassed,
-   mixed in and nested.
-3. **Every instance is constructed by the framework with no arguments.** Anything needing outside
-   input happens in a lifecycle hook, because only what happens there has a matching reclamation
-   step.
-4. **Assembly is synchronous and side-effect free.** Building, sorting and injecting run no hooks
-   and need no event loop.
-5. **Anything assembly can detect, assembly raises** — name clashes, cycles, units needing
-   constructor arguments, dependencies that are not cocoas.
-6. **The runtime knows about no shell.** There are two ways in: `lifespan` and the explicit
+1. Units are always constructed by the framework with no arguments.
+2. One instance per type per scope; two separately constructed roots are two unrelated graphs.
+3. Decorators only declare and never rewrite, so units stay plain classes.
+4. Dependencies exist from `@init` onward.
+5. Every `@init` completes before any `@start` runs.
+6. `stop()` is the single reclamation path, shared by success and failure, and is idempotent.
+7. The framework knows no shells; hosting is either a context manager or the three explicit
    methods.

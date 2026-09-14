@@ -1,160 +1,135 @@
-# Dependency Injection
+# Dependencies
 
-A cocoa declares its dependencies with `@cocoa(deps=[...])`. No extra DSL, no `__init__` wiring —
-the dependency graph lives in the decorator.
+## `dep()`
 
-## The contract
+Declare a dependency in the class body:
 
 ```python
-@cocoa(deps=[Database, Cache])
-class UserService: ...
+from canary_framework import Canary, dep
+
+
+class UserService(Canary):
+    database = dep(Database)
+    cache = dep(Cache)
 ```
 
-`deps=[...]` is an ordered list of cocoa types. At construction the runtime injects each
-dependency onto the instance under a name derived from the class name:
+It is a descriptor that resolves to the shared instance from the owner's scope. Three
+properties:
 
-| Dependency type | Injected attribute |
-|---|---|
-| `Config` | `self.config` |
-| `Database` | `self.database` |
-| `UserService` | `self.user_service` |
-| `APIService` | `self.api_service` |
-| `HTTPServer` | `self.http_server` |
+**You choose the attribute name.** The injected name does not come from the dependency's class
+name, so an implementation class can be bound under an abstract name:
 
 ```python
-@cocoa(deps=[Database])
-class UserService:
-    @on_init
-    def check(self) -> None:
-        assert self.database is not None  # already injected by @on_init
+class AlertDispatcher(Canary):
+    sink = dep(LoggingAlertSink)     # self.sink, not self.logging_alert_sink
 ```
 
-**Injection is assembly, not startup**, which is why it happens in the constructor: when
-`Canary(Root)` returns, the wiring is done. `@on_init` can therefore see its collaborators, and
-assembly errors — name clashes, "not a cocoa", cycles, units needing constructor arguments — are
-raised on the `Canary(Root)` line rather than at some later `await`.
+**The type is inferred.** `dep()` is typed to return an instance of what it is given, so
+`database` has type `Database` with no extra annotation. Type checkers and IDEs see it.
 
-Do not read injected attributes in `__init__`; they do not exist yet. Use `@on_init` or
-`@on_start`.
+**The declaration never needs evaluating.** The descriptor holds the class object itself, not
+a name, so it is unaffected by `from __future__ import annotations`, `if TYPE_CHECKING`, or
+class definitions inside a function.
 
-## Where values come from
-
-Units are always constructed with no arguments, so "this unit needs a dsn / an api key / a
-timeout" cannot be a constructor parameter. It becomes a dependency:
+## Only units may be dependencies
 
 ```python
-@cocoa
-class Config:
+class Plain: ...
+
+
+class Broken(Canary):
+    thing = dep(Plain)
+```
+
+```
+DeclarationError: dep(<class 'Plain'>): not a Canary subclass
+```
+
+The check happens while the class body is evaluated, so the error points at the `dep(...)`
+line. Type checkers reject it as well, because `dep()`'s type parameter is bound to `Canary`.
+
+## When dependencies become available
+
+Dependencies exist from `@init` onward, not in `__init__`:
+
+```python
+class Broken(Canary):
+    config = dep(Config)
+
     def __init__(self) -> None:
-        self.dsn = os.environ["DATABASE_URL"]
-        self.timeout = 5.0
-
-
-@cocoa(deps=[Config])
-class Database:
-    @on_init
-    def configure(self) -> None:
-        self.pool = ConnectionPool(self.config.dsn, timeout=self.config.timeout)
+        print(self.config)      # LifecycleError
 ```
 
-This means any unit needing an external value depends on a configuration unit, and that edge
-exists only to carry values.
+```
+LifecycleError: Broken.config is unavailable before the lifecycle begins.
+Dependencies exist from @init onward, not in __init__.
+```
 
-Configuration itself gets no special treatment — it is an ordinary `@cocoa`, and how it reads
-environment variables, a `.env` file or a remote config service is up to you (remote reads are
-IO, so they belong in `@on_start`).
+## Scopes: one scope is one graph
 
-## Resolution
+The state one run shares lives in a `Scope`. It is created by the **first unit to be driven**,
+which is that graph's root; every other instance is constructed by the framework and registered
+into the same scope.
 
-`Canary(...)` builds the graph by walking `deps=[...]` from every root and instantiating each type
-once. A type that is not marked with `@cocoa` raises `TypeError`.
-
-Dependencies are resolved by class object — no strings, no forward references.
-
-## Sharing
-
-Each type is instantiated **once per graph**. Units that depend on the same type share the same
-instance:
+**One instance per type per scope.** A diamond yields one shared instance:
 
 ```python
-@cocoa
-class Config: ...
+class Left(Canary):
+    config = dep(Config)
 
 
-@cocoa(deps=[Config])
-class Database: ...
+class Right(Canary):
+    config = dep(Config)
 
 
-@cocoa(deps=[Config])
-class Cache: ...
+class Root(Canary):
+    left = dep(Left)
+    right = dep(Right)
 
 
-@cocoa(deps=[Database, Cache])
-class Root: ...
-
-
-app = Canary(Root)
-assert app[Database].config is app[Cache].config  # the same Config
+root = Root()
+await root.init()
+assert root.left.config is root.right.config      # the same object
 ```
 
-Sharing is scoped to a single `Canary`; two independent instances build two independent graphs.
+**Two separately constructed roots are two unrelated graphs.** Even shared dependencies are
+distinct:
 
-**Type is identity.** One type has one instance per graph, so "two `Database` instances pointing
-at different servers" cannot be expressed — write two classes if you need two instances.
+```python
+a, b = Root(), Root()
+await a.init()
+await b.init()
+assert a.left is not b.left
+assert a.left.config is not b.left.config
+```
+
+Use `scope_of()` to inspect a scope:
+
+```python
+from canary_framework import scope_of
+
+scope = scope_of(root)
+scope.instances          # type -> instance
+scope.entered["start"]   # units that entered start, in entry order
+```
 
 ## Cycles
 
-Cycles are rejected at construction. The topological sort raises `CircularDependencyError` and
-exposes the types on the cycle through `.cycle`:
-
 ```python
-@cocoa(deps=[B])
-class A: ...
+class A(Canary): ...
 
 
-@cocoa(deps=[A])
-class B: ...
+class B(Canary):
+    a = dep(A)
 
 
-Canary(A)  # CircularDependencyError: circular dependency detected: A -> B -> A
+A.b = dep(B)
 ```
 
-## Name clashes
-
-The injected attribute name is derived from the dependency's **class name**, independent of the
-order in `deps`. When two dependencies produce the same snake_case name, the runtime raises
-`InjectionError` instead of letting the last one win:
-
-```python
-@cocoa(deps=[KBFileRepository, KbFileRepository])
-class Collide: ...
-
-# InjectionError: Collide.kb_file_repository is claimed by more than one source:
-#   KBFileRepository, KbFileRepository
+```
+CircularDependencyError: circular dependency: A -> B -> A
 ```
 
-Rename one of the classes. Acronyms are handled correctly (`APIService` → `api_service`).
-
-## Multi-root graphs
-
-Passing several roots merges their graphs. Dependencies shared between roots are still
-instantiated once:
-
-```python
-app = Canary(UserService, ReportService)
-assert app[UserService].database is app[ReportService].database
-```
-
-## Substituting dependencies in tests
-
-The framework provides no substitution entry point. Injection is nothing but attribute
-assignment, so a test can do it directly:
-
-```python
-service = UserService()
-service.database = FakeDatabase()      # exactly what injection does
-await service.some_method()
-```
-
-When you need the lifecycle too, write the fake as a `@cocoa` unit and compose a test-only graph
-with it as a root.
+The exception carries the path actually walked. Cycles are hard to write in practice: `dep(B)`
+is evaluated in the class body, so `B` must already exist and a direct mutual dependency cannot
+be expressed.

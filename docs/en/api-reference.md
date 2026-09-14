@@ -1,187 +1,126 @@
 # API Reference
 
-Everything below is exported from `canary_framework` unless stated otherwise.
-
-## `cocoa`
+Every public name is exported from `canary_framework`.
 
 ```python
-def cocoa(cls=None, *, deps: list[type] | None = None)
+from canary_framework import (
+    Canary, dep,                                  # declaration
+    init, start, stop, Phase,                     # phases
+    advance, unwind, Scope, scope_of, deps_of,    # engine
+    CanaryError, DeclarationError, ConstructionError,
+    CircularDependencyError, LifecycleError,      # exceptions
+)
 ```
 
-Marks `cls` as a cocoa — the minimum unit. `deps` is an ordered list of dependency types. Usable
-directly or as a decorator factory:
+## Declaration
+
+### `class Canary`
+
+The unit base class. Subclass it and you have a unit.
+
+| Member | Description |
+|---|---|
+| `async init()` | Advance the `init` phase along dependencies. |
+| `async start()` | Advance the `start` phase. Raises `LifecycleError` if `init()` has not run. |
+| `async stop()` | Reclaim the whole scope's ledger in reverse. Idempotent. |
+| `async __aenter__()` | Calls `init()` then `start()`, reclaiming and re-raising on failure. Returns self. |
+| `async __aexit__(...)` | Calls `stop()`; never suppresses the exception. |
+
+Subclasses may override these and compose with `super()`. Phase hooks must not use these names.
+
+### `dep(cls)`
+
+Declare a dependency; typed to return an instance of `cls`.
 
 ```python
-@cocoa
-class Config: ...
-
-
-@cocoa(deps=[Config])
-class Database: ...
+class UserService(Canary):
+    database = dep(Database)
 ```
 
-Units are always constructed by the framework **with no arguments**: `__init__` may not have
-required parameters, or `Canary(...)` raises `ConstructionError`.
+- You choose the attribute name; it is unrelated to the dependency's class name.
+- Dependencies exist from `@init` onward; reading one in `__init__` raises `LifecycleError`.
+- Raises `DeclarationError` when `cls` is not a `Canary` subclass, while the class body is
+  being evaluated.
 
-## `on_init` / `on_start` / `on_stop`
+## Phases
+
+### `init` / `start` / `stop`
+
+The three `Phase` instances the framework ships, which are also the decorators that mark hooks.
 
 ```python
-def on_init(fn) -> fn
-def on_start(fn) -> fn
-def on_stop(fn) -> fn
+class Database(Canary):
+    @start
+    async def connect(self) -> None: ...
 ```
 
-Register a method as a lifecycle hook. Each accepts sync or async functions; a phase may have any
-number of hooks, and mixin hooks run before the class's own.
+`start`'s predecessor is `init`. `stop` is not advanced by `advance()`; `Canary.stop()`
+consumes the ledger with it.
 
-## `Canary`
+### `class Phase(name, *, after=None)`
+
+A phase. Calling it marks a method as one of its hooks.
+
+| Parameter | Description |
+|---|---|
+| `name` | The phase name; the scope keys its advance records and ledgers by it. |
+| `after` | The predecessor phase. Advancing before it has finished raises `LifecycleError`. |
 
 ```python
-class Canary(*roots: type, start_concurrency: int | None = None)
+migrate = Phase("migrate", after=init)
 ```
 
-The orchestrator. Construction is assembly: build the graph (each type constructed once, with no
-arguments), sort it, inject dependencies — all synchronously. Assembly errors
-(`ConstructionError` / `InjectionError` / `CircularDependencyError`, `TypeError` for a
-non-cocoa) are raised on this line.
+## Engine
 
-`start_concurrency`: `None` (default) is strictly sequential; a positive integer lets independent
-units start together, at most that many at once. See
-[Lifecycle · Concurrent startup](lifecycle.md#concurrent-startup).
+### `async advance(unit, phase)`
 
-### Properties
+Advance `phase` across `unit`'s dependency graph: dependencies first, then the unit's own
+hooks. One unit runs one phase exactly once; independent dependencies advance concurrently.
 
-| Property | Type | Meaning |
-|---|---|---|
-| `state` | `LifecycleState` | current lifecycle state |
-| `order` | `tuple[type, ...]` | topological start order (dependencies first) |
-| `instances` | `tuple[object, ...]` | the instances in that order |
-| `roots` | `tuple[type, ...]` | the roots given at construction |
+### `async unwind(scope, phase, *, undoing)`
 
-### `__getitem__`
+Drain `undoing`'s ledger in reverse, running `phase`'s hooks on each unit. One failing hook
+does not abort the pass; errors are collected and returned as a list. The ledger is drained
+either way.
 
 ```python
-def __getitem__(self, cls: type[T]) -> T
+errors = await unwind(scope_of(unit), stop, undoing=start)
 ```
 
-Returns the shared singleton for `cls`, or raises `KeyError`.
+### `class Scope`
 
-### `init`
+The state one run shares.
 
-```python
-async def init(self) -> None
-```
+| Attribute | Description |
+|---|---|
+| `instances` | `dict[type, object]`, type to shared instance. |
+| `phases` | `dict[tuple[type, str], Future]`, each advance itself. |
+| `entered` | `dict[str, list[object]]`, phase name to the units that entered, in order. |
 
-`READY → INITIALIZED`. Runs every `@on_init` — settling in. Dependencies were injected at
-construction; here each unit does the preparation that needs only its dependencies and no
-external resource. On failure the state becomes `FAILED` and the exception propagates; the ledger
-is empty, so nothing is reclaimed.
+| Method | Description |
+|---|---|
+| `instance(cls)` | The single instance of that type in this scope, constructed on first use. |
+| `adopt(unit)` | Register an instance into this scope. |
 
-It is a barrier: only once every `@on_init` has completed may any `@on_start` run. The barrier
-is this method's return.
+### `scope_of(unit)`
 
-### `start`
+The scope a unit belongs to. A root unit gets a fresh one on first use.
 
-```python
-async def start(self) -> None
-```
+### `deps_of(cls)`
 
-`INITIALIZED → STARTED`. Runs every `@on_start` — going to work. A unit is ledgered the moment
-it enters `@on_start`. Calling it from `READY` (having skipped `init()`) raises
-`LifecycleError: call init() before start()`.
-
-If any step fails, every unit that **entered** `@on_start` (including the one that failed) is
-reclaimed in reverse, and the original exception is re-raised with any unwind failures attached
-as notes.
-
-### `stop`
-
-```python
-async def stop(self) -> None
-```
-
-Runs `@on_stop` in reverse topological order. **The single reclamation path**: callable from
-`STARTED` and from `FAILED`, idempotent, a no-op when nothing ever started. A failing `@on_stop`
-does not abort the rest — the errors are collected and raised together as an `ExceptionGroup`.
-
-### `lifespan`
-
-```python
-@asynccontextmanager
-def lifespan(self, _host: object = None) -> AsyncContextManager[None]
-```
-
-The host-facing entry point: `start()` on enter, `stop()` on exit, **yielding
-`None`**.
-
-`_host` accepts the host a framework passes in (ASGI's `lifespan(app)`, MCP's
-`lifespan(server)`) and defaults to `None`, so it also works standalone as
-`async with canary.lifespan():`.
-
-```python
-app = FastAPI(lifespan=canary.lifespan)
-app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
-server = MCPServer("demo", lifespan=canary.lifespan)
-```
-
-Yielding `None` is required: the ASGI lifespan protocol treats the yielded value as a mapping to
-merge into `scope["state"]`.
-
-### `__aenter__` / `__aexit__`
-
-The async context manager protocol, wrapping `start()` / `stop()`, **handing back the
-container** — it serves your own code:
-
-```python
-async with Canary(Root) as canary:
-    canary[SomeUnit].do_something()
-```
-
-## Enums
-
-### `LifecycleState`
-
-`READY`, `INITIALIZING`, `INITIALIZED`, `STARTING`, `STARTED`, `STOPPING`, `STOPPED`, `FAILED`.
-Each action has an in-progress and a settled state; it starts at `READY` because assembly is
-already done inside `Canary(...)`.
-
-### `State`
-
-(`canary_framework.common.type`) The base of every state enum; a mounting point for `issubclass`
-checks.
+The dependencies `cls` declares: base class first, in definition order, deduplicated by type.
 
 ## Exceptions
 
-| Exception | Base | Meaning |
-|---|---|---|
-| `CanaryError` | `Exception` | the root of every framework and extension error |
-| `CircularDependencyError` | `CanaryError` | a cycle in the graph; `.cycle` lists the type names |
-| `ConstructionError` | `CanaryError` | the unit needs constructor arguments and cannot be built |
-| `InjectionError` | `CanaryError` | two dependencies claim the same attribute; `.attribute` / `.claimants` |
-| `LifecycleError` | `CanaryError` | an illegal lifecycle transition |
+All inherit `CanaryError`, so one `except CanaryError` catches everything.
 
-Everything inherits `CanaryError`, so a single `except CanaryError` catches them all. Future
-extensions should inherit it too.
-
-## Environment variables
-
-| Variable | Effect |
+| Exception | Raised when |
 |---|---|
-| `CANARY_LOG_LEVEL` | the level of the `canary` logger tree; `DEBUG` also prints the assembly summary |
-| `CANARY_SLOW_CALLBACK_SECONDS` | threshold in seconds for the event-loop lag probe; a development tool, off by default |
+| `CanaryError` | Base class; never raised directly. |
+| `DeclarationError` | `dep()` was given something that is not a `Canary` subclass. |
+| `ConstructionError` | A unit requires constructor arguments. Carries `unit`. |
+| `CircularDependencyError` | The dependency graph has a cycle. Carries `cycle`, the path walked. |
+| `LifecycleError` | A unit used outside its lifecycle: a dependency read in `__init__`, or a phase advanced before its predecessor. |
 
-## Introspection (`canary_framework.core.decorator.introspect`)
-
-| Function | Purpose |
-|---|---|
-| `is_cocoa(cls)` | whether `cls` is marked with `@cocoa` |
-| `deps_of(cls)` | the declared dependencies (a tuple) |
-| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | the hooks of one phase, base-first |
-| `to_snake(name)` | (`core.infra.naming`) `UserService` → `user_service` |
-
-## Graph algorithms (`canary_framework.runtime.graph`)
-
-| Function | Purpose |
-|---|---|
-| `build_graph(roots)` | instantiate every root and its transitive dependencies, once each, with no arguments |
-| `topological_sort(graph)` | Kahn's algorithm; raises `CircularDependencyError` on a cycle |
+Several reclamation failures are combined into the standard library's `ExceptionGroup`, which
+is not a `CanaryError`.

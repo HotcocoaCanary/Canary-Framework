@@ -1,205 +1,170 @@
 # 生命周期
 
-`Canary` 驱动每个单元走过一条显式的、异步原生的时间线。
+## 阶段
 
-## 五个时刻
-
-一个单元从无到有再到销毁经过五个时刻，区别在于**每个时刻手上有什么**：
-
-| 时刻 | 谁在动 | 手上有什么 |
-|---|---|---|
-| 构造 | 使用者的 `__init__` | 什么都没有（无参构造） |
-| **装配** | **框架**，在 `Canary(...)` 里 | 建图 → 校验 → 排序 → 注入 |
-| 初始化 `@on_init` | 使用者 | 依赖已就位，但还没有任何东西开始运行 |
-| 启动 `@on_start` | 使用者 | 依赖已就位，可以获取资源 |
-| 停止 `@on_stop` | 使用者 | 逆序回收 |
-
-中间那一步是框架的动作，不是使用者的钩子：它在 `Canary(...)` 里同步完成，没有可供介入
-的位置。
-
-## 三个钩子
-
-| 声明 | 执行于 | 顺序 |
-|---|---|---|
-| `@on_init` | `init()`，注入之后 | 拓扑序（依赖在前） |
-| `@on_start` | `start()` | 拓扑序（依赖在前） |
-| `@on_stop` | `stop()` | 逆拓扑序（被依赖方在前） |
-
-所有钩子都可选。钩子可以是普通函数或协程函数 —— 运行时检查返回值，仅当可等待时才
-`await`，因此同步与异步钩子可自由混用。
-
-## 三个方法各做什么
-
-| 何时 | 迁移 | 做什么 |
-|---|---|---|
-| `Canary(*roots)` | —— `→ READY` | 装配：建图、校验、拓扑排序、**注入依赖**。同步，不跑任何钩子 |
-| `await app.init()` | `READY → INITIALIZED` | 各就各位：全部 `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | 开工：全部 `@on_start`，进入即记账 |
-| `await app.stop()` | 任何终态 `→ STOPPED` | 逆序执行 `@on_stop` |
-
-四个动作，四个含义，一一对应：**构造装配、`init` 各就各位、`start` 开工、`stop` 回收。**
-没有一个方法做两件事。`init()` 和 `start()` 之间是一道栅栏 —— 整张图各就各位之后，才允许
-任何单元开工；这道栅栏就是两个方法的边界，不调 `start()`，谁也不会开工。
-
-## 状态机
-
-```
-READY ─▶ INITIALIZING ─▶ INITIALIZED ─▶ STARTING ─▶ STARTED ─▶ STOPPING ─▶ STOPPED
-             │                            │                       │
-             └──────────────▶ FAILED ◀────┴───────────────────────┘
-```
-
-三个动作各有一个进行中的状态（`*ING`），它们只可能被并发调用者观察到。
-
-起点是 `READY` 而不是"什么都还没做"：装配在构造函数里已经完成，一个刚造出来的运行时
-**已经可用** —— `canary[SomeUnit]` 立刻能取到已注入依赖的实例，只是还没有人开始运行。
-
-`app.state` 返回当前的 `LifecycleState`。非法迁移抛 `LifecycleError`：
+一个阶段是一次遍历的名字。框架提供三个：
 
 ```python
-await app.init()
-await app.start()
-await app.init()
-await app.start()  # LifecycleError: illegal transition from STARTED
+from canary_framework import init, start, stop
 ```
 
-## 钩子顺序
-
-对于图 `APIService → UserService → Database`（箭头 = "依赖"）：
-
-- **初始化** — `Database` → `UserService` → `APIService`
-- **启动** — `Database` → `UserService` → `APIService`
-- **停止** — `APIService` → `UserService` → `Database`
-
-每个单元都在其依赖之后才初始化、启动；在依赖之前停止。顺序来自卡恩拓扑排序，因而是确定
-的。
-
-## 钩子可叠加
-
-一个标记可被多个方法共享 —— 混入的钩子先于本类执行，按定义顺序：
+它们既是标记方法用的装饰器，也是 `advance()` 与 `unwind()` 的参数。
 
 ```python
-class LoggingMixin:
-    @on_start
-    def log_start(self) -> None:
-        print(f"[{type(self).__name__}] starting")
+class Database(Canary):
+    @init
+    def prepare(self) -> None: ...
 
+    @start
+    async def connect(self) -> None: ...
 
-@cocoa(deps=[Config])
-class Database(LoggingMixin):
-    @on_start
-    async def connect(self) -> None:
-        await self.pool.connect()
+    @stop
+    async def close(self) -> None: ...
 ```
 
-`log_start`（混入）与 `connect`（本类）都会执行，且按此顺序。
+同一个类的同一个阶段可以有多个钩子，按定义顺序执行；同一个方法可以同时属于多个阶段。
+钩子可以是同步的，也可以是 `async def`——框架按返回值判断是否需要等待，因此返回协程的
+同步函数同样成立。
 
-## 失败路径
+## 推进：沿依赖递归
 
-**只有一条规则：`stop()` 收台账里的一切。** `init()` 阶段失败时台账是空的（`@on_init`
-按契约不获取资源），所以没有东西要收，状态直接置 `FAILED`。
-
-台账记的是**进入过 `@on_start`** 的单元。`@on_start` 按契约是唯一获取资源的地方，所以
-只有它需要对应的回收。
-
-`start()` 失败时不变式是「要么全部启动，要么什么都没启动」：台账里的单元（含失败的那一个）
-按逆序执行 `@on_stop`，然后原样抛出最初的异常；回收过程中的异常作为 note 附在它上面，
-不改变异常类型。
-
-`@on_init` 阶段失败时台账还是空的，回滚自然是空转 —— 不需要为它单写一条规则。
-
-**`stop()` 是唯一的回收路径。** 它同时承接正常结束与失败结束：
+`await unit.init()` 在依赖图上推进一次 `init`：先推进依赖，再运行自身的钩子。
 
 ```python
-app = Canary(Root)
-try:
-    await app.init()
-    await app.start()
-finally:
-    await app.stop()   # 从 STARTED 可调，从 FAILED 也可调；重复调用是幂等的
+class Config(Canary): ...
+
+
+class Database(Canary):
+    config = dep(Config)
+
+
+class Service(Canary):
+    database = dep(Database)
+
+
+await Service().init()      # Config -> Database -> Service
 ```
 
-没启动过就调用 `stop()` 不是错误 —— 它空转并进入 `STOPPED`（先前的 `FAILED` 不会被抹掉）。
-这样 `finally: await app.stop()` 永远是安全的写法，不必先判断状态。
+两条性质：
 
-单个 `@on_stop` 抛出不会中断回收：异常被逐一收集，其余单元照常回收，最后合并成一个
-`ExceptionGroup` 抛出。
+- **同一个单元的同一个阶段只运行一次**，无论有多少单元依赖它。
+- **互不依赖的依赖同时推进**，因此耗时贴着依赖链的关键路径，而不是所有单元之和。
 
-## 并发启动
+## 栅栏
+
+`init()` 的返回是一道栅栏：全部 `@init` 完成之后，才有任何 `@start` 运行。
+
+```
+Config.init -> Database.init -> Service.init
+          ↓ 栅栏
+Config.start -> Database.start -> Service.start
+```
+
+这是 `@init` 与 `@start` 的实质区别。`@init` 不获取外部资源，所以它在整张图上跑一遍时，
+失败不需要回收；`@start` 获取资源，所以它有配对的 `@stop`。
+
+未调用 `init()` 就 `start()` 会抛出：
+
+```
+LifecycleError: Service: @init has not run, call it before @start
+```
+
+## 记账与回收
+
+单元一进入 `@start` 就被记入台账——记的是"进入"而非"完成"，因此启动到一半失败的单元
+同样会被回收。
+
+`stop()` 逆序消费台账，是唯一的回收路径：
+
+| 调用时机 | 行为 |
+|---|---|
+| 从未启动 | 台账为空，空操作 |
+| 只 `init()` 过 | `start` 台账为空，空操作 |
+| 正常启动之后 | 逆序回收 |
+| `start()` 中途失败 | 回收进入过 `@start` 的单元，含失败的那一个 |
+| 重复调用 | 台账已排空，空操作 |
+
+一条规则覆盖全部五种情形，因此不需要状态机。
+
+## 失败
+
+**启动失败。** 任一 `@start` 抛出时，台账里的单元逆序回收，随后原样抛出最初的异常：
 
 ```python
-Canary(Root, start_concurrency=8)
-```
+class Leaf(Canary):
+    @start
+    def go(self) -> None: ...
 
-默认 `None`：严格按拓扑序一个一个启动。给一个正整数，**互不依赖的单元同时启动**，同时最多
-这么多个。加速比 = 顺序总耗时 ÷ 关键路径（按耗时算最长的一条依赖链），完全由图的形状决定：
+    @stop
+    def bye(self) -> None:
+        print("leaf 回收")
 
-```
-50 个各 60ms 的独立 IO 单元    3009ms → 423ms     7.1x
-典型 web 形状（DB / Redis / MQ）  260ms → 152ms     1.7x
-一条链                            无变化            1.0x
-```
 
-**默认关着**，两个理由：并发启动会同时向下游发起 N 个连接（连接风暴 —— 实测 20 个单元
-对一个"最多接 8 个连接"的下游，12 次被拒、启动失败）；它也会打破"兄弟按声明序启动"这个
-虽然从未承诺、但可能有人依赖的顺序。
+class Root(Canary):
+    leaf = dep(Leaf)
 
-**上限不是可选参数。** 信号量只圈住真正跑钩子的那段，等依赖的时候不占名额。调度按依赖
-驱动 —— 每个单元等自己的依赖，不按拓扑层次分组（分组会让一个单元白等同层里最慢的那个）。
+    @start
+    def go(self) -> None:
+        raise RuntimeError("启动失败")
 
-**失败语义与顺序启动一致。** 一个单元失败时同批的其它单元被取消；被取消的单元同样持有半个
-资源，同样进了台账、同样被回收。只有一个真实失败时原样抛出（`except RuntimeError` 照旧管用）；
-多个单元同时失败才抛 `ExceptionGroup`，一个都不隐瞒。
 
-**框架会给出建议值。** `CANARY_LOG_LEVEL=DEBUG` 时，顺序启动的装配摘要会
-记下每个单元的耗时、算出关键路径，并说明开并发能省多少：
-
-```
-Canary assembled 8 unit(s), started in 260ms
-  ...
-  critical path is 150ms of the 260ms spent starting units
-  start_concurrency=3 could bring that down to about 150ms (1.7x)
-```
-
-耗时太短或图太窄时它不吭声。
-
-## 交给宿主驱动
-
-两种宿主协议，两个入口：
-
-| 宿主收什么 | 用哪个 | 谁是这样 |
-|---|---|---|
-| 一个异步上下文管理器 `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI（Starlette / FastAPI / Litestar）、MCP、FastStream |
-| 成对的启动 / 关停回调 | `start()` 与 `stop()` | Quart、Sanic、arq、Dramatiq |
-
-```python
-app = FastAPI(lifespan=canary.lifespan)          # 就这一行
-app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
-server = MCPServer("demo", lifespan=canary.lifespan)
-```
-
-没有宿主时（CLI、脚本、测试夹具）直接用：
-
-```python
-async with canary.lifespan():
+async with Root():        # 打印 "leaf 回收"，然后抛出 RuntimeError
     ...
 ```
 
-框架不认识任何具体宿主 —— 上面那张表覆盖的是 Python 世界仅有的两种形状。
+回收过程中再出错时，该异常作为 note 附在最初那个异常上，不会盖住它。
 
-`canary.lifespan` 和 `async with canary` 只差一件事：**它交出 `None` 而不是容器自己**。
-ASGI 的 lifespan 协议会把交出来的值当作要合并进 `scope["state"]` 的映射，交出容器会让
-Starlette 去 `dict.update(canary)`，漏出一个毫无线索的 `KeyError`。`async with canary`
-服务的是你自己的代码，照常交出容器。
+**多个单元同时失败。** 并发推进时若有多个单元同时抛出，异常合并为一个
+`ExceptionGroup`；只有一个失败时原样抛出，与顺序推进行为一致。
 
-## 两个环境变量
+**回收失败。** 单个 `@stop` 抛出不中断整轮回收，其余单元照常回收，最后合并为一个
+`ExceptionGroup` 抛出，即使只有一个：
 
-框架自己只有两个开关，直接读环境变量：
+```
+ExceptionGroup: 1 error(s) while stopping
+  RuntimeError: 关闭失败
+    raised by Database.close
+```
 
-| 变量 | 作用 |
-|---|---|
-| `CANARY_LOG_LEVEL` | 设置 `canary` 这一棵 logger 的级别。不装 handler、不设 format、不碰 root。设成 `DEBUG` 会打印装配摘要（启动顺序、依赖、路由）。 |
-| `CANARY_SLOW_CALLBACK_SECONDS` | 打开事件循环延迟探针：任何一次占用事件循环超过该秒数的回调都会被 asyncio 记一条 WARNING。它会打开 asyncio 的调试模式，有额外开销，属于开发期工具，默认关闭。 |
+## 自定义阶段
 
-框架不提供配置机制 —— 配置就是你自己的一个 `@cocoa` 单元，日志就是标准库的
-`logging.getLogger(__name__)`。
+`Phase` 是公开的，加一个阶段不需要注册：
+
+```python
+from canary_framework import Phase, advance, init
+
+migrate = Phase("migrate", after=init)
+
+
+class Schema(Canary):
+    @migrate
+    async def apply(self) -> None: ...
+
+
+await unit.init()
+await advance(unit, migrate)
+```
+
+`after` 声明前驱：前驱阶段尚未完成时推进本阶段会抛 `LifecycleError`，而不是静默跳过。
+
+需要给新阶段配一个回收阶段时用 `unwind()`，配对关系写在调用点：
+
+```python
+from canary_framework import scope_of, unwind
+
+errors = await unwind(scope_of(unit), rollback, undoing=migrate)
+```
+
+## 接入宿主
+
+框架不认识任何外壳。宿主收异步上下文管理器时：
+
+```python
+@asynccontextmanager
+async def lifespan(_app):
+    async with service:
+        yield
+```
+
+宿主收成对的启停回调时，直接给它 `service.init` / `service.start` / `service.stop`
+三个方法。

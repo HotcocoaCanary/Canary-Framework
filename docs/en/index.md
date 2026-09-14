@@ -1,88 +1,96 @@
 # Canary Framework
 
-A minimal, decorator-driven runtime for **dependency injection** and **lifecycle** — pure
-Python, zero dependencies.
+**Dependency injection** and **lifecycle** for plain Python classes. Standard library only,
+zero third-party dependencies.
 
-It is a runtime container: it assembles a set of objects according to their dependencies, starts
-them in order and reclaims them in reverse. Which shell drives those objects — HTTP, a CLI, a
-scheduler, a message consumer — is up to you: FastAPI, Starlette, Typer, or your own `main()`.
-
-There are only two concepts:
-
-- **cocoa** — the minimum unit. A plain class marked with `@cocoa`; dependencies are declared
-  with `deps=[...]`, behaviour with the `@on_init` / `@on_start` / `@on_stop` hooks.
-- **Canary** — the orchestrator. `Canary(*roots)` resolves the dependency graph, sorts it
-  topologically and drives the whole lifecycle.
-
-## One rule that runs through everything
-
-> **The framework only builds empty shells. Anything that needs input from outside happens in
-> the lifecycle.**
-
-Every unit is constructed by the framework **with no arguments**, so `__init__` cannot have
-required parameters. Whatever a unit needs, it declares as a dependency and reads in `@on_init`
-or `@on_start`.
-
-## Highlights
-
-- **Declarative dependency injection** — no `__init__` wiring; dependencies are injected during
-  `init()` as `self.<snake_case name>`, so `@on_init` already sees its collaborators.
-- **Explicit, async-native lifecycle** — assembly at construction, then `start()` → `stop()`; hooks may be sync or
-  async. Plugging it into any host takes one line: `async with canary:`.
-- **Failure paths are part of the design** — a failing `start()` unwinds everything it started;
-  `stop()` is the single reclamation path for both normal and failed termination, and it is
-  idempotent.
-- **Deterministic ordering** — Kahn's topological sort; one shared singleton per type per graph.
-- **Multi-root composition** — nest, mix in, or start any subgraph on its own.
-- **Concurrent startup** — `start_concurrency=N` starts independent units together, with a bound.
-- **Zero dependencies** — `pip install canary-framework` uses nothing but the standard library.
-
-## Example
+Subclass `Canary` and you have a unit: it declares what it depends on, and what it does in
+each phase. Start one unit and its dependencies come up in dependency order; leaving reclaims
+them in reverse.
 
 ```python
 import asyncio
 
-from canary_framework import Canary, cocoa, on_init, on_start
+from canary_framework import Canary, dep, init, start, stop
 
 
-@cocoa
-class Config:
-    def __init__(self) -> None:  # no required parameters
-        self.database_url = "postgresql://localhost/dev"
+class Config(Canary):
+    @init
+    def load(self) -> None:
+        self.dsn = "postgresql://localhost/dev"
 
 
-@cocoa(deps=[Config])
-class Database:
-    @on_init
-    def build_pool(self) -> None:
-        self.pool = ConnectionPool(self.config.database_url)  # self.config is injected
+class Database(Canary):
+    config = dep(Config)
 
-    @on_start
+    @start
     async def connect(self) -> None:
-        await self.pool.connect()
+        print(f"connecting to {self.config.dsn}")
+
+    @stop
+    async def close(self) -> None:
+        print("disconnected")
 
 
-@cocoa(deps=[Database])
-class UserService: ...
+class UserService(Canary):
+    database = dep(Database)
 
 
 async def main() -> None:
-    app = Canary(UserService)
-    await app.init()   # settle in: @on_init
-    await app.start()  # go to work: @on_start
-    assert app[Database].config is app[Config]
-    await app.stop()   # run @on_stop in reverse
+    async with UserService() as service:
+        print(service.database.config.dsn)
 
 
 asyncio.run(main())
 ```
 
-## Navigation
+## Two rules
 
-- [Quick Start](quickstart.md)
-- [Cocoa Units](cocoa.md)
-- [Runtime (Canary)](canary.md)
-- [Lifecycle](lifecycle.md)
-- [Dependency Injection](dependency-injection.md)
-- [Architecture](architecture.md)
-- [API Reference](api-reference.md)
+The whole framework is two rules.
+
+**Advancing** recurses along dependencies: a unit enters a phase only after its dependencies
+have completed that phase. One unit runs one phase exactly once no matter how many units
+depend on it, and independent dependencies advance concurrently.
+
+**Unwinding** is linear, driven by a ledger: a dependency graph is not a tree, so reclamation
+cannot recurse along dependencies. It runs in reverse entry order instead.
+
+`init` / `start` / `stop` are three names for these two rules.
+
+## Core concepts
+
+| Name | What it is |
+|---|---|
+| `Canary` | The unit base class. Subclass it and you get four lifecycle actions. |
+| `dep(Cls)` | A dependency declaration. You choose the attribute name. |
+| `@init` / `@start` / `@stop` | Phase markers: which phase a method belongs to. |
+| `Phase` | A phase itself. `Phase("migrate")` is a fourth one, no registration needed. |
+| `Scope` | The state one run shares. One scope is one graph. |
+
+## Invariants
+
+1. **Units are always constructed with no arguments.** Anything that needs the outside world
+   happens in a lifecycle hook, because only those have a matching reclamation step.
+2. **One instance per type per scope.** Two separately constructed roots are two unrelated
+   graphs.
+3. **Dependencies exist from `@init` onward.** Reading one in `__init__` raises
+   `LifecycleError`.
+4. **Every `@init` completes before any `@start` runs.**
+5. **`stop()` is the single reclamation path.** Success and failure share it, and it is
+   idempotent.
+
+## Install
+
+```bash
+pip install canary-framework
+```
+
+Requires Python 3.12 or newer. Installing pulls in no third-party packages.
+
+## Next
+
+- [Quick Start](quickstart.md): a working example in ten minutes.
+- [Units](canary.md): the four actions on `Canary`.
+- [Dependencies](dependency-injection.md): `dep()` and scopes.
+- [Lifecycle](lifecycle.md): phases, the barrier, failure and reclamation.
+- [Architecture](architecture.md): layering and dependency direction.
+- [API Reference](api-reference.md): every public name.

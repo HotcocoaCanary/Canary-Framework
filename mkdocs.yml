@@ -1,5 +1,5 @@
 site_name: Canary Framework
-site_description: A minimal, decorator-driven dependency-injection, lifecycle and ASGI web framework
+site_description: Dependency injection and lifecycle for plain Python classes, with zero dependencies
 site_author: 张文博 (Canary)
 copyright: Copyright &copy; 2026 张文博 (Canary)
 
@@ -78,10 +78,9 @@ nav:
   - What's New: whats-new.md
   - Quick Start: quickstart.md
   - Core:
-      - Cocoa Units: cocoa.md
-      - Runtime (Canary): canary.md
+      - Units: canary.md
+      - Dependencies: dependency-injection.md
       - Lifecycle: lifecycle.md
-      - Dependency Injection: dependency-injection.md
   - Architecture: architecture.md
   - API Reference: api-reference.md
 

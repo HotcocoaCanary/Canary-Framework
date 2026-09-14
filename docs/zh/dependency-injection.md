@@ -1,156 +1,129 @@
-# 依赖注入
+# 依赖声明
 
-cocoa 通过 `@cocoa(deps=[...])` 声明依赖。无需额外 DSL，也无需 `__init__` 装配 —— 依赖图
-就写在装饰器里。
+## `dep()`
 
-## 契约
+用 `dep()` 在类体里声明一条依赖：
 
 ```python
-@cocoa(deps=[Database, Cache])
-class UserService: ...
+from canary_framework import Canary, dep
+
+
+class UserService(Canary):
+    database = dep(Database)
+    cache = dep(Cache)
 ```
 
-`deps=[...]` 是一个有序的 cocoa 类型列表。在**构造期**，运行时把每个依赖注入到实例上，
-属性名由类名转 snake_case 得到：
+它是一个描述符，读取时从所在作用域取回共享实例。三条性质：
 
-| 依赖类型 | 注入属性 |
-|---|---|
-| `Config` | `self.config` |
-| `Database` | `self.database` |
-| `UserService` | `self.user_service` |
-| `APIService` | `self.api_service` |
-| `HTTPServer` | `self.http_server` |
+**属性名由你决定。** 注入名不来自被依赖的类名，因此可以为实现类起一个抽象的名字：
 
 ```python
-@cocoa(deps=[Database])
-class UserService:
-    @on_init
-    def check(self) -> None:
-        assert self.database is not None  # @on_init 时已经注入
+class AlertDispatcher(Canary):
+    sink = dep(LoggingAlertSink)     # self.sink，不是 self.logging_alert_sink
 ```
 
-**注入属于装配，不属于启动**，所以它发生在构造函数里：`Canary(Root)` 一返回，依赖就已经
-接好。因此 `@on_init` 能看到自己的协作者，装配类的错误（撞名、不是 cocoa、成环、需要构造
-参数）也在 `Canary(Root)` 那一行抛出，而不是等到某个 `await`。
+**类型是推断出来的。** `dep()` 的返回值标注为被依赖的类型，所以 `database` 的类型就是
+`Database`，不必另写注解，类型检查器与 IDE 都能识别。
 
-不要在 `__init__` 里读注入属性 —— 那时它们还不存在。请用 `@on_init` 或 `@on_start`。
+**声明不需要求值。** 描述符持有的是类对象本身而非名字，因此不受
+`from __future__ import annotations`、`if TYPE_CHECKING` 或函数作用域的影响。
 
-## 值从哪来
-
-单元一律**无参构造**，所以"这个单元需要一个 dsn / 一个 api key / 一个超时时间"不能写成
-构造参数，得写成依赖：
+## 只能依赖单元
 
 ```python
-@cocoa
-class Config:
+class Plain: ...
+
+
+class Broken(Canary):
+    thing = dep(Plain)
+```
+
+```
+DeclarationError: dep(<class 'Plain'>): not a Canary subclass
+```
+
+检查发生在类体求值的那一刻，错误指向写下 `dep(...)` 的那一行。类型检查器也会拒绝它，
+因为 `dep()` 的类型参数以 `Canary` 为界。
+
+## 依赖何时可用
+
+依赖在 `@init` 之后可用，在 `__init__` 中不可用：
+
+```python
+class Broken(Canary):
+    config = dep(Config)
+
     def __init__(self) -> None:
-        self.dsn = os.environ["DATABASE_URL"]
-        self.timeout = 5.0
-
-
-@cocoa(deps=[Config])
-class Database:
-    @on_init
-    def configure(self) -> None:
-        self.pool = ConnectionPool(self.config.dsn, timeout=self.config.timeout)
+        print(self.config)      # LifecycleError
 ```
 
-这意味着需要外部取值的单元都会依赖一个配置单元，那条依赖只用于搬运值。
+```
+LifecycleError: Broken.config is unavailable before the lifecycle begins.
+Dependencies exist from @init onward, not in __init__.
+```
 
-配置本身没有特殊待遇，它就是一个普通的 `@cocoa`：怎么读环境变量、`.env` 或远程配置中心
-都由你决定（远程读取属于 IO，放 `@on_start`）。
+## 作用域：一个作用域就是一张图
 
-## 解析
+一次运行共享的状态保存在 `Scope` 里。作用域由**第一个被驱动的单元**创建，它就是这张图
+的根；图上其余实例都由框架构造并登记进同一个作用域。
 
-`Canary(...)` 通过遍历每个根的 `deps=[...]` 建图，并把每个类型实例化一次。未被 `@cocoa`
-标记的类型会抛出 `TypeError`。
-
-依赖按具体类对象解析 —— 没有字符串、没有前向引用：
+**同一个作用域内，每个类型只有一个实例。** 菱形依赖只会得到一份共享实例：
 
 ```python
-@cocoa(deps=[Database])
-class UserService: ...
+class Left(Canary):
+    config = dep(Config)
+
+
+class Right(Canary):
+    config = dep(Config)
+
+
+class Root(Canary):
+    left = dep(Left)
+    right = dep(Right)
+
+
+root = Root()
+await root.init()
+assert root.left.config is root.right.config      # 同一个
 ```
 
-## 共享
-
-每个类型在**单张图内只实例化一次**。当多个单元依赖同一类型时，它们共享同一个实例：
+**两个各自构造的根是两张互不相干的图。** 连共享依赖也是两份：
 
 ```python
-@cocoa
-class Config: ...
-
-
-@cocoa(deps=[Config])
-class Database: ...
-
-
-@cocoa(deps=[Config])
-class Cache: ...
-
-
-@cocoa(deps=[Database, Cache])
-class Root: ...
-
-
-app = Canary(Root)
-assert app[Database].config is app[Cache].config  # 同一个 Config
+a, b = Root(), Root()
+await a.init()
+await b.init()
+assert a.left is not b.left
+assert a.left.config is not b.left.config
 ```
 
-共享作用域限于单个 `Canary`。两个独立的 `Canary` 实例会构建两张独立的图。
-
-**类型即身份。** 一个类型在一张图里只有一个实例，所以"两个连不同库的 `Database`"写不
-出来 —— 需要两个实例就写两个类。
-
-## 成环
-
-成环会在**构造期**被拒绝。拓扑排序检测到环时抛出 `CircularDependencyError`，并通过
-`.cycle` 暴露环上的类型：
+需要观察作用域时用 `scope_of()`：
 
 ```python
-@cocoa(deps=[B])
-class A: ...
+from canary_framework import scope_of
 
-
-@cocoa(deps=[A])
-class B: ...
-
-
-Canary(A)  # CircularDependencyError: circular dependency detected: A -> B -> A
+scope = scope_of(root)
+scope.instances          # 类型 -> 实例
+scope.entered["start"]   # 进入 start 阶段的单元，按进入顺序
 ```
 
-## 撞名
-
-注入属性名由依赖的**类名**派生，与 `deps` 的顺序无关。两个依赖的 snake_case 撞名时抛
-`InjectionError`，而不是"后写的赢"：
+## 依赖成环
 
 ```python
-@cocoa(deps=[KBFileRepository, KbFileRepository])
-class Collide: ...
+class A(Canary): ...
 
-# InjectionError: Collide.kb_file_repository is claimed by more than one source:
-#   KBFileRepository, KbFileRepository
+
+class B(Canary):
+    a = dep(A)
+
+
+A.b = dep(B)
 ```
 
-改名其中一个类即可。缩写会被正确处理（`APIService` → `api_service`）。
-
-## 多根图
-
-给 `Canary` 传入多个根会合并它们的图。根之间共享的依赖仍只实例化一次：
-
-```python
-app = Canary(UserService, ReportService)
-assert app[UserService].database is app[ReportService].database
+```
+CircularDependencyError: circular dependency: A -> B -> A
 ```
 
-## 测试时替换依赖
-
-框架不提供替换入口。注入就是给属性赋值，测试里直接赋值即可：
-
-```python
-service = UserService()
-service.database = FakeDatabase()      # 就是注入在做的事
-await service.some_method()
-```
-
-需要连生命周期一起测时，把假实现写成一个 `@cocoa` 单元，用它当根组一张测试专用的图。
+异常携带的是推进时实际走过的那条路径。实践中环很难写出来：`dep(B)` 在类体求值时 `B`
+必须已经存在，所以直接的相互依赖写不出来。

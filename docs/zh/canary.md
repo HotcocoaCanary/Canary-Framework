@@ -1,136 +1,124 @@
-# 运行时（Canary）
+# 单元
 
-`Canary` 是持有整张 [cocoa](cocoa.md) 依赖图并驱动其生命周期的编排器。它本身不是业务单元
-—— 只负责解析、排序与运行。
-
-```python
-from canary_framework import Canary
-
-
-app = Canary(UserService)
-await app.init()
-await app.start()
-...
-await app.stop()
-```
-
-## 构造
+单元是继承了 `Canary` 的普通类。`Canary` 做两件事：把这个类纳入依赖图（于是别人可以
+`dep()` 它），并给它四个生命周期动作。
 
 ```python
-app = Canary(*roots)
+from canary_framework import Canary, dep, init, start, stop
+
+
+class Database(Canary):
+    config = dep(Config)
+
+    @start
+    async def connect(self) -> None:
+        self.pool = await open_pool(self.config.dsn)
+
+    @stop
+    async def close(self) -> None:
+        await self.pool.close()
 ```
 
-每个根都必须被 `@cocoa` 标记，否则 `Canary` 在构造时抛出 `TypeError`。传入多个根会把它们
-的依赖图合并为一张共享图。
+除此之外它仍是普通 Python 类，可以继承、混入、嵌套。
 
-**构造即装配**：`Canary(...)` 一返回，图已经建好、排好序、依赖已注入 —— `canary[SomeUnit]`
-立刻能用。装配是同步的，不需要事件循环；装配类的错误也在这一行抛出。
+## 四个动作
 
-## 装配与生命周期
+| 动作 | 做什么 |
+|---|---|
+| `Unit()` | 无参构造。不运行任何钩子，依赖此时尚不可用。 |
+| `await unit.init()` | 沿依赖推进 `init` 阶段。 |
+| `await unit.start()` | 沿依赖推进 `start` 阶段。 |
+| `await unit.stop()` | 按台账逆序回收。 |
 
-| 何时 | 状态迁移 | 作用 |
-|---|---|---|
-| `Canary(*roots)` | —— `→ READY` | 装配：建图、校验、拓扑排序、**注入依赖**。同步，不跑任何钩子 |
-| `await app.init()` | `READY → INITIALIZED` | 各就各位：全部 `@on_init` |
-| `await app.start()` | `INITIALIZED → STARTED` | 开工：全部 `@on_start`，进入即记账 |
-| `await app.stop()` | 任何终态 `→ STOPPED` | 逆序执行 `@on_stop`；幂等，正常结束与失败结束共用 |
+`async with unit` 是便利写法：进入时依次调用 `init()` 与 `start()`，退出时调用
+`stop()`。三个动作都经由本类的方法，因此子类的覆盖在这条路径上同样生效。
 
-引擎是异步原生的：钩子可同步可异步，运行时按返回值判断是否 `await`。状态机与失败路径见
-[生命周期](lifecycle.md)。
+## 无参构造
 
-`Canary` 也实现了异步上下文管理器协议：
+单元一律由框架无参构造，因此 `__init__` 不能有必填参数：
 
 ```python
-async with Canary(UserService) as app:
-    assert app[Database] is app[UserService].database
+class Database(Canary):
+    def __init__(self, dsn: str) -> None:   # 不可以
+        self.dsn = dsn
 ```
 
-## 访问实例
+```
+ConstructionError: cannot construct Database: missing a required argument: 'dsn'.
+Units are always constructed with no arguments. Declare what it needs with dep(...)
+and read the values from those dependencies in @init or @start.
+```
 
-用 `__getitem__` 获取图中某类型的共享单例：
+正确写法是把构造参数改写成依赖，值在钩子里从协作者读取：
 
 ```python
-users = app[UserService]
-assert users.database is app[Database]
+class Database(Canary):
+    config = dep(Config)
+
+    @start
+    async def connect(self) -> None:
+        self.pool = await open_pool(self.config.dsn)
 ```
 
-`order` 属性返回拓扑启动顺序（依赖在前）；`instances` 按同序返回对应实例；`state` 返回
-当前的 `LifecycleState`。
+这条约束是有意的：`@start` 有配对的 `@stop`，而构造没有配对的析构。把需要外界输入的
+事情推迟到生命周期钩子，等于让每一件事都落进一个有台账、能逆序回收的阶段。
 
-## 多根编排
+## 任何单元都能当入口
 
-因为 `Canary` 接受多个根，同一个单元可以参与不同的图 —— 任意子图也能独立启动：
+依赖图上的任何一个单元都可以自己启动，此时它就是它那张图的根：
 
 ```python
-# 完整应用
-app = Canary(LibraryApp)
-await app.init()
-await app.start()
-
-# 仅数据层，独立启动
-books = Canary(BookRepository)
-await books.init()
-await books.start()
-```
-
-依赖在单张图内共享，但在两个独立的 `Canary` 实例之间不共享。
-
-多根还有一个后果值得知道：**没有任何单元最后启动**，所以不存在"一切都起来之后"那个位置。
-需要那个位置的话，声明一个组合根。
-
-## 装配摘要
-
-把 `CANARY_LOG_LEVEL` 设成 `DEBUG`，启动末尾会在 `canary.runtime` 上打印一份摘要 ——
-启动顺序、每个单元的依赖与耗时：
-
-```text
-Canary assembled 4 unit(s)
-  roots: LibraryApp
-  start order (stop runs in reverse):
-    1. Config
-    2. Database  <- Config
-    3. BookRepository  <- Database
-    4. LibraryApp  <- BookRepository
-```
-
-## 交给宿主驱动
-
-`Canary` 不认识任何外壳 —— 它既不是 web 框架，也不是 CLI 框架。
-
-两种宿主协议，两个入口：
-
-| 宿主收什么 | 用哪个 | 谁是这样 |
-|---|---|---|
-| 一个异步上下文管理器 `Callable[[Host], AsyncContextManager]` | `canary.lifespan` | ASGI（Starlette / FastAPI / Litestar）、MCP、FastStream |
-| 成对的启动 / 关停回调 | `start()` 与 `stop()` | Quart、Sanic、arq、Dramatiq |
-
-```python
-app = FastAPI(lifespan=canary.lifespan)          # 就这一行
-app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
-server = MCPServer("demo", lifespan=canary.lifespan)
-```
-
-没有宿主时（CLI、脚本、测试夹具）直接用：
-
-```python
-async with canary.lifespan():
+async with BookRepository() as books:      # 连同它的 Database 与 Config 一起就位
     ...
 ```
 
-需要在宿主的处理函数里拿到某个单元时，`canary[SomeUnit]` 就是它 —— 依赖已经注入好了，
-`self.<dep>` 直接可用。配合 FastAPI 的 `Depends` 只要一个三行的工厂：
+## 覆盖与组合
+
+生命周期方法是普通方法，可以覆盖并用 `super()` 组合：
 
 ```python
-def provide[T](cls: type[T]):
-    def dep() -> T:
-        return canary[cls]
-    return dep
+class Traced(Canary):
+    async def start(self) -> None:
+        log.info("starting %s", type(self).__name__)
+        await super().start()
+        log.info("started %s", type(self).__name__)
 
 
-@app.get("/books/{book_id}")
-async def read(book_id: int, svc: Annotated[LibraryApp, Depends(provide(LibraryApp))]):
-    return svc.get_book(book_id)
+class Service(Traced):
+    @start
+    async def go(self) -> None: ...
 ```
 
-HTTP、WebSocket、静态文件、中间件、认证全归宿主。Canary 只保证你的对象被正确装配、按序
-启动、按逆序回收。
+阶段钩子的名字由你决定，只要不与 `init` / `start` / `stop` / `__aenter__` /
+`__aexit__` 这五个名字冲突。
+
+## 替身
+
+单元的标记随继承传递，因此测试替身继承被替换的类型即可：
+
+```python
+class FakeDatabase(Database):
+    @start
+    async def connect(self) -> None:
+        self.pool = InMemoryPool()
+```
+
+在图中替换某个实例，直接给属性赋值：
+
+```python
+service = UserService()
+await service.init()
+service.database = FakeDatabase()
+```
+
+## `stop()` 是图的动作
+
+`init()` 与 `start()` 是单元的动作，沿依赖向下推进。`stop()` 不同：它回收整个作用域的
+台账，因此在图中任意一个单元上调用效果相同。
+
+```python
+await service.database.stop()     # 回收整张图，不只是 database
+```
+
+原因是回收不能分治：`Database` 可能同时被多个单元依赖，单独停掉它会让还在使用它的单元
+失效。

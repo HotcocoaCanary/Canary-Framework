@@ -1,176 +1,122 @@
 # API 参考
 
-以下均从 `canary_framework` 导出，除非另有说明。
-
-## `cocoa`
+全部公开名字都从 `canary_framework` 导出。
 
 ```python
-def cocoa(cls=None, *, deps: list[type] | None = None)
+from canary_framework import (
+    Canary, dep,                                  # 声明
+    init, start, stop, Phase,                     # 阶段
+    advance, unwind, Scope, scope_of, deps_of,    # 引擎
+    CanaryError, DeclarationError, ConstructionError,
+    CircularDependencyError, LifecycleError,      # 异常
+)
 ```
 
-把 `cls` 标记为 cocoa —— 最小单元。`deps` 是有序的依赖类型列表。可直接使用，也可作为
-装饰器工厂：
+## 声明
+
+### `class Canary`
+
+单元基类。继承它即为一个单元。
+
+| 成员 | 说明 |
+|---|---|
+| `async init()` | 沿依赖推进 `init` 阶段。 |
+| `async start()` | 沿依赖推进 `start` 阶段。未先 `init()` 时抛 `LifecycleError`。 |
+| `async stop()` | 按台账逆序回收整个作用域。幂等。 |
+| `async __aenter__()` | 依次调用 `init()` 与 `start()`，失败时回收并原样抛出。返回自身。 |
+| `async __aexit__(...)` | 调用 `stop()`，不吞掉异常。 |
+
+子类可以覆盖这些方法并用 `super()` 组合。阶段钩子的名字不得与它们冲突。
+
+### `dep(cls)`
+
+声明一条依赖，返回值标注为 `cls` 的实例类型。
 
 ```python
-@cocoa
-class Config: ...
-
-
-@cocoa(deps=[Config])
-class Database: ...
+class UserService(Canary):
+    database = dep(Database)
 ```
 
-单元一律由框架**无参构造**：`__init__` 不能有必填参数，否则 `Canary(...)` 抛 `ConstructionError`。
+- 属性名由使用者决定，与被依赖的类名无关。
+- 依赖在 `@init` 之后可用；在 `__init__` 中读取抛 `LifecycleError`。
+- `cls` 不是 `Canary` 子类时抛 `DeclarationError`，检查发生在类体求值时。
 
-## `on_init` / `on_start` / `on_stop`
+## 阶段
+
+### `init` / `start` / `stop`
+
+框架提供的三个 `Phase` 实例，同时是标记方法用的装饰器。
 
 ```python
-def on_init(fn) -> fn
-def on_start(fn) -> fn
-def on_stop(fn) -> fn
+class Database(Canary):
+    @start
+    async def connect(self) -> None: ...
 ```
 
-把方法注册为生命周期钩子。每个都接受同步或异步函数；同一阶段可有任意多个钩子，混入的
-先于本类执行。
+`start` 的前驱是 `init`。`stop` 不由 `advance()` 推进，由 `Canary.stop()` 按台账消费。
 
-## `Canary`
+### `class Phase(name, *, after=None)`
+
+一个阶段。可调用，调用的效果是给方法打上本阶段的标记。
+
+| 参数 | 说明 |
+|---|---|
+| `name` | 阶段名。作用域用它作为推进记录与台账的键。 |
+| `after` | 前驱阶段。前驱未完成时推进本阶段抛 `LifecycleError`。 |
 
 ```python
-class Canary(*roots: type, start_concurrency: int | None = None)
+migrate = Phase("migrate", after=init)
 ```
 
-编排器。构造即装配：建图（每个类型无参构造一次）、拓扑排序、注入依赖，全部同步完成；
-装配类错误（`ConstructionError` / `InjectionError` / `CircularDependencyError`、非 cocoa 的
-`TypeError`）在这一行抛出。
+## 引擎
 
-`start_concurrency`：`None`（默认）严格顺序；给一个正整数则让互不依赖的单元同时启动，同时
-最多这么多个。见 [生命周期 · 并发启动](lifecycle.md#并发启动)。
+### `async advance(unit, phase)`
 
-### 属性
+在 `unit` 的依赖图上推进一次 `phase`：先推进依赖，再运行自身的钩子。同一个单元的同一个
+阶段只运行一次；互不依赖的依赖同时推进。
 
-| 属性 | 类型 | 含义 |
-|---|---|---|
-| `state` | `LifecycleState` | 当前生命周期状态 |
-| `order` | `tuple[type, ...]` | 拓扑启动顺序（依赖在前） |
-| `instances` | `tuple[object, ...]` | 按拓扑序排列的实例 |
-| `roots` | `tuple[type, ...]` | 构造时传入的根 |
+### `async unwind(scope, phase, *, undoing)`
 
-### `__getitem__`
+逆序消费 `undoing` 阶段的台账，在每个单元上执行 `phase` 的钩子。单个钩子失败不中断回收，
+异常被收集并作为列表返回。台账无论成败都会排空。
 
 ```python
-def __getitem__(self, cls: type[T]) -> T
+errors = await unwind(scope_of(unit), stop, undoing=start)
 ```
 
-返回图中 `cls` 的共享单例；若不存在则抛出 `KeyError`。
+### `class Scope`
 
-### `init`
+一次运行共享的状态。
 
-```python
-async def init(self) -> None
-```
+| 属性 | 说明 |
+|---|---|
+| `instances` | `dict[type, object]`，类型到共享实例。 |
+| `phases` | `dict[tuple[type, str], Future]`，每次推进本身。 |
+| `entered` | `dict[str, list[object]]`，阶段名到进入该阶段的单元，按进入顺序。 |
 
-`READY → INITIALIZED`。跑全部 `@on_init` —— 各就各位。依赖已在构造期注入，这里让每个单元
-做"只需要依赖、不碰外部资源"的准备。失败置 `FAILED` 并抛出；台账为空，无需回收。
+| 方法 | 说明 |
+|---|---|
+| `instance(cls)` | 返回该类型在本作用域内的唯一实例，首次取用时无参构造。 |
+| `adopt(unit)` | 把实例登记进本作用域。 |
 
-它是一道栅栏：全部 `@on_init` 完成之后，才允许任何 `@on_start`。栅栏就是本方法的返回。
+### `scope_of(unit)`
 
-### `start`
+返回单元所在的作用域。根单元在第一次取用时得到一个新作用域。
 
-```python
-async def start(self) -> None
-```
+### `deps_of(cls)`
 
-`INITIALIZED → STARTED`。跑全部 `@on_start` —— 开工。进入 `@on_start` 的单元立刻记账。
-在 `READY` 态调用（忘了 `init()`）会抛 `LifecycleError: call init() before start()`。
-
-任一环节失败时，**进入过 `@on_start`** 的单元（含失败的那个）按逆序回收，然后原样抛出最初
-的异常，回收过程中的异常作为 note 附在其上。
-
-### `stop`
-
-```python
-async def stop(self) -> None
-```
-
-逆拓扑序执行 `@on_stop`。**唯一的回收路径**：从 `STARTED` 可调，从 `FAILED` 也可调，
-重复调用是幂等的，没启动过时空转。单个 `@on_stop` 抛出不会中断回收 —— 异常收集完毕后
-合并成一个 `ExceptionGroup` 抛出。
-
-### `lifespan`
-
-```python
-@asynccontextmanager
-def lifespan(self, _host: object = None) -> AsyncContextManager[None]
-```
-
-交给宿主的入口：进入时 `start()`，退出时 `stop()`，**交出 `None`**。
-
-`_host` 收下宿主传进来的自己（ASGI 的 `lifespan(app)`、MCP 的 `lifespan(server)`），又给了
-默认值，所以没有宿主时也能直接 `async with canary.lifespan():`。
-
-```python
-app = FastAPI(lifespan=canary.lifespan)
-app = Litestar(route_handlers=[...], lifespan=[canary.lifespan])
-server = MCPServer("demo", lifespan=canary.lifespan)
-```
-
-交出 `None` 是必须的：ASGI 的 lifespan 协议把交出来的值当作要合并进 `scope["state"]` 的
-映射。
-
-### `__aenter__` / `__aexit__`
-
-异步上下文管理器协议，封装 `start()` / `stop()`，**交出容器自己** —— 它服务的是
-你自己的代码：
-
-```python
-async with Canary(Root) as canary:
-    canary[SomeUnit].do_something()
-```
-
-## 枚举
-
-### `LifecycleState`
-
-`READY`、`INITIALIZING`、`INITIALIZED`、`STARTING`、`STARTED`、`STOPPING`、`STOPPED`、
-`FAILED`。三个动作各有一个进行中状态与一个完成态；起点是 `READY`：装配在 `Canary(...)`
-里已经做完。
-
-### `State`
-
-（`canary_framework.common.type`）所有状态枚举的基类；`issubclass` 校验的挂载点。
+返回 `cls` 声明的依赖，基类在前、按定义顺序、按类型去重。
 
 ## 异常
 
-| 异常 | 基类 | 含义 |
-|---|---|---|
-| `CanaryError` | `Exception` | 所有框架与扩展错误的根基类 |
-| `CircularDependencyError` | `CanaryError` | 依赖成环；`.cycle` 是环上的类型名 |
-| `ConstructionError` | `CanaryError` | 单元需要构造参数，框架无参构造不出来 |
-| `InjectionError` | `CanaryError` | 两个依赖的 snake_case 撞名；`.attribute` / `.claimants` |
-| `LifecycleError` | `CanaryError` | 非法生命周期迁移 |
+全部继承 `CanaryError`，因此可用一次 `except CanaryError` 统一捕获。
 
-所有框架错误都继承 `CanaryError`，因此 `except CanaryError` 可一网打尽。将来的扩展也应
-继承它。
-
-## 环境变量
-
-| 变量 | 作用 |
+| 异常 | 何时抛出 |
 |---|---|
-| `CANARY_LOG_LEVEL` | `canary` logger 树的级别。设成 `DEBUG` 会打印装配摘要。 |
-| `CANARY_SLOW_CALLBACK_SECONDS` | 事件循环延迟探针的阈值（秒）。开发期工具，默认关闭。 |
+| `CanaryError` | 基类，本身不抛出。 |
+| `DeclarationError` | `dep()` 的参数不是 `Canary` 子类。 |
+| `ConstructionError` | 单元需要构造参数。携带 `unit`。 |
+| `CircularDependencyError` | 依赖成环。携带 `cycle`，是实际走过的路径。 |
+| `LifecycleError` | 在生命周期之外使用单元：`__init__` 中读取依赖，或前驱阶段未完成。 |
 
-## 自省（`canary_framework.core.decorator.introspect`）
-
-| 函数 | 作用 |
-|---|---|
-| `is_cocoa(cls)` | `cls` 是否被 `@cocoa` 标记 |
-| `deps_of(cls)` | 声明的依赖（元组） |
-| `init_hooks(instance)` / `start_hooks(instance)` / `stop_hooks(instance)` | 某阶段的钩子，基类优先 |
-| `to_snake(name)` | （`core.infra.naming`）`UserService` → `user_service` |
-
-## 图算法（`canary_framework.runtime.graph`）
-
-| 函数 | 作用 |
-|---|---|
-| `build_graph(roots)` | 实例化每个根及其传递依赖，每类型一次，全部无参构造 |
-| `topological_sort(graph)` | 卡恩算法；成环抛 `CircularDependencyError` |
+回收阶段的多个失败合并为标准库的 `ExceptionGroup`，不是 `CanaryError` 的子类。
