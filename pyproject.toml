@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "canary-framework"
-version = "0.9.3"
-description = "Canary / cocoa — a minimal dependency-injection and lifecycle runtime, with zero dependencies"
+version = "0.10.0"
+description = "Canary — dependency injection and lifecycle for plain Python classes, with zero dependencies"
 requires-python = ">=3.12"
 dependencies = []
 readme = "README.md"
@@ -16,7 +16,6 @@ keywords = [
     "lifecycle",
     "decorator",
     "canary",
-    "cocoa",
     "di",
     "container",
     "ioc",
@@ -99,18 +98,6 @@ disallow_untyped_defs = true
 no_implicit_optional = true
 check_untyped_defs = true
 
-[[tool.mypy.overrides]]
-module = ["tests", "tests.*"]
-# 测试代码依赖运行时注入的属性（self.<dep>），并断言 LifecycleState 等状态
-# 枚举的 `is` 比较；这些在 strict 下无法静态判型，按需放宽以保持发布门禁。
-disable_error_code = [
-    "attr-defined",
-    "assignment",
-    "comparison-overlap",
-    "no-any-return",
-    "type-arg",
-    "var-annotated",
-]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/canary_framework"]

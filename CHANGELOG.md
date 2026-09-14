@@ -2,11 +2,90 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
-## [0.9.3] — 2026-09-10
+## [0.10.0] — 2026-09-14
 
-Several breaking changes; 0.9.x is still taking shape.
+A complete rewrite of the core. Not compatible with 0.9.x; there is no compatibility layer.
 
-含多处破坏性变更；0.9.x 仍在快速定型阶段。
+核心完全重写。与 0.9.x 不兼容，且没有兼容层。
+
+### Changed
+
+- **BREAKING: a unit is a base class, not a decorator.** `@cocoa` is gone; subclass `Canary`
+  instead. The unit itself carries the lifecycle — `init()`, `start()`, `stop()` and
+  `async with unit` — so `svc.init()` and `self.config` are visible to type checkers and IDEs,
+  which a decorator cannot achieve.
+- **BREAKING: dependencies are declared with `dep()`, not `deps=[...]`.** `database =
+  dep(Database)` is a descriptor: the attribute name is the user's choice rather than the
+  snake_case of the class name, the type is inferred with no extra annotation, and the
+  declaration holds the class object itself so it never needs evaluating (unaffected by
+  `from __future__ import annotations`, `if TYPE_CHECKING` or function-local classes).
+- **BREAKING: hooks are `@init` / `@start` / `@stop`**, instances of the public `Phase` class.
+  They are both the decorators and the engine's arguments; `Phase("migrate", after=init)` adds
+  a fourth phase with no registration.
+- **BREAKING: hooks resolve by attribute name.** Overriding a hook replaces it, and `super()`
+  composes — matching ordinary method semantics. 0.9.x deduplicated by function identity, which
+  turned an override into an addition.
+- **BREAKING: one scope is one graph.** Two separately constructed roots are two unrelated
+  graphs; even shared dependencies are distinct instances.
+- `stop()` is a graph action: it reclaims the whole scope's ledger, so calling it on any unit
+  in the graph has the same effect. Reclamation cannot be divided because a dependency graph is
+  not a tree.
+- Concurrency is the default. Independent dependencies advance together, scheduled by
+  dependency; there is no longer anything to configure.
+
+### Added
+
+- `Phase`, `advance()` and `unwind()` as the public engine: `advance` recurses along
+  dependencies, `unwind` drains a ledger in reverse. Custom phases pair with a reclamation
+  phase at the call site: `unwind(scope, rollback, undoing=migrate)`.
+- `Scope`, `scope_of()` and `deps_of()` for inspecting a run.
+- `DeclarationError` — `dep()` rejects a non-unit while the class body is evaluated; type
+  checkers reject it too, because `dep()`'s type parameter is bound to `Canary`.
+- `tests/test_layering.py` — the layering `canary → runtime → declare → errors` is asserted by
+  parsing every module's imports, so a reverse dependency fails the test suite.
+
+### Fixed
+
+- **A dependency chain of about 493 units raised `RecursionError`.** A single dependency is
+  still awaited directly, but every 32 levels the call stack is handed back to the event loop;
+  5000 levels are covered by a test.
+- **Cycle detection is no longer on the hot path.** A cycle is exactly a unit that has not
+  finished and sits on the current path, so the check happens only on an unfinished memo hit.
+  This removes a quadratic term: a 3000-deep chain goes from 213ms to 163ms.
+- **`async with` now goes through the unit's own lifecycle methods**, so a subclass overriding
+  `start()` applies on that path as well as on the explicit one.
+
+### Removed
+
+- `@cocoa`, the `Canary(*roots)` runtime container, `canary.order`, `canary.instances`,
+  `canary[Type]`, `canary.lifespan`, `start_concurrency=`, the assembly summary and
+  `CANARY_SLOW_CALLBACK_SECONDS`.
+- `LifecycleState` and the eight-state machine. "Not started / in progress / finished" is
+  expressed by the advance record itself.
+- The standalone topological sort. Depth-first plus memoisation already produces a valid
+  topological order.
+- snake_case-by-class-name injection, class-level annotation injection, and `Config` / logger
+  injection.
+- `tmp/` (0.9.3 field reports), `tests/conftest.py`, the `cocoa.md` documentation page and the
+  stale `--extra web` reference in `CONTRIBUTING.md`.
+
+### Performance
+
+Measured in isolated processes, best of five:
+
+      fan(1000)      14.2 ms     one root with 1000 independent leaves
+      diamond(12)     7.3 ms     6 layers x 12 wide, fully connected, 864 edges
+      chain(300)      3.4 ms
+      chain(3000)   163.4 ms
+
+Source is 773 lines across 13 modules with 16 public names; 44 tests, 99% coverage.
+
+## [0.9.3] — 未发布 / never released
+
+Developed but never published. Its work is superseded by 0.10.0; the entry is kept for the
+record.
+
+开发完成但从未发布，内容已被 0.10.0 取代，此处仅作记录。
 
 ### Changed
 

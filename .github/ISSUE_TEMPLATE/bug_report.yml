@@ -24,7 +24,7 @@ body:
   - type: input
     attributes:
       label: CF 版本 / Version
-      placeholder: "例如 0.9.0"
+      placeholder: "例如 0.10.0"
     validations:
       required: true
   - type: input
