@@ -92,7 +92,7 @@ class Service(Traced):
 阶段钩子的名字由你决定，只要不与 `init` / `start` / `stop` / `__aenter__` /
 `__aexit__` 这五个名字冲突。
 
-## 替身
+## 替身 {#substitutes}
 
 单元的标记随继承传递，因此测试替身继承被替换的类型即可：
 

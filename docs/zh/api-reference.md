@@ -95,6 +95,8 @@ errors = await unwind(scope_of(unit), stop, undoing=start)
 | `entered` | `dict[str, dict[type, object]]`，阶段名到进入该阶段的单元，以类型为键，按进入顺序。 |
 | `known` | `dict[str, Phase]`，本作用域推进过的阶段。 |
 
+`phases`、`entered` 与 `known` 用于观察，其结构不在[兼容性承诺](versioning.md#public-api)范围内。
+
 | 方法 | 说明 |
 |---|---|
 | `instance(cls)` | 返回该类型在本作用域内的唯一实例，首次取用时无参构造。 |

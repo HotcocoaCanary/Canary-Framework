@@ -1,106 +1,53 @@
-# What's New in 0.10.0
+# What's New in 1.0
 
-0.10.0 rewrites the core. The public API is not compatible with 0.9.x, and there is no
-compatibility layer.
+1.0 is the first stable release. The API introduced in 0.10 is now covered by
+[Semantic Versioning](versioning.md): no breaking changes until 2.0, and anything removed is
+deprecated for at least one minor release first.
 
-## A unit is a base class
+Coming from 0.9.x? Start with [Upgrading from 0.9.x](upgrading-from-0.9.md).
 
-The `@cocoa` decorator and the `Canary` runtime container are both gone. Subclass `Canary` and
-the unit runs its own life:
+## Replacing a dependency across the graph
+
+`Scope.provide()` makes one instance stand in for a dependency everywhere in the graph — the
+supported way to use test doubles:
 
 ```python
-class Database(Canary):
-    config = dep(Config)
+service = UserService()
+scope_of(service).provide(Database, FakeDatabase())
 
-    @start
-    async def connect(self) -> None: ...
+async with service:
+    assert service.repository.database is service.database     # both the fake
+```
 
-    @stop
-    async def close(self) -> None: ...
+The provided unit runs its own hooks and advances the dependencies its own class declares.
 
+Assigning to a dependency attribute now raises `AttributeError` pointing to `provide()`. In
+0.10 it silently replaced that one attribute while the rest of the graph, and the lifecycle,
+kept the original.
 
-async with UserService() as service:      # the whole graph comes up in dependency order
+## Starting again
+
+`stop()` undoes `start`, so the same graph can start again. `@init` is not rerun:
+
+```python
+async with service:     # init, start, stop
+    ...
+async with service:     # start, stop
     ...
 ```
 
-A base class rather than a decorator so that `service.init()`, `async with service` and
-`self.config` are all visible to type checkers and IDEs — a decorator cannot widen a class's
-static type.
+In 0.10 the second `start()` returned without running anything.
 
-## `dep()` replaces `deps=[...]`
+## Retrying a failure
 
-Dependencies are declared with a descriptor instead of listed in a decorator argument:
+A failed or cancelled advance no longer leaves a record, so calling it again runs it again. In
+0.10 every later call re-raised the first exception. Relatedly, `start()` after a failed
+`init()` now raises `LifecycleError` instead of proceeding.
 
-```python
-class AlertDispatcher(Canary):
-    sink = dep(LoggingAlertSink)
-```
+## Upgrading from 0.10
 
-- **You choose the attribute name.** It is no longer the snake_case of the dependency's class
-  name, so an implementation can be bound under an abstract name.
-- **The type is inferred.** `self.sink` is a `LoggingAlertSink` with no extra annotation.
-- **The declaration never needs evaluating**, so it is unaffected by
-  `from __future__ import annotations`, `if TYPE_CHECKING` or function-local classes. 0.9.x's
-  class-level annotation injection failed silently in all three cases.
-
-## Phases are first-class
-
-`@init` / `@start` / `@stop` are `Phase` instances — both decorators and engine arguments.
-Adding a phase requires no registration:
-
-```python
-migrate = Phase("migrate", after=init)
-```
-
-`after` declares a predecessor, so calling `start()` without `init()` raises `LifecycleError`
-instead of silently skipping a phase.
-
-## Overriding means overriding
-
-Hooks resolve by attribute name, matching ordinary method semantics: a subclass overriding a
-hook of the same name replaces it, and `super()` composes. 0.9.x deduplicated by function
-identity, which turned an override into an addition.
-
-Lifecycle methods can be overridden too:
-
-```python
-class Traced(Canary):
-    async def start(self) -> None:
-        log.info("starting")
-        await super().start()
-```
-
-## The engine is two rules
-
-- `advance(unit, phase)` recurses along dependencies — the only recursion.
-- `unwind(scope, phase, undoing=...)` drains the ledger in reverse — the only rule that
-  does not recurse.
-
-The separate topological sort, the state machine and the runtime container are all gone:
-depth-first plus memoisation already produces a valid topological order, and
-"not started / in progress / finished" is expressed by the advance record itself.
-
-Dependency-chain depth is no longer bounded by Python's recursion limit (previously about 493).
-
-## Removed
-
-- `@cocoa`, the `Canary(*roots)` runtime container, `canary.order`, `canary.instances`,
-  `canary[Type]`, `canary.lifespan`, `start_concurrency=`, the assembly summary and the
-  event-loop lag probe.
-- `LifecycleState` and its eight-state machine.
-- snake_case-by-class-name injection, class-level annotation injection, `Config` and logger
-  injection.
-- `canary_framework.web` was removed during 0.9.3 development and is not restored here.
-
-## Migration
-
-| 0.9.x | 0.10.0 |
+| 0.10 | 1.0 |
 |---|---|
-| `@cocoa(deps=[Database])` + `self.database` | `class X(Canary)` + `database = dep(Database)` |
-| `@on_init` / `@on_start` / `@on_stop` | `@init` / `@start` / `@stop` |
-| `canary = Canary(Root)` | `root = Root()` |
-| `await canary.init()` / `.start()` / `.stop()` | `await root.init()` / `.start()` / `.stop()` |
-| `async with Canary(Root) as c` | `async with Root() as root` |
-| `canary[Database]` | Read it from a unit that declares it, or `scope_of(root).instances[Database]` |
-| `Canary(Root, start_concurrency=8)` | Concurrency is the default; nothing to configure |
-| `app = FastAPI(lifespan=canary.lifespan)` | Write the three-line `asynccontextmanager` yourself |
+| `service.database = FakeDatabase()` | `scope_of(service).provide(Database, FakeDatabase())` before the lifecycle begins |
+| `for unit in scope.entered["start"]` | `for unit in scope.entered["start"].values()` — keyed by type |
+| Build a new root to restart | Call `start()` again on the same root |
