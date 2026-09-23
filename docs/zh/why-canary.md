@@ -40,7 +40,7 @@ uv run benchmarks/comparison.py
 场景：`Config`，两个互不依赖、各需 0.1 秒获取的资源 `Database` 与 `Cache`，以及同时需要二者的
 `Service`。
 
-| | Canary 1.0.1 | dishka 1.10.1 | dependency-injector 4.49.1 | injector 0.24.0 | FastAPI `Depends` 0.141.1 |
+| | Canary 1.1.0 | dishka 1.10.1 | dependency-injector 4.49.1 | injector 0.24.0 | FastAPI `Depends` 0.141.1 |
 |---|---|---|---|---|---|
 | 装配方式 | 类上的 `dep()` 属性 | `Provider` 类 | 由 provider 组成的容器 | module 与 binder | handler 签名中的 `Depends(...)` |
 | 你的类 | 继承 `Canary` | 普通类 | 普通类 | 普通类，`__init__` 上加 `@inject` | 普通函数 |

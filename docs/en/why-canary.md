@@ -43,7 +43,7 @@ Measured on 2026-09-23 with Python 3.13; library versions are pinned in the scri
 The scenario: `Config`, two independent resources `Database` and `Cache` that each take 0.1 s to
 acquire, and a `Service` that needs both.
 
-| | Canary 1.0.1 | dishka 1.10.1 | dependency-injector 4.49.1 | injector 0.24.0 | FastAPI `Depends` 0.141.1 |
+| | Canary 1.1.0 | dishka 1.10.1 | dependency-injector 4.49.1 | injector 0.24.0 | FastAPI `Depends` 0.141.1 |
 |---|---|---|---|---|---|
 | Wiring | `dep()` attributes on the class | `Provider` classes | a container of providers | modules and binders | `Depends(...)` in handler signatures |
 | Your classes | subclass `Canary` | plain classes | plain classes | plain classes, `@inject` on `__init__` | plain functions |
