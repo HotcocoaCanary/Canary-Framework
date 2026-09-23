@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "canary-framework"
-version = "1.0.0"
+version = "1.0.1"
 description = "Canary — dependency injection and lifecycle for plain Python classes, with zero dependencies"
 requires-python = ">=3.12"
 dependencies = []
@@ -101,3 +101,7 @@ check_untyped_defs = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/canary_framework"]
+
+[tool.hatch.build.targets.sdist]
+# 显式列出：examples/ 是子模块（示例仓库），不属于框架的源码包
+only-include = ["src", "tests", "README.md", "README_ZH.md", "CHANGELOG.md", "LICENSE"]
