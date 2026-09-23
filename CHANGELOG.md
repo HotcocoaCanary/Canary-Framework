@@ -4,6 +4,15 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- `stop()` called while `start()` is still running waits for it to finish before reclaiming.
+  It used to run `@stop` first; the in-flight `@start` then acquired its resource after
+  reclamation, and nothing released it. The same applies to `unwind()` for any phase.
+  ([#10](https://github.com/HotcocoaCanary/Canary-Framework/issues/10))
+
+  `start()` 仍在进行时调用 `stop()`，会先等它结束再回收，不再泄漏在回收之后才获取的资源。
+
 ## [1.0.0] — 2026-09-23
 
 The first stable release. The core introduced in 0.10 is kept; from here on the public API
