@@ -52,14 +52,17 @@ async def leave(unit: object, phase: Phase) -> None:
 
 
 async def rollback(scope: Scope, cls: type, phase: Phase) -> list[Exception]:
-    """Leave *phase* on *cls* right after it failed to enter, whoever waits on it.
+    """Undo a failed entering of *phase* on *cls*, whoever waits on it.
 
-    进入失败或被取消的单元立即离开：不检查是否被使用。由进入调用。
+    进入失败或被取消的单元立即回到空闲。阶段声明了 ``leave`` 时先离开——不检查是否被使用，
+    等待它的依赖者从未用到它；没有声明时它没有获取任何东西，直接重置。由进入调用。
 
     :return: 离开钩子抛出的异常。
     """
     errors: list[Exception] = []
-    if phase.leave is not None:
+    if phase.leave is None:
+        scope.track(cls, phase).reset()
+    else:
         await _leave(scope, cls, _Pass(phase, _left_with(scope, phase), errors), failed=True)
     return errors
 
@@ -130,6 +133,17 @@ async def _each(scope: Scope, targets: Iterable[type], run: _Pass) -> None:
     再次离开时继续。
     """
     tasks = [asyncio.create_task(_leave(scope, cls, run)) for cls in targets]
+    await wait_all(tasks)
+    for task in tasks:
+        if not task.cancelled() and (exc := task.exception()) is not None:
+            raise exc
+
+
+async def wait_all(tasks: list[asyncio.Task[None]]) -> None:
+    """Wait for every task; if cancelled meanwhile, cancel them all, wait, and re-raise.
+
+    等待全部任务结束。等待期间被取消时，连带取消这些任务并等它们结束，再抛出取消。
+    """
     if not tasks:
         return
     try:
@@ -137,10 +151,8 @@ async def _each(scope: Scope, targets: Iterable[type], run: _Pass) -> None:
     except asyncio.CancelledError:
         for task in tasks:
             task.cancel()
+        await asyncio.wait(tasks)
         raise
-    for task in tasks:
-        if not task.cancelled() and (exc := task.exception()) is not None:
-            raise exc
 
 
 def _in_use(scope: Scope, cls: type, phase: Phase) -> bool:
