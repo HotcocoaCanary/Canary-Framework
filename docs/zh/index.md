@@ -83,6 +83,7 @@ pip install canary-framework
 
 ## 下一步
 
+- [为什么选 Canary](why-canary.md)：适合与不适合的场景，以及实测对比。
 - [快速开始](quickstart.md)：十分钟跑通一个完整的例子。
 - [单元](canary.md)：`Canary` 基类的四个动作。
 - [依赖声明](dependency-injection.md)：`dep()` 与作用域。

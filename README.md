@@ -123,6 +123,9 @@ breaking changes before 2.0, and removals are deprecated for at least one minor 
 
 ## Documentation
 
+- [Why Canary](https://hotcocoacanary.github.io/Canary-Framework/why-canary/) — where it fits,
+  where it does not, and a measured comparison with dishka, dependency-injector, injector and
+  FastAPI `Depends`
 - [Documentation](https://hotcocoacanary.github.io/Canary-Framework/) —
   [What's new in 1.0](https://hotcocoacanary.github.io/Canary-Framework/whats-new/),
   [patterns](https://hotcocoacanary.github.io/Canary-Framework/patterns/),

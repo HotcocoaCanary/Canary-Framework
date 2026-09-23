@@ -4,6 +4,16 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Documentation
+
+- New page: Why Canary — where it fits and where it does not, and a comparison with dishka,
+  dependency-injector, injector and FastAPI `Depends`. Every row is measured by
+  `benchmarks/comparison.py`, which anyone can run with `uv run benchmarks/comparison.py`.
+  ([#13](https://github.com/HotcocoaCanary/Canary-Framework/issues/13))
+
+  新增「为什么选 Canary」：适合与不适合的场景，以及实测对比；每一行都可用
+  `uv run benchmarks/comparison.py` 复现。
+
 ## [1.0.1] — 2026-09-23
 
 ### Changed
