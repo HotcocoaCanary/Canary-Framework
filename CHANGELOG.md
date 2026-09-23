@@ -4,6 +4,17 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-09-23
+
+The engine now runs on an explicit dependency graph, and `stop()` is a unit action. Two changes
+break code that used the engine directly — `advance()` / `unwind()` are renamed, and `stop()` on
+a unit still in use now does nothing — see
+[What's New in 1.1](https://hotcocoacanary.github.io/Canary-Framework/whats-new/). `init()`,
+`start()`, `stop()` and `async with` keep working as before.
+
+引擎改为基于显式依赖图，`stop()` 成为单元的动作。两处破坏性变更只影响直接使用引擎的代码：
+`advance()` / `unwind()` 改名，对仍被使用的单元调用 `stop()` 不再回收整张图。
+
 ### Changed
 
 - **BREAKING: the engine functions are renamed**, for phases of your own

@@ -2,7 +2,7 @@
 
 0.10.0 rewrote the core, and 1.0 keeps that core. Coming from 0.9.x, the public API is not
 compatible and there is no compatibility layer; this page lists what changed and how to migrate.
-Then read [What's New in 1.0](whats-new.md) for the additions since 0.10.
+Then read [What's New in 1.0](whats-new-1.0.md) and [What's New in 1.1](whats-new.md) for what came after.
 
 ## A unit is a base class
 
