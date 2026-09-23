@@ -70,8 +70,10 @@ Depth-first plus memoisation produces a completion order that is already a valid
 order, so there is no separate topological sort in the framework.
 
 **Unwinding** is the only rule that does not recurse. A dependency graph is not a tree, so
-reclamation runs linearly over the ledger in reverse. This is the one asymmetry in the model:
-construction divides, reclamation does not.
+reclamation runs linearly over the ledger in reverse. What to reclaim is decided by
+reachability: stopping a unit removes it from the units started directly, and every running
+unit no longer reachable from those through `dep()` is reclaimed. A unit that running units
+still depend on is not stopped at all.
 
 ## Concurrency
 

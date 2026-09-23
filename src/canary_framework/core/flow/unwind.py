@@ -1,7 +1,10 @@
 """Reclaiming what a phase started.
 
-回收。依赖图不是树，一个单元可能被多个单元依赖，因此回收不能沿依赖递归：只能按台账
-逆序线性进行。单个钩子失败不中断整轮回收。
+回收。依赖图不是树，一个单元可能被多个单元依赖，因此回收不沿依赖递归，而是按台账逆序
+线性进行。单个钩子失败不中断整轮回收。
+
+:func:`unwind` 回收台账中的全部或指定单元；:func:`release` 回收一个单元：仍有运行中的
+单元依赖它时拒绝，否则回收它以及从此不再被需要的依赖。
 
 回收同时撤销被回收单元在 *undoing* 阶段（以及以它为前驱的阶段）上的推进记录，因此回收之后
 可以再次推进这些阶段。
@@ -15,13 +18,16 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Collection
 
+from canary_framework.core.errors import LifecycleError
 from canary_framework.core.flow.invoke import invoke
 from canary_framework.core.flow.scope import Scope
-from canary_framework.core.meta.introspect import hooks_of
+from canary_framework.core.meta.introspect import deps_of, hooks_of
 from canary_framework.core.meta.phase import Phase
 
 
-async def unwind(scope: Scope, phase: Phase, *, undoing: Phase) -> list[Exception]:
+async def unwind(
+    scope: Scope, phase: Phase, *, undoing: Phase, units: Collection[type] | None = None
+) -> list[Exception]:
     """Drain *undoing*'s ledger in reverse, running *phase*'s hooks, collecting failures.
 
     逆序消费 *undoing* 阶段的台账，在每个单元上执行 *phase* 的钩子。单个钩子失败不中断
@@ -34,14 +40,17 @@ async def unwind(scope: Scope, phase: Phase, *, undoing: Phase) -> list[Exceptio
     :param scope: 要回收的作用域。
     :param phase: 执行哪个阶段的钩子。
     :param undoing: 消费哪个阶段的台账。
+    :param units: 只回收台账中的这些单元（以键表示）；省略时回收全部。
     :return: 回收过程中收集到的异常，按发生顺序排列。
     """
     errors: list[Exception] = []
     undone = _followers(scope, undoing)
     await _settle(scope, undone)
     ledger = scope.entered[undoing.name]
-    while ledger:
-        cls, unit = ledger.popitem()
+    targets = list(ledger) if units is None else [cls for cls in ledger if cls in units]
+    for cls in reversed(targets):
+        if (unit := ledger.pop(cls, None)) is None:
+            continue
         for name in undone:
             scope.phases.pop((cls, name), None)
         for hook in hooks_of(unit, phase):
@@ -51,6 +60,48 @@ async def unwind(scope: Scope, phase: Phase, *, undoing: Phase) -> list[Exceptio
                 exc.add_note(f"raised by {type(unit).__name__}.{_name_of(hook)}")
                 errors.append(exc)
     return errors
+
+
+async def release(scope: Scope, unit: object, phase: Phase, *, undoing: Phase) -> list[Exception]:
+    """Reclaim *unit*, and every unit that nothing still running needs any more.
+
+    回收 *unit*，以及从此不再被需要的单元：一个运行中的单元只要还能从某个被直接推进过
+    *undoing* 的单元沿依赖到达，就继续运行，其余的按台账逆序回收。*unit* 从未推进或已被
+    回收时，只回收不再被需要的单元。
+
+    :raises LifecycleError: 仍有运行中的单元依赖 *unit*。此时不做任何回收。
+    :return: 回收过程中收集到的异常，按发生顺序排列。
+    """
+    await _settle(scope, _followers(scope, undoing))
+    key = scope.key_of(unit)
+    running = scope.entered[undoing.name]
+    dependents = [cls for cls in running if key in deps_of(scope.resolve(cls))]
+    if dependents:
+        names = ", ".join(cls.__name__ for cls in dependents)
+        raise LifecycleError(
+            f"{key.__name__} is still required by running units: {names}. Stop those first."
+        )
+    requested = scope.requested[undoing.name]
+    requested.discard(key)
+    live = _reachable(scope, requested)
+    return await unwind(
+        scope, phase, undoing=undoing, units=[cls for cls in running if cls not in live]
+    )
+
+
+def _reachable(scope: Scope, roots: Collection[type]) -> set[type]:
+    """Return *roots* and everything they depend on, transitively.
+
+    返回 *roots* 以及它们沿依赖可达的全部单元。
+    """
+    seen: set[type] = set()
+    todo = list(roots)
+    while todo:
+        cls = todo.pop()
+        if cls not in seen:
+            seen.add(cls)
+            todo.extend(deps_of(scope.resolve(cls)))
+    return seen
 
 
 async def _settle(scope: Scope, names: Collection[str]) -> None:

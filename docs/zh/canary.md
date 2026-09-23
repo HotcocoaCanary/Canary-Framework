@@ -122,14 +122,33 @@ async with service:
 （`service.database = ...`）会抛 `AttributeError`：赋值只会改到这一个属性，图中其余单元
 仍然取回原来的实例。
 
-## `stop()` 是图的动作
+## `stop()` 是单元的动作
 
-`init()` 与 `start()` 是单元的动作，沿依赖向下推进。`stop()` 不同：它回收整个作用域的
-台账，因此在图中任意一个单元上调用效果相同。
+三个动作都属于被调用的那个单元。`start()` 启动本单元及它需要的依赖；`stop()` 回收本单元，
+以及从此不再被需要的依赖：
 
 ```python
-await service.database.stop()     # 回收整张图，不只是 database
+await service.stop()       # 根单元：它的依赖不再被任何单元需要，整张图随之回收
 ```
 
-原因是回收不能分治：`Database` 可能同时被多个单元依赖，单独停掉它会让还在使用它的单元
-失效。
+依赖只要还被运行中的单元需要——被直接启动的单元，或从它沿 `dep()` 可达的单元——就继续
+运行：
+
+```python
+await root.start()
+await root.metrics.start()    # 也被直接要求运行
+await root.stop()             # root 回收；metrics 及它需要的依赖继续运行
+await root.metrics.stop()     # 这时它们也被回收
+```
+
+仍有运行中的单元依赖某个单元时，停止它会被拒绝，且不回收任何东西：
+
+```python
+await service.database.stop()
+```
+
+```
+LifecycleError: Database is still required by running units: UserService. Stop those first.
+```
+
+作用域知道每一条声明过的依赖，因此知道谁还需要一个单元；先停止它们，或直接停止根单元。

@@ -88,8 +88,9 @@ that fails halfway is reclaimed too.
 | `start()` failed midway | Reclaims whatever entered `@start`, including the one that failed |
 | `start()` still running | Waits for it to finish, succeed or fail, then reclaims in reverse |
 | Called again | Ledger already drained, no-op |
+| Running units still depend on it | Refused with `LifecycleError`; nothing is reclaimed |
 
-One rule covers all six cases, which is why there is no state machine.
+The same rules cover every case, which is why there is no state machine.
 
 Because `stop()` waits for an in-flight `start()`, do not call it from inside a `@start` hook of
 the same graph: it would wait for itself. To bound shutdown, wrap the call in `asyncio.timeout`.

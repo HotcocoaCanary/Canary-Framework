@@ -22,7 +22,7 @@ from canary_framework import (
 |---|---|
 | `async init()` | 沿依赖推进 `init` 阶段。 |
 | `async start()` | 沿依赖推进 `start` 阶段。未先 `init()` 时抛 `LifecycleError`。 |
-| `async stop()` | 按台账逆序回收整个作用域。幂等。 |
+| `async stop()` | 逆序回收本单元及不再被需要的依赖；在根单元上即整张图。仍有运行中的单元依赖它时抛 `LifecycleError`。幂等。 |
 | `async __aenter__()` | 依次调用 `init()` 与 `start()`，失败时回收并原样抛出。返回自身。 |
 | `async __aexit__(...)` | 调用 `stop()`，不吞掉异常。 |
 
@@ -75,10 +75,11 @@ migrate = Phase("migrate", after=init)
 在 `unit` 的依赖图上推进一次 `phase`：先推进依赖，再运行自身的钩子。同一个单元的同一个
 阶段只运行一次；互不依赖的依赖同时推进。
 
-### `async unwind(scope, phase, *, undoing)`
+### `async unwind(scope, phase, *, undoing, units=None)`
 
 逆序消费 `undoing` 阶段的台账，在每个单元上执行 `phase` 的钩子。单个钩子失败不中断回收，
-异常被收集并作为列表返回。台账无论成败都会排空。开始之前先等待 `undoing` 及以它为前驱的
+异常被收集并作为列表返回。给出 `units` 时只回收台账中的这些单元（以类型表示），否则回收
+全部；被选中的单元无论成败都会移出台账。开始之前先等待 `undoing` 及以它为前驱的
 阶段上进行中的推进结束。
 
 ```python
@@ -95,8 +96,9 @@ errors = await unwind(scope_of(unit), stop, undoing=start)
 | `phases` | `dict[tuple[type, str], Future]`，进行中或已完成的推进。失败的推进不留记录。 |
 | `entered` | `dict[str, dict[type, object]]`，阶段名到进入该阶段的单元，以类型为键，按进入顺序。 |
 | `known` | `dict[str, Phase]`，本作用域推进过的阶段。 |
+| `requested` | `dict[str, set[type]]`，阶段名到被直接推进过该阶段的单元。 |
 
-`phases`、`entered` 与 `known` 用于观察，其结构不在[兼容性承诺](versioning.md#public-api)范围内。
+`phases`、`entered`、`known` 与 `requested` 用于观察，其结构不在[兼容性承诺](versioning.md#public-api)范围内。
 
 | 方法 | 说明 |
 |---|---|
@@ -104,6 +106,7 @@ errors = await unwind(scope_of(unit), stop, undoing=start)
 | `adopt(unit)` | 把实例登记进本作用域。 |
 | `provide(cls, unit)` | 把 `unit` 登记为整张图上 `cls` 的实例。须在生命周期开始之前调用。 |
 | `resolve(cls)` | `cls` 的实际类型：登记过替身时为替身的类型，否则为 `cls`。 |
+| `key_of(unit)` | `unit` 在本作用域内登记的类型；替身为被替换的类型。 |
 
 ### `scope_of(unit)`
 

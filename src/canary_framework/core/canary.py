@@ -15,7 +15,7 @@ from typing import Literal, Self
 from canary_framework.core.errors import DeclarationError
 from canary_framework.core.flow.advance import advance
 from canary_framework.core.flow.scope import Scope, scope_of
-from canary_framework.core.flow.unwind import unwind
+from canary_framework.core.flow.unwind import release
 from canary_framework.core.meta.dep import Dep
 from canary_framework.core.meta.phase import init as init_phase
 from canary_framework.core.meta.phase import start as start_phase
@@ -45,8 +45,8 @@ class Canary:
 
     四个动作一一对应：无参构造、:meth:`init`、:meth:`start`、:meth:`stop`。
 
-    :meth:`init` 与 :meth:`start` 是单元的动作，沿依赖向下推进；:meth:`stop` 是图的动作，
-    回收整个作用域的台账，在图中任一单元上调用效果相同。
+    三者都是单元的动作：:meth:`init` 与 :meth:`start` 沿依赖向下推进；:meth:`stop` 回收
+    本单元以及从此不再被需要的依赖，仍有运行中的单元依赖本单元时拒绝。
     """
 
     #: 所在作用域。第一次进入生命周期时创建，之后不变；同一张图上的单元共享同一个。
@@ -71,14 +71,18 @@ class Canary:
         await advance(self, start_phase)
 
     async def stop(self) -> None:
-        """Reclaim everything that entered ``start``, in reverse order.
+        """Reclaim this unit, and the dependencies nothing still running needs.
 
-        按台账逆序执行 ``@stop``。这是唯一的回收路径，正常结束与失败结束共用；重复调用
-        幂等，从未启动时为空操作。
+        回收本单元，以及从此不再被需要的依赖：依赖只要还被其他运行中的单元需要（从某个被
+        直接调用过 :meth:`start` 的单元沿依赖可达），就继续运行。按台账逆序执行 ``@stop``。
 
+        这是唯一的回收路径，正常结束与失败结束共用；重复调用幂等，从未启动时为空操作。
+        对根单元调用即回收整张图。
+
+        :raises LifecycleError: 仍有运行中的单元依赖本单元，此时不回收任何东西——先停止它们。
         :raises ExceptionGroup: 一个或多个 ``@stop`` 抛出异常，即使只有一个。
         """
-        errors = await unwind(scope_of(self), stop_phase, undoing=start_phase)
+        errors = await release(scope_of(self), self, stop_phase, undoing=start_phase)
         if errors:
             raise ExceptionGroup(f"{len(errors)} error(s) while stopping", errors)
 

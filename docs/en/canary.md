@@ -127,15 +127,34 @@ Providing is refused once the scope already holds a `Database`, and when the ins
 `AttributeError`: it would change only that one attribute, leaving the rest of the graph on
 the original.
 
-## `stop()` is a graph action
+## `stop()` is a unit action
 
-`init()` and `start()` are unit actions: they advance down the dependencies. `stop()` is
-different — it reclaims the whole scope's ledger, so calling it on any unit in the graph has
-the same effect.
+All three actions belong to the unit they are called on. `start()` brings up the unit and what
+it needs; `stop()` reclaims the unit and whatever nothing else still needs:
 
 ```python
-await service.database.stop()     # reclaims the whole graph, not just database
+await service.stop()       # the root: nothing else needs its dependencies, so the whole graph goes
 ```
 
-Reclamation cannot be divided: `Database` may be depended on by several units, and stopping it
-alone would break the ones still using it.
+A dependency stays up while something running still needs it — a unit you started directly, or
+anything reachable from one through `dep()`:
+
+```python
+await root.start()
+await root.metrics.start()    # also asked for directly
+await root.stop()             # root goes; metrics and what it needs stay up
+await root.metrics.stop()     # now they go too
+```
+
+Stopping a unit that running units still depend on is refused, and nothing is reclaimed:
+
+```python
+await service.database.stop()
+```
+
+```
+LifecycleError: Database is still required by running units: UserService. Stop those first.
+```
+
+The scope knows every declared dependency, so it can tell who still needs a unit; stop those
+first, or stop the root.

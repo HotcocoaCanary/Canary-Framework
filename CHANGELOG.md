@@ -4,6 +4,34 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- **`stop()` is a unit action.** It reclaims the unit it is called on and the dependencies that
+  nothing running still needs — a dependency stays up while it is reachable through `dep()`
+  from a unit that was started directly. On the root this is the whole graph, as before.
+- **Stopping a unit that running units depend on raises `LifecycleError`** naming them, and
+  reclaims nothing. It used to reclaim the whole graph from whichever unit it was called on:
+  `await service.database.stop()` must become `await service.stop()`.
+- A unit started directly inside a running graph — `await root.metrics.start()` — now keeps
+  itself and what it needs running after `root.stop()`, until it is stopped itself.
+
+  `stop()` 改为单元的动作：回收本单元以及不再被需要的依赖，在根单元上即整张图。仍有运行中的
+  单元依赖它时抛 `LifecycleError` 并且不回收任何东西（原先会回收整张图）；在运行中的图里被
+  直接启动的单元，在根停止后继续运行，直到它自己被停止。
+
+### Added
+
+- `unwind(..., units=...)` reclaims only the given units; `Scope.key_of(unit)` returns the type a
+  unit is registered under; `Scope.requested` records the units advanced directly.
+
+  `unwind()` 可只回收指定单元；新增 `Scope.key_of()` 与 `Scope.requested`。
+
+### Fixed
+
+- `start()` on a provided substitute advances it under the type it replaces, not its own type.
+
+  对替身直接调用 `start()` 时，按被替换的类型推进，而不是替身自身的类型。
+
 ### Documentation
 
 - New page: Why Canary — where it fits and where it does not, and a comparison with dishka,

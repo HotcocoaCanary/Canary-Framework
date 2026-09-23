@@ -21,7 +21,7 @@ class Scope:
     一次运行共享的状态。
     """
 
-    __slots__ = ("entered", "instances", "known", "phases")
+    __slots__ = ("entered", "instances", "known", "phases", "requested")
 
     def __init__(self) -> None:
         #: 类型到共享实例。经 :meth:`provide` 登记的实例可以是该类型的子类实例。
@@ -34,6 +34,9 @@ class Scope:
         self.entered: dict[str, dict[type, object]] = defaultdict(dict)
         #: 阶段名到在本作用域推进过的阶段对象，回收时据此找出以被撤销阶段为前驱的阶段。
         self.known: dict[str, Phase] = {}
+        #: 阶段名到被直接推进过该阶段的单元（以键表示）。回收一个单元时，从其余被直接推进的
+        #: 单元出发仍能沿依赖到达的单元保持运行，其余的一并回收。
+        self.requested: dict[str, set[type]] = defaultdict(set)
 
     def instance(self, cls: type) -> object:
         """Return the single instance of *cls* in this scope, constructing it on first use.
@@ -83,6 +86,17 @@ class Scope:
             )
         setattr(unit, SCOPE, self)
         self.instances[cls] = unit
+
+    def key_of(self, unit: object) -> type:
+        """Return the type *unit* is registered under in this scope.
+
+        返回 *unit* 在本作用域内登记的键。经 :meth:`provide` 登记的替身，键是被替换的类型
+        而不是它自身的类型；未登记时返回它自身的类型。
+        """
+        for cls, instance in self.instances.items():
+            if instance is unit:
+                return cls
+        return type(unit)
 
     def resolve(self, cls: type) -> type:
         """Return the type that will stand in for *cls*: a provided unit's own type, or *cls*.

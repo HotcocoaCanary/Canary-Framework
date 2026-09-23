@@ -25,9 +25,9 @@ Canary Framework 从 1.0.0 起遵循[语义化版本](https://semver.org/lang/zh
 - `canary_framework.core.*` 下未从 `canary_framework` 重新导出的内容；
 - 以下划线开头的名字；
 - 异常消息与 note 的文字；
-- `Scope` 记录类属性（`phases`、`entered`、`known`）的结构。它们用于观察与调试，可能在次版本
-  中变化。`Scope.instances`、`Scope.instance()`、`Scope.provide()` 与 `Scope.resolve()` 在
-  承诺范围内。
+- `Scope` 记录类属性（`phases`、`entered`、`known`、`requested`）的结构。它们用于观察与调试，
+  可能在次版本中变化。`Scope.instances`、`Scope.instance()`、`Scope.provide()`、
+  `Scope.resolve()` 与 `Scope.key_of()` 在承诺范围内。
 
 ## 弃用
 

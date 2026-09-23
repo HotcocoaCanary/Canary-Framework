@@ -36,7 +36,10 @@ async def advance(unit: object, phase: Phase) -> None:
     :raises CircularDependencyError: 依赖成环，异常携带实际走过的环路径。
     :raises ConstructionError: 某个单元需要构造参数。
     """
-    await _advance(type(unit), phase, scope_of(unit))
+    scope = scope_of(unit)
+    key = scope.key_of(unit)
+    scope.requested[phase.name].add(key)
+    await _advance(key, phase, scope)
 
 
 async def _advance(cls: type, phase: Phase, scope: Scope, path: tuple[type, ...] = ()) -> None:

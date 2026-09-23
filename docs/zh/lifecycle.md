@@ -84,8 +84,9 @@ LifecycleError: Service: @init has not run, call it before @start
 | `start()` 中途失败 | 回收进入过 `@start` 的单元，含失败的那一个 |
 | `start()` 仍在进行 | 等它结束（无论成败），再逆序回收 |
 | 重复调用 | 台账已排空，空操作 |
+| 仍有运行中的单元依赖它 | 抛 `LifecycleError` 拒绝，不回收任何东西 |
 
-一条规则覆盖全部六种情形，因此不需要状态机。
+同一套规则覆盖所有情形，因此不需要状态机。
 
 由于 `stop()` 会等待进行中的 `start()`，不要在同一张图的 `@start` 钩子里调用它：那会等待
 自身。需要限时关闭时，用 `asyncio.timeout` 包住这次调用。

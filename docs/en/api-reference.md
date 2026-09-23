@@ -22,7 +22,7 @@ The unit base class. Subclass it and you have a unit.
 |---|---|
 | `async init()` | Advance the `init` phase along dependencies. |
 | `async start()` | Advance the `start` phase. Raises `LifecycleError` if `init()` has not run. |
-| `async stop()` | Reclaim the whole scope's ledger in reverse. Idempotent. |
+| `async stop()` | Reclaim this unit and the dependencies nothing running still needs, in reverse. On the root, the whole graph. Raises `LifecycleError` while running units depend on it. Idempotent. |
 | `async __aenter__()` | Calls `init()` then `start()`, reclaiming and re-raising on failure. Returns self. |
 | `async __aexit__(...)` | Calls `stop()`; never suppresses the exception. |
 
@@ -77,11 +77,12 @@ migrate = Phase("migrate", after=init)
 Advance `phase` across `unit`'s dependency graph: dependencies first, then the unit's own
 hooks. One unit runs one phase exactly once; independent dependencies advance concurrently.
 
-### `async unwind(scope, phase, *, undoing)`
+### `async unwind(scope, phase, *, undoing, units=None)`
 
 Drain `undoing`'s ledger in reverse, running `phase`'s hooks on each unit. One failing hook
-does not abort the pass; errors are collected and returned as a list. The ledger is drained
-either way. Advances of `undoing`, and of phases declared after it, that are still in flight are
+does not abort the pass; errors are collected and returned as a list. With `units`, only those
+units (given by type) are reclaimed; otherwise the whole ledger is. The chosen units leave the
+ledger either way. Advances of `undoing`, and of phases declared after it, that are still in flight are
 awaited first.
 
 ```python
@@ -98,8 +99,9 @@ The state one run shares.
 | `phases` | `dict[tuple[type, str], Future]`, each advance in progress or completed. Failed advances leave no record. |
 | `entered` | `dict[str, dict[type, object]]`, phase name to the units that entered, keyed by type, in entry order. |
 | `known` | `dict[str, Phase]`, the phases advanced in this scope. |
+| `requested` | `dict[str, set[type]]`, phase name to the units advanced directly through it. |
 
-`phases`, `entered` and `known` are for inspection; their shape is not covered by the
+`phases`, `entered`, `known` and `requested` are for inspection; their shape is not covered by the
 [compatibility promise](versioning.md#public-api).
 
 | Method | Description |
@@ -108,6 +110,7 @@ The state one run shares.
 | `adopt(unit)` | Register an instance into this scope. |
 | `provide(cls, unit)` | Make `unit` the instance of `cls` for the whole graph. Call before the lifecycle begins. |
 | `resolve(cls)` | The type standing in for `cls`: a provided unit's type, or `cls`. |
+| `key_of(unit)` | The type `unit` is registered under: the replaced type for a provided unit. |
 
 ### `scope_of(unit)`
 

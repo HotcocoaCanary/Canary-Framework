@@ -26,9 +26,9 @@ It does **not** cover:
 - anything under `canary_framework.core.*` that is not re-exported from `canary_framework`;
 - names that start with an underscore;
 - the text of exception messages and notes;
-- the shape of `Scope`'s record attributes — `phases`, `entered` and `known`. They are there for
-  inspection and debugging, and may change in a minor release. `Scope.instances`,
-  `Scope.instance()`, `Scope.provide()` and `Scope.resolve()` are covered.
+- the shape of `Scope`'s record attributes — `phases`, `entered`, `known` and `requested`. They
+  are there for inspection and debugging, and may change in a minor release. `Scope.instances`,
+  `Scope.instance()`, `Scope.provide()`, `Scope.resolve()` and `Scope.key_of()` are covered.
 
 ## Deprecation
 
