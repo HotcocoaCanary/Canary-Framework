@@ -40,7 +40,7 @@ Canary Framework 从 1.0.0 起遵循[语义化版本](https://semver.org/lang/zh
 
 ## Python 版本
 
-每个版本支持的 Python 版本以 PyPI 上列出的为准（目前为 3.12 至 3.14）。已到生命周期终点的
+每个版本支持的 Python 版本以 PyPI 上列出的为准（目前为 3.12 至 3.15）。已到生命周期终点的
 Python 版本可能在次版本中停止支持，并在变更日志中说明。
 
 ## 发布

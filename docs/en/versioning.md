@@ -43,7 +43,7 @@ major version is expected to be a drop-in change.
 
 ## Python versions
 
-Each release supports the Python versions listed on PyPI (currently 3.12 to 3.14). Support for a
+Each release supports the Python versions listed on PyPI (currently 3.12 to 3.15). Support for a
 Python version that has reached its end of life may be dropped in a minor release; the changelog
 says so.
 

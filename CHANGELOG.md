@@ -4,6 +4,13 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Python 3.15 support: tested in CI and listed in the classifiers.
+  ([#21](https://github.com/HotcocoaCanary/Canary-Framework/issues/21))
+
+  支持 Python 3.15：CI 测试矩阵与 classifier 均已加入。
+
 ### Fixed
 
 Found by the new randomised lifecycle tests
