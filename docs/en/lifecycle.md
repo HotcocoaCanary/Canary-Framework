@@ -8,7 +8,7 @@ A phase is the name of one pass. The framework ships three:
 from canary_framework import init, start, stop
 ```
 
-They are both the decorators that mark hooks and the arguments to `advance()` and `unwind()`.
+They are both the decorators that mark hooks and the arguments to `enter()` and `leave()`.
 
 ```python
 class Database(Canary):
@@ -27,9 +27,9 @@ belong to several phases. Hooks may be synchronous or `async def` — the framew
 whether to await by looking at the return value, so a synchronous function returning a
 coroutine works too.
 
-## Advancing: dependencies first {#advancing}
+## Entering: dependencies first {#entering}
 
-`await unit.init()` advances `init` across the graph: dependencies first, then the unit's own
+`await unit.init()` enters `init` across the graph: dependencies first, then the unit's own
 hooks.
 
 ```python
@@ -50,7 +50,7 @@ await Service().init()      # Config -> Database -> Service
 Three properties:
 
 - **One unit runs one phase exactly once**, no matter how many units depend on it.
-- **Independent units advance concurrently**, so elapsed time tracks the graph's critical path
+- **Independent units enter concurrently**, so elapsed time tracks the graph's critical path
   rather than the sum of all units.
 - **Nothing runs until the graph checks out.** The dependency graph is built first, so a cycle,
   or a unit whose `@init` has not run before `start()`, is reported before any hook runs.
@@ -75,10 +75,10 @@ Calling `start()` without `init()` raises:
 LifecycleError: Service: @init has not run, call it before @start
 ```
 
-## The ledger and reclamation
+## Stopping
 
-A unit is recorded in the ledger as it **enters** `@start`, not when it completes — so a unit
-that fails halfway is reclaimed too.
+A unit holds what `@start` acquired from the moment its `@start` **begins**, not when it
+completes — so a unit that fails halfway is reclaimed too.
 
 `stop()` is the single reclamation path. It stops the unit unless something still uses it, then
 tries each of its dependencies the same way:
@@ -111,7 +111,7 @@ async with service:     # start, stop
     ...
 ```
 
-A phase declared with `after=start` is undone along with `start`, and has to be advanced
+A phase declared with `after=start` is undone along with `start`, and has to be entered
 again after the restart.
 
 A failed `start()` has already released what it acquired (see below), so retrying is simply
@@ -152,20 +152,22 @@ failure reached through several paths is reported once.
 reclaimed and everything is raised at the end as one `ExceptionGroup`, even for a single error:
 
 ```
-ExceptionGroup: 1 error(s) while stopping
+ExceptionGroup: 1 error(s) while leaving @start
   RuntimeError: could not close
     raised by Database.close
 ```
 
 ## Custom phases
 
-`Phase` is public, and adding a phase requires no registration:
+`Phase` is public, and adding a phase requires no registration. `Canary`'s methods are thin
+wrappers over two functions — `unit.start()` is `enter(unit, start)`, `unit.stop()` is
+`leave(unit, start)` — so a phase of your own uses them directly:
 
 ```python
-from canary_framework import Phase, advance, init
+from canary_framework import Phase, enter, init, leave
 
 rollback = Phase("rollback")
-migrate = Phase("migrate", after=init, undo=rollback)
+migrate = Phase("migrate", after=init, leave=rollback)
 
 
 class Schema(Canary):
@@ -177,21 +179,16 @@ class Schema(Canary):
 
 
 await unit.init()
-await advance(unit, migrate)
+await enter(unit, migrate)      # runs @migrate, dependencies first
+await leave(unit, migrate)      # runs @rollback, the unit first
 ```
 
-`after` declares a predecessor: advancing a phase whose predecessor has not finished raises
+`after` declares a predecessor: entering a phase whose predecessor has not been entered raises
 `LifecycleError` instead of silently skipping it.
 
-`undo` names the phase that undoes it, exactly as `stop` undoes `start`: a unit whose `@migrate`
-fails runs its `@rollback` at once, and the failed advance releases what it brought up. To undo
-everything that migrated:
-
-```python
-from canary_framework import scope_of, unwind
-
-errors = await unwind(scope_of(unit), rollback, undoing=migrate)
-```
+`leave` names the phase whose hooks run when this one is left, exactly as `stop` for `start`:
+`leave()` runs them with the same rules as `stop()`, and a unit whose `@migrate` fails runs its
+`@rollback` at once.
 
 ## Hosting
 

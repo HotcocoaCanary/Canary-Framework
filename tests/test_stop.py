@@ -161,9 +161,9 @@ async def test_a_provided_substitute_is_started_and_stopped_under_the_type_it_re
     scope_of(root).provide(database, substitute)
     await root.init()
     await substitute.start()
-    assert database in scope_of(root).entered["start"]
+    assert database in scope_of(root).entered(start)
     await substitute.stop()
-    assert not scope_of(root).entered["start"]
+    assert not scope_of(root).entered(start)
 
 
 async def test_a_cycle_is_reported_before_any_hook_runs() -> None:
@@ -233,7 +233,7 @@ async def test_a_failed_start_releases_itself_then_what_its_users_acquired() -> 
 
     # b 立即回滚自己；x 依赖不足，不启动，释放它占用的 a；最后没人使用 c
     assert log == ["c.start", "a.start", "b.start", "b.stop", "a.stop", "c.stop"]
-    assert not scope_of(root).entered["start"], "nothing is left running"
+    assert not scope_of(root).entered(start), "nothing is left running"
 
 
 async def test_a_sibling_still_starting_finishes_before_it_is_released() -> None:
@@ -303,10 +303,10 @@ async def test_a_cancelled_start_releases_what_it_acquired() -> None:
 
 
 async def test_a_custom_phase_with_undo_is_rolled_back_on_failure() -> None:
-    from canary_framework import Phase, advance
+    from canary_framework import Phase, enter
 
     rollback = Phase("rollback")
-    migrate = Phase("migrate", after=init, undo=rollback)
+    migrate = Phase("migrate", after=init, leave=rollback)
     log: list[str] = []
 
     class Schema(Canary):
@@ -332,7 +332,7 @@ async def test_a_custom_phase_with_undo_is_rolled_back_on_failure() -> None:
     root = Data()
     await root.init()
     with pytest.raises(RuntimeError, match="data failed"):
-        await advance(root, migrate)
+        await enter(root, migrate)
     assert log == ["schema.migrate", "data.rollback", "schema.rollback"]
 
 
@@ -404,7 +404,7 @@ async def test_a_stop_cut_short_by_a_timeout_carries_on_when_called_again() -> N
         async with asyncio.timeout(0.05):
             await service.stop()
     assert log == ["service.stop", "database.stop"], "config was not reached"
-    assert Config in scope_of(service).entered["start"]
+    assert Config in scope_of(service).entered(start)
 
     stuck = False
     await service.stop()

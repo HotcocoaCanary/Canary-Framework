@@ -26,8 +26,8 @@ class Database(Canary):
 | 动作 | 做什么 |
 |---|---|
 | `Unit()` | 无参构造。不运行任何钩子，依赖此时尚不可用。 |
-| `await unit.init()` | 沿依赖推进 `init` 阶段。 |
-| `await unit.start()` | 沿依赖推进 `start` 阶段。 |
+| `await unit.init()` | 沿依赖进入 `init` 阶段。 |
+| `await unit.start()` | 沿依赖进入 `start` 阶段。 |
 | `await unit.stop()` | 停止本单元，再停止不再被需要的依赖。 |
 
 `async with unit` 是便利写法：进入时依次调用 `init()` 与 `start()`，退出时调用
@@ -61,7 +61,7 @@ class Database(Canary):
 ```
 
 这条约束是有意的：`@start` 有配对的 `@stop`，而构造没有配对的析构。把需要外界输入的
-事情推迟到生命周期钩子，等于让每一件事都落进一个有台账、能逆序回收的阶段。
+事情推迟到生命周期钩子，等于让每一件事都落进一个在单元停止时回收的阶段。
 
 ## 任何单元都能当入口
 
@@ -116,7 +116,7 @@ async with service:
 ```
 
 之后图中所有 `dep(Database)` 都取回这个实例，它按自身的类型参与生命周期：运行自己的钩子，
-自己声明的依赖先推进。
+自己声明的依赖先进入。
 
 作用域里已经有 `Database` 时，或实例不是 `Database` 时，登记会被拒绝。给依赖属性赋值
 （`service.database = ...`）会抛 `AttributeError`：赋值只会改到这一个属性，图中其余单元

@@ -4,7 +4,7 @@
 
 - :class:`Canary` 是单元，:func:`dep` 声明它依赖谁。
 - ``@init`` / ``@start`` / ``@stop`` 标记单元在各阶段的行为。
-- :func:`advance` 在依赖图上推进一个阶段，:func:`unwind` 按台账逆序回收。
+- :func:`enter` 在依赖图上进入一个阶段，依赖在前；:func:`leave` 离开一个阶段，本单元在前。
 
 ::
 
@@ -29,9 +29,9 @@ from canary_framework.core.errors import (
     DeclarationError,
     LifecycleError,
 )
-from canary_framework.core.flow.advance import advance
+from canary_framework.core.flow.enter import enter
+from canary_framework.core.flow.leave import leave
 from canary_framework.core.flow.scope import Scope, scope_of
-from canary_framework.core.flow.unwind import unwind
 from canary_framework.core.meta.introspect import deps_of
 from canary_framework.core.meta.phase import Phase, init, start, stop
 
@@ -44,12 +44,12 @@ __all__ = [
     "LifecycleError",
     "Phase",
     "Scope",
-    "advance",
     "dep",
     "deps_of",
+    "enter",
     "init",
+    "leave",
     "scope_of",
     "start",
     "stop",
-    "unwind",
 ]

@@ -76,9 +76,9 @@ disconnected
 
 ## Two rules
 
-**Advancing** runs dependencies first: a unit enters a phase only after its dependencies have
+**Entering** runs dependencies first: a unit enters a phase only after its dependencies have
 completed it. One unit runs one phase exactly once no matter how many units depend on it, and
-independent units advance concurrently.
+independent units enter concurrently.
 
 **Releasing** runs the unit first: stopping a unit stops it — unless something still uses it —
 then tries its dependencies the same way, so what nothing else uses goes down with it. A failed
@@ -98,7 +98,7 @@ line: `Phase("migrate", after=init)`.
   and lifecycle methods can be overridden with `super()`.
 - **Failure paths are part of the design.** A failing `start()` releases what it started; `stop()`
   is the single reclamation path, shared by success and failure, and is idempotent. A stopped
-  graph starts again; a failed advance can be retried.
+  graph starts again; a failed enter can be retried.
 - **Test doubles without mocks.** `scope_of(service).provide(Database, FakeDatabase())` swaps a
   dependency across the whole graph, and the double runs its own lifecycle.
 - **Concurrent by default.** Independent units start together and stop together, scheduled by

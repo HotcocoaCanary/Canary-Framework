@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from canary_framework import Canary, Phase, advance, init, start
+from canary_framework import Canary, Phase, enter, init, start
 
 pytestmark = pytest.mark.unit
 
@@ -21,7 +21,7 @@ async def test_one_class_may_have_several_hooks_in_one_phase_in_definition_order
         def second(self) -> None:
             seen.append("second")
 
-    await advance(Many(), init)
+    await enter(Many(), init)
     assert seen == ["first", "second"]
 
 
@@ -35,8 +35,8 @@ async def test_one_method_may_belong_to_several_phases() -> None:
             seen.append("touch")
 
     unit = Both()
-    await advance(unit, init)
-    await advance(unit, start)
+    await enter(unit, init)
+    await enter(unit, start)
     assert seen == ["touch", "touch"]
 
 
@@ -53,7 +53,7 @@ async def test_a_mixins_hook_runs_before_the_units_own() -> None:
         def own(self) -> None:
             seen.append("own")
 
-    await advance(Unit(), init)
+    await enter(Unit(), init)
     assert seen == ["mixin", "own"]
 
 
@@ -72,8 +72,8 @@ async def test_overriding_a_hook_replaces_it_the_way_a_plain_method_would() -> N
 
     class Inheriting(Base): ...
 
-    await advance(Overriding(), init)
-    await advance(Inheriting(), init)
+    await enter(Overriding(), init)
+    await enter(Inheriting(), init)
     assert seen == ["override", "base"]
 
 
@@ -89,7 +89,7 @@ async def test_an_override_that_drops_the_marker_drops_the_hook() -> None:
         def prepare(self) -> None:
             seen.append("silent")
 
-    await advance(Silent(), init)
+    await enter(Silent(), init)
     assert seen == []
 
 
@@ -102,5 +102,5 @@ async def test_a_phase_the_framework_does_not_ship_works_the_same_way() -> None:
         async def apply(self) -> None:
             seen.append("schema")
 
-    await advance(Schema(), migrate)
+    await enter(Schema(), migrate)
     assert seen == ["schema"]

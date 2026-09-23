@@ -1,4 +1,4 @@
-"""推进：依赖序、只跑一次、环、并发、失败。"""
+"""进入：依赖序、只跑一次、环、并发、失败。"""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from canary_framework import (
     Canary,
     CircularDependencyError,
     LifecycleError,
-    advance,
     dep,
+    enter,
     init,
     scope_of,
     start,
@@ -43,11 +43,11 @@ async def test_dependencies_run_before_the_unit_that_declares_them() -> None:
         def go(self) -> None:
             seen.append("root")
 
-    await advance(Root(), init)
+    await enter(Root(), init)
     assert seen == ["leaf", "middle", "root"]
 
 
-async def test_a_shared_dependency_advances_exactly_once() -> None:
+async def test_a_shared_dependency_enters_exactly_once() -> None:
     seen: list[str] = []
 
     class Shared(Canary):
@@ -65,7 +65,7 @@ async def test_a_shared_dependency_advances_exactly_once() -> None:
         left = dep(Left)
         right = dep(Right)
 
-    await advance(Root(), init)
+    await enter(Root(), init)
     assert seen == ["shared"]
 
 
@@ -78,8 +78,8 @@ async def test_advancing_the_same_phase_twice_is_a_no_op() -> None:
             seen.append("once")
 
     unit = Once()
-    await advance(unit, init)
-    await advance(unit, init)
+    await enter(unit, init)
+    await enter(unit, init)
     assert seen == ["once"]
 
 
@@ -92,12 +92,12 @@ async def test_a_cycle_reports_the_path_it_actually_walked() -> None:
     A.b = dep(B)  # type: ignore[attr-defined]  # 环只能这样事后接上：dep(B) 在类体里求值时 B 还不存在
 
     with pytest.raises(CircularDependencyError) as caught:
-        await advance(A(), init)
+        await enter(A(), init)
 
     assert [t.__name__ for t in caught.value.cycle] == ["A", "B", "A"]
 
 
-async def test_independent_dependencies_advance_concurrently() -> None:
+async def test_independent_dependencies_enter_concurrently() -> None:
     class SlowLeft(Canary):
         @start
         async def go(self) -> None:
@@ -113,9 +113,9 @@ async def test_independent_dependencies_advance_concurrently() -> None:
         right = dep(SlowRight)
 
     root = Root()
-    await advance(root, init)
+    await enter(root, init)
     began = time.perf_counter()
-    await advance(root, start)
+    await enter(root, start)
     elapsed = time.perf_counter() - began
 
     assert elapsed < 0.09  # 顺序执行要 0.1s
@@ -137,7 +137,7 @@ async def test_one_failing_sibling_surfaces_as_itself_not_as_a_group() -> None:
         fine = dep(Fine)
 
     with pytest.raises(RuntimeError, match="boom"):
-        await advance(Root(), init)
+        await enter(Root(), init)
 
 
 async def test_a_phase_refuses_to_run_before_its_declared_predecessor() -> None:
@@ -146,7 +146,7 @@ async def test_a_phase_refuses_to_run_before_its_declared_predecessor() -> None:
         def go(self) -> None: ...
 
     with pytest.raises(LifecycleError, match="@init has not run"):
-        await advance(Unit(), start)
+        await enter(Unit(), start)
 
 
 async def test_the_ledger_is_always_a_valid_topological_order() -> None:
@@ -163,10 +163,10 @@ async def test_the_ledger_is_always_a_valid_topological_order() -> None:
         cache = dep(Cache)
 
     root = Root()
-    await advance(root, init)
-    await advance(root, start)
+    await enter(root, init)
+    await enter(root, start)
 
-    order = [type(unit) for unit in scope_of(root).entered["start"].values()]
+    order = [type(unit) for unit in scope_of(root).entered(start).values()]
     assert order.index(Config) < order.index(Database)
     assert order.index(Config) < order.index(Cache)
     assert order.index(Database) < order.index(Root)
@@ -193,7 +193,7 @@ async def test_two_simultaneous_failures_are_reported_together() -> None:
         right = dep(Right)
 
     with pytest.raises(ExceptionGroup) as caught:
-        await advance(Root(), init)
+        await enter(Root(), init)
 
     assert {str(exc) for exc in caught.value.exceptions} == {"left", "right"}
 
@@ -226,12 +226,12 @@ async def test_a_failing_dependency_reached_by_two_paths_runs_once() -> None:
         middle = dep(Middle)
 
     root = Root()
-    await advance(root, init)
+    await enter(root, init)
     with pytest.raises(RuntimeError, match="boom"):
-        await advance(root, start)
+        await enter(root, start)
     assert runs == ["flaky"]
 
-    # 推进结束后失败记录被清除，因此可以重试
+    # 进入结束后失败记录被清除，因此可以重试
     with pytest.raises(RuntimeError, match="boom"):
-        await advance(root, start)
+        await enter(root, start)
     assert runs == ["flaky", "flaky"]

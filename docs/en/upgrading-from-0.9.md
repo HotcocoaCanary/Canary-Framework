@@ -71,17 +71,16 @@ class Traced(Canary):
         await super().start()
 ```
 
-## The engine is two rules
+## The engine is two functions
 
-- `advance(unit, phase)` recurses along dependencies — the only recursion.
-- `unwind(scope, phase, undoing=...)` drains the ledger in reverse — the only rule that
-  does not recurse.
+Phases of your own are driven by two functions, which `Canary`'s methods wrap:
 
-The separate topological sort, the state machine and the runtime container are all gone:
-depth-first plus memoisation already produces a valid topological order, and
-"not started / in progress / finished" is expressed by the advance record itself.
+- `enter(unit, phase)` enters a phase across the dependency graph, dependencies first;
+- `leave(unit, phase)` leaves it, the unit first.
 
-Dependency-chain depth is no longer bounded by Python's recursion limit (previously about 493).
+The runtime container and its separate lifecycle state machine are gone; each unit keeps its
+own state in the scope's dependency graph. Dependency-chain depth is no longer bounded by
+Python's recursion limit (previously about 493). See [Architecture](architecture.md).
 
 ## Removed
 

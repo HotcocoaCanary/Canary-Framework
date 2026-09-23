@@ -41,14 +41,14 @@ from canary_framework.core import (
     LifecycleError,
     Phase,
     Scope,
-    advance,
     dep,
     deps_of,
+    enter,
     init,
+    leave,
     scope_of,
     start,
     stop,
-    unwind,
 )
 
 __all__ = [
@@ -60,12 +60,12 @@ __all__ = [
     "LifecycleError",
     "Phase",
     "Scope",
-    "advance",
     "dep",
     "deps_of",
+    "enter",
     "init",
+    "leave",
     "scope_of",
     "start",
     "stop",
-    "unwind",
 ]

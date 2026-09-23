@@ -1,10 +1,10 @@
-"""再次推进：回收之后可以重新启动，失败之后可以重试。"""
+"""再次进入：回收之后可以重新启动，失败之后可以重试。"""
 
 from __future__ import annotations
 
 import pytest
 
-from canary_framework import Canary, LifecycleError, Phase, advance, dep, init, start, stop
+from canary_framework import Canary, LifecycleError, Phase, dep, enter, init, start, stop
 
 pytestmark = pytest.mark.functional
 
@@ -128,14 +128,14 @@ async def test_a_phase_that_requires_start_must_run_again_after_a_restart() -> N
     server = Server()
     await server.init()
     await server.start()
-    await advance(server, serve)
+    await enter(server, serve)
     await server.stop()
 
     with pytest.raises(LifecycleError, match="@start has not run"):
-        await advance(server, serve)
+        await enter(server, serve)
 
     await server.start()
-    await advance(server, serve)
+    await enter(server, serve)
     await server.stop()
 
     assert seen == ["serve", "serve"]

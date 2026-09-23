@@ -42,7 +42,7 @@ class ConstructionError(CanaryError):
 class CircularDependencyError(CanaryError):
     """Raised when the dependency graph contains a cycle.
 
-    依赖成环时抛出。携带的是推进时实际走过的那条路径，首尾为同一个类型。
+    依赖成环时抛出。携带的是构建依赖图时走到环上的路径，首尾为同一个类型。
 
     :ivar cycle: 环上的类型，按经过顺序排列。
     """
@@ -56,5 +56,5 @@ class LifecycleError(CanaryError):
     """Raised when a unit is used outside its lifecycle.
 
     在生命周期之外使用单元时抛出。例如尚未进入任何阶段就读取依赖，或在前驱阶段
-    尚未完成时推进某个阶段。
+    尚未进入时进入某个阶段。
     """

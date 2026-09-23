@@ -105,7 +105,7 @@ from canary_framework import scope_of
 
 scope = scope_of(root)
 scope.instances          # 类型 -> 实例
-scope.entered["start"]   # 类型 -> 进入 start 阶段的单元，按进入顺序
+scope.entered(start)   # 类型 -> 进入 start 阶段的单元，按进入顺序
 ```
 
 ## 依赖成环

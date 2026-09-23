@@ -13,9 +13,9 @@ import types
 from typing import Literal, Self
 
 from canary_framework.core.errors import DeclarationError
-from canary_framework.core.flow.advance import advance
-from canary_framework.core.flow.scope import Scope, scope_of
-from canary_framework.core.flow.unwind import release
+from canary_framework.core.flow.enter import enter
+from canary_framework.core.flow.leave import leave
+from canary_framework.core.flow.scope import Scope
 from canary_framework.core.meta.dep import Dep
 from canary_framework.core.meta.phase import init as init_phase
 from canary_framework.core.meta.phase import start as start_phase
@@ -44,7 +44,7 @@ class Canary:
 
     四个动作一一对应：无参构造、:meth:`init`、:meth:`start`、:meth:`stop`。
 
-    三者都是单元的动作：:meth:`init` 与 :meth:`start` 推进本单元及它的依赖，依赖在前；
+    三者都是单元的动作：:meth:`init` 与 :meth:`start` 进入本单元及它的依赖，依赖在前；
     :meth:`stop` 先停止本单元，再尝试停止它的依赖。启动失败的单元立即停止自己。
     """
 
@@ -54,20 +54,20 @@ class Canary:
     async def init(self) -> None:
         """Run every ``@init`` across this unit's graph, dependencies first.
 
-        推进 ``init``：先初始化全部依赖，再运行自身的 ``@init``。本方法的返回是一道栅栏，
-        在调用 :meth:`start` 之前没有任何单元开始运行。
+        进入 ``init``：先初始化全部依赖，再运行自身的 ``@init``。本方法的返回是一道栅栏，
+        在调用 :meth:`start` 之前没有任何单元开始运行。等同于 ``enter(self, init)``。
         """
-        await advance(self, init_phase)
+        await enter(self, init_phase)
 
     async def start(self) -> None:
         """Run every ``@start`` across this unit's graph, dependencies first.
 
-        推进 ``start``：先启动全部依赖，再运行自身的 ``@start``。单元进入该阶段即记账，
-        :meth:`stop` 按台账回收。
+        进入 ``start``：先启动全部依赖，再运行自身的 ``@start``。失败时先释放它启动的一切，
+        再抛出。等同于 ``enter(self, start)``。
 
         :raises LifecycleError: 尚未调用过 :meth:`init`。
         """
-        await advance(self, start_phase)
+        await enter(self, start_phase)
 
     async def stop(self) -> None:
         """Stop this unit, then try to stop its dependencies.
@@ -76,13 +76,11 @@ class Canary:
         ``@stop``，再沿依赖图递归尝试停止它的依赖——同样，仍被使用的跳过。在根单元上即
         整张图。本单元正在启动时，先等启动结束。
 
-        重复调用幂等，从未启动时为空操作。
+        重复调用幂等，从未启动时为空操作。等同于 ``leave(self, start)``。
 
         :raises ExceptionGroup: 一个或多个 ``@stop`` 抛出异常，即使只有一个。
         """
-        errors = await release(scope_of(self), self, start_phase)
-        if errors:
-            raise ExceptionGroup(f"{len(errors)} error(s) while stopping", errors)
+        await leave(self, start_phase)
 
     async def __aenter__(self) -> Self:
         """Run ``init`` then ``start``, reclaiming what started if either fails.
