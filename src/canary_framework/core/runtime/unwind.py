@@ -5,11 +5,15 @@
 
 回收同时撤销被回收单元在 *undoing* 阶段（以及以它为前驱的阶段）上的推进记录，因此回收之后
 可以再次推进这些阶段。
+
+回收开始之前先等待这些阶段上进行中的推进结束：否则进行中的钩子会在回收之后才获取资源，
+而它的台账已被消费，再也不会被回收。
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Callable, Collection
 
 from canary_framework.core.declare.introspect import hooks_of
 from canary_framework.core.declare.phase import Phase
@@ -24,6 +28,9 @@ async def unwind(scope: Scope, phase: Phase, *, undoing: Phase) -> list[Exceptio
     回收：异常被逐一收集并返回，其余单元照常回收。台账无论成败都会被排空，因此回收只
     进行一次；被回收的单元在 *undoing* 及其后继阶段上的推进记录一并撤销，之后可以重新推进。
 
+    开始回收之前，先等待 *undoing* 及其后继阶段上进行中的推进结束，无论成败。因此不要在
+    这些阶段的钩子里回收它们自己：那会等待自身，永远不会返回。
+
     :param scope: 要回收的作用域。
     :param phase: 执行哪个阶段的钩子。
     :param undoing: 消费哪个阶段的台账。
@@ -31,6 +38,7 @@ async def unwind(scope: Scope, phase: Phase, *, undoing: Phase) -> list[Exceptio
     """
     errors: list[Exception] = []
     undone = _followers(scope, undoing)
+    await _settle(scope, undone)
     ledger = scope.entered[undoing.name]
     while ledger:
         cls, unit = ledger.popitem()
@@ -43,6 +51,18 @@ async def unwind(scope: Scope, phase: Phase, *, undoing: Phase) -> list[Exceptio
                 exc.add_note(f"raised by {type(unit).__name__}.{_name_of(hook)}")
                 errors.append(exc)
     return errors
+
+
+async def _settle(scope: Scope, names: Collection[str]) -> None:
+    """Wait until no advance of the phases in *names* is in flight in *scope*.
+
+    等待 *names* 中各阶段在 *scope* 内进行中的推进全部结束。进行中的推进可能再推进新的
+    依赖，因此反复检查直到没有进行中的推进。推进的异常由它自己的调用方接收，这里不取。
+    """
+    while pending := [
+        future for (_, name), future in scope.phases.items() if name in names and not future.done()
+    ]:
+        await asyncio.wait(pending)
 
 
 def _followers(scope: Scope, undoing: Phase) -> tuple[str, ...]:
