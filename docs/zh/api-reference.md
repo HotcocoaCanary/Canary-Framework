@@ -78,7 +78,8 @@ migrate = Phase("migrate", after=init)
 ### `async unwind(scope, phase, *, undoing)`
 
 逆序消费 `undoing` 阶段的台账，在每个单元上执行 `phase` 的钩子。单个钩子失败不中断回收，
-异常被收集并作为列表返回。台账无论成败都会排空。
+异常被收集并作为列表返回。台账无论成败都会排空。开始之前先等待 `undoing` 及以它为前驱的
+阶段上进行中的推进结束。
 
 ```python
 errors = await unwind(scope_of(unit), stop, undoing=start)
