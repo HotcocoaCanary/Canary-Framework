@@ -90,7 +90,9 @@ postgresql://localhost/dev
 - **普通类。** 装饰器只在方法上打标记；单元可继承、可混入、可嵌套，生命周期方法也可以
   覆盖并用 `super()` 组合。
 - **失败路径是设计的一部分。** `start()` 失败会回收已启动的单元；`stop()` 是唯一的回收
-  路径，正常结束与失败结束共用，重复调用幂等。
+  路径，正常结束与失败结束共用，重复调用幂等。停止的图可以再次启动，失败的推进可以重试。
+- **不靠 mock 的测试替身。** `scope_of(service).provide(Database, FakeDatabase())` 在整张图上
+  替换一个依赖，替身走自己的生命周期。
 - **默认并发。** 互不依赖的单元同时推进，调度由依赖驱动。
 - **零依赖。** 有一条测试断言：跑完一整轮生命周期，不会从 site-packages 导入任何东西。
 
@@ -108,12 +110,25 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 ```
 
+## 稳定性
+
+1.0 是第一个稳定版本。公开 API 遵循
+[语义化版本](https://hotcocoacanary.github.io/Canary-Framework/zh/versioning/)：2.0 之前不做
+破坏性变更，任何移除都至少提前一个次版本弃用。
+
 ## 文档
 
-完整文档（含 0.9.x 迁移指南）见
-[hotcocoacanary.github.io/Canary-Framework](https://hotcocoacanary.github.io/Canary-Framework/)。
+- [文档站](https://hotcocoacanary.github.io/Canary-Framework/zh/)——
+  [1.0 新特性](https://hotcocoacanary.github.io/Canary-Framework/zh/whats-new/)、
+  [常见用法](https://hotcocoacanary.github.io/Canary-Framework/zh/patterns/)、
+  [从 0.9.x 升级](https://hotcocoacanary.github.io/Canary-Framework/zh/upgrading-from-0.9/)
+- 一个五层的完整示例：[`examples/library/`](examples/library)
 
-一个五层的完整示例在 [`examples/library/`](examples/library)。
+## 社区
+
+提问与想法请到 [Discussions](https://github.com/HotcocoaCanary/Canary-Framework/discussions)，
+bug 请提 [Issues](https://github.com/HotcocoaCanary/Canary-Framework/issues)。另见
+[贡献指南](CONTRIBUTING.md)、[项目治理](GOVERNANCE.md) 与 [安全策略](SECURITY.md)。
 
 ## 许可证
 

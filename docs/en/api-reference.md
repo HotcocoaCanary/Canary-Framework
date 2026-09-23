@@ -98,6 +98,9 @@ The state one run shares.
 | `entered` | `dict[str, dict[type, object]]`, phase name to the units that entered, keyed by type, in entry order. |
 | `known` | `dict[str, Phase]`, the phases advanced in this scope. |
 
+`phases`, `entered` and `known` are for inspection; their shape is not covered by the
+[compatibility promise](versioning.md#public-api).
+
 | Method | Description |
 |---|---|
 | `instance(cls)` | The single instance of that type in this scope, constructed on first use. |

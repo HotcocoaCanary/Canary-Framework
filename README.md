@@ -93,7 +93,10 @@ line: `Phase("migrate", after=init)`.
 - **Plain classes.** Decorators only mark methods; units stay subclassable, mixable, nestable,
   and lifecycle methods can be overridden with `super()`.
 - **Failure paths are part of the design.** A failing `start()` reclaims what started; `stop()`
-  is the single reclamation path, shared by success and failure, and is idempotent.
+  is the single reclamation path, shared by success and failure, and is idempotent. A stopped
+  graph starts again; a failed advance can be retried.
+- **Test doubles without mocks.** `scope_of(service).provide(Database, FakeDatabase())` swaps a
+  dependency across the whole graph, and the double runs its own lifecycle.
 - **Concurrent by default.** Independent units advance together, scheduled by dependency.
 - **Zero dependencies.** A test asserts that a full lifecycle imports nothing from
   site-packages.
@@ -112,12 +115,25 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 ```
 
+## Stability
+
+1.0 is the first stable release. The public API follows
+[Semantic Versioning](https://hotcocoacanary.github.io/Canary-Framework/versioning/): no
+breaking changes before 2.0, and removals are deprecated for at least one minor release first.
+
 ## Documentation
 
-Full documentation, including migration from 0.9.x, is at
-[hotcocoacanary.github.io/Canary-Framework](https://hotcocoacanary.github.io/Canary-Framework/).
+- [Documentation](https://hotcocoacanary.github.io/Canary-Framework/) —
+  [What's new in 1.0](https://hotcocoacanary.github.io/Canary-Framework/whats-new/),
+  [patterns](https://hotcocoacanary.github.io/Canary-Framework/patterns/),
+  [upgrading from 0.9.x](https://hotcocoacanary.github.io/Canary-Framework/upgrading-from-0.9/)
+- A complete five-layer example: [`examples/library/`](examples/library)
 
-A complete five-layer example lives in [`examples/library/`](examples/library).
+## Community
+
+Questions and ideas go to [Discussions](https://github.com/HotcocoaCanary/Canary-Framework/discussions),
+bugs to [Issues](https://github.com/HotcocoaCanary/Canary-Framework/issues). See
+[CONTRIBUTING](CONTRIBUTING.md), [GOVERNANCE](GOVERNANCE.md) and [SECURITY](SECURITY.md).
 
 ## License
 

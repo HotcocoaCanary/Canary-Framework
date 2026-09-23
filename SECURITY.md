@@ -15,6 +15,7 @@ Report it privately via either of:
 仅**最新版本**接受安全修复；所有历史版本均视为停止维护。
 
 Only the **latest release** receives security fixes; every older version is end-of-life.
+See [Versioning & Compatibility](https://hotcocoacanary.github.io/Canary-Framework/versioning/).
 
 | 版本 / Version  | 支持状态 / Status          |
 | --------------- | -------------------------- |

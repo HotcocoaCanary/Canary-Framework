@@ -86,7 +86,7 @@ LifecycleError: Service: @init has not run, call it before @start
 
 一条规则覆盖全部五种情形，因此不需要状态机。
 
-## 再次启动
+## 再次启动 {#starting-again}
 
 回收时，被回收单元在 `start` 上的推进记录一并撤销，因此停止之后可以再次启动。`@init`
 没有配对的回收阶段，它的记录保留，重启时不会再次运行：
