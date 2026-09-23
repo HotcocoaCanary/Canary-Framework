@@ -4,6 +4,8 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-09-23
+
 ### Fixed
 
 - `stop()` called while `start()` is still running waits for it to finish before reclaiming.
@@ -12,6 +14,33 @@ This project follows Keep a Changelog and Semantic Versioning.
   ([#10](https://github.com/HotcocoaCanary/Canary-Framework/issues/10))
 
   `start()` 仍在进行时调用 `stop()`，会先等它结束再回收，不再泄漏在回收之后才获取的资源。
+
+### Documentation
+
+- Patterns: blocking work in hooks (`asyncio.to_thread`), and bounding shutdown with
+  `asyncio.timeout`. ([#11](https://github.com/HotcocoaCanary/Canary-Framework/issues/11))
+
+  常见用法：钩子里的阻塞操作与限时关闭。
+
+### Packaging
+
+- The source distribution lists its contents explicitly — `src`, `tests`, the READMEs, the
+  changelog and the license — so the `examples/` submodule and the docs are no longer packed
+  into it. The wheel is unchanged.
+
+  sdist 显式列出所含内容，不再打入 `examples/` 子模块与文档；wheel 不变。
+
+### Examples
+
+- `examples/` is now a submodule of
+  [Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example) — a
+  FastAPI service with RAG and a long-running telemetry daemon, both on 1.0 — replacing the
+  in-repository library example. Run `git submodule update --init` to fetch it. An existing
+  clone that still has the old `examples/` files may need them removed before switching to a
+  branch with the submodule. ([#12](https://github.com/HotcocoaCanary/Canary-Framework/issues/12))
+
+  `examples/` 改为 Canary-Framework-Example 子模块（FastAPI + RAG 服务与常驻遥测守护进程）。
+  用 `git submodule update --init` 拉取；旧 clone 若残留原 `examples/` 文件，切换分支前需先删除。
 
 ## [1.0.0] — 2026-09-23
 
