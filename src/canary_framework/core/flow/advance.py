@@ -7,8 +7,12 @@
 已完成表示结束。三种情形因此无需另设状态机；环检测也不需要额外的"进行中"集合，因为环的
 唯一表现就是遇到一个尚未完成、且位于当前路径上的单元。
 
-失败或取消的推进在结束时移除自己的记录：正在等待它的调用方收到同一个异常，之后再推进
-则重新运行，因此失败可以重试。
+失败或取消的推进在本次 :func:`advance` 期间保留记录：同一次推进里经由其他路径到达它的
+依赖者收到同一个异常，而不会把它再运行一遍。:func:`advance` 返回时清除这些记录，之后再
+推进则重新运行，因此失败可以重试。
+
+多条路径共用一个单元时，后到者等待先到者的推进。等待经过 :func:`asyncio.shield`：一个
+等待者被取消（例如兄弟依赖失败后任务组取消其余任务），不会连带取消这次共享的推进。
 """
 
 from __future__ import annotations
@@ -36,7 +40,11 @@ async def advance(unit: object, phase: Phase) -> None:
     :raises CircularDependencyError: 依赖成环，异常携带实际走过的环路径。
     :raises ConstructionError: 某个单元需要构造参数。
     """
-    await _advance(type(unit), phase, scope_of(unit))
+    scope = scope_of(unit)
+    try:
+        await _advance(type(unit), phase, scope)
+    finally:
+        _forget_failures(scope, phase)
 
 
 async def _advance(cls: type, phase: Phase, scope: Scope, path: tuple[type, ...] = ()) -> None:
@@ -51,7 +59,7 @@ async def _advance(cls: type, phase: Phase, scope: Scope, path: tuple[type, ...]
         # 在这一处，因此常规路径上没有与深度成正比的扫描。
         if not running.done() and cls in path:
             raise CircularDependencyError((*path, cls))
-        await running
+        await asyncio.shield(running)
         return
 
     _require_predecessor(cls, phase, scope)
@@ -70,11 +78,9 @@ async def _advance(cls: type, phase: Phase, scope: Scope, path: tuple[type, ...]
         for hook in hooks_of(unit, phase):
             await invoke(hook)
     except asyncio.CancelledError:
-        _forget(scope, key, future)
         future.cancel()
         raise
     except BaseException as exc:
-        _forget(scope, key, future)
         future.set_exception(exc)
         raise
     else:
@@ -109,16 +115,28 @@ def _require_predecessor(cls: type, phase: Phase, scope: Scope) -> None:
     if phase.after is None:
         return
     done = scope.phases.get((cls, phase.after.name))
-    if done is None or not done.done():
+    if done is None or not _succeeded(done):
         raise LifecycleError(f"{cls.__name__}: {phase.after} has not run, call it before {phase}")
 
 
-def _forget(scope: Scope, key: tuple[type, str], future: asyncio.Future[None]) -> None:
-    """Drop a failed advance's record, so that advancing again runs it again.
+def _succeeded(future: asyncio.Future[None]) -> bool:
+    """Whether *future* records an advance that finished without error.
 
-    移除一次失败推进的记录。只移除自己那一条，以免误删之后的新推进。
+    推进是否已成功结束。
     """
-    if scope.phases.get(key) is future:
+    return future.done() and not future.cancelled() and future.exception() is None
+
+
+def _forget_failures(scope: Scope, phase: Phase) -> None:
+    """Drop the records of *phase*'s failed or cancelled advances, so that they can be retried.
+
+    清除 *phase* 上已结束但失败或被取消的推进记录。进行中与成功的记录保留。
+    """
+    for key in [
+        key
+        for key, future in scope.phases.items()
+        if key[1] == phase.name and future.done() and not _succeeded(future)
+    ]:
         del scope.phases[key]
 
 
@@ -134,10 +152,14 @@ def _settled(future: asyncio.Future[None]) -> None:
 def _one_failure(group: BaseExceptionGroup) -> BaseException:
     """Reduce a task group's exception group back to the single real failure, when there is one.
 
-    滤掉取消异常后：只剩一个则原样返回，与顺序推进的行为一致；剩下多个则合成一个
-    ``ExceptionGroup``。
+    滤掉取消异常并按对象去重后：只剩一个则原样返回，与顺序推进的行为一致；剩下多个则
+    合成一个 ``ExceptionGroup``。去重是因为经多条路径等待同一次失败推进的分支，拿到的是
+    同一个异常对象。
     """
-    real = [exc for exc in _flatten(group) if not isinstance(exc, asyncio.CancelledError)]
+    flat = _flatten(group)
+    real = list(
+        {id(exc): exc for exc in flat if not isinstance(exc, asyncio.CancelledError)}.values()
+    )
     if len(real) == 1:
         return real[0]
     ordinary = [exc for exc in real if isinstance(exc, Exception)]

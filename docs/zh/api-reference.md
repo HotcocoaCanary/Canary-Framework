@@ -92,7 +92,7 @@ errors = await unwind(scope_of(unit), stop, undoing=start)
 | 属性 | 说明 |
 |---|---|
 | `instances` | `dict[type, object]`，类型到共享实例。 |
-| `phases` | `dict[tuple[type, str], Future]`，进行中或已完成的推进。失败的推进不留记录。 |
+| `phases` | `dict[tuple[type, str], Future]`，进行中或已完成的推进。失败推进的记录在运行它的 `advance()` 返回时清除。 |
 | `entered` | `dict[str, dict[type, object]]`，阶段名到进入该阶段的单元，以类型为键，按进入顺序。 |
 | `known` | `dict[str, Phase]`，本作用域推进过的阶段。 |
 

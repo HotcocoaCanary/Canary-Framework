@@ -4,6 +4,25 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+Found by the new randomised lifecycle tests
+([#20](https://github.com/HotcocoaCanary/Canary-Framework/issues/20)):
+
+- A dependency that fails while reached through two paths in one `start()` is no longer run a
+  second time. Since 1.0.0 a failed advance dropped its record immediately, so a concurrent
+  path could start the same unit again within the same call. The record is now kept until the
+  `advance()` that ran it returns; retrying afterwards still works.
+- When a sibling dependency fails, cancelling the remaining work no longer cancels an advance
+  shared with other paths. A cancelled waiter used to cancel the shared advance itself, which
+  then raised `InvalidStateError` from inside the framework when it finished.
+- One failure reached through several paths is reported once. It used to appear several times
+  in an `ExceptionGroup` claiming that several units had failed.
+
+  随机化测试发现并修复三处问题：同一次 `start()` 中失败的依赖可能被另一条路径再运行一遍；
+  等待共享推进的任务被取消时会连带取消该推进，导致框架内部抛出 `InvalidStateError`；
+  经多条路径到达的同一个失败会在 `ExceptionGroup` 中重复出现。
+
 ### Documentation
 
 - New page: Why Canary — where it fits and where it does not, and a comparison with dishka,
