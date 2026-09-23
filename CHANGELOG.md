@@ -6,6 +6,17 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [1.0.1] — 2026-09-23
 
+### Changed
+
+- The internal packages are renamed: `canary_framework.core.declare` → `core.meta`, and
+  `canary_framework.core.runtime` → `core.flow`. Both sit outside the
+  [public API](https://hotcocoacanary.github.io/Canary-Framework/versioning/#public-api) —
+  everything exported from `canary_framework` is unchanged. Code importing these modules
+  directly must update its imports.
+
+  内部包改名：`core.declare` → `core.meta`，`core.runtime` → `core.flow`。二者不属于公开 API，
+  从 `canary_framework` 导出的名字不变；直接 import 这两个内部模块的代码需改用新路径。
+
 ### Fixed
 
 - `stop()` called while `start()` is still running waits for it to finish before reclaiming.
