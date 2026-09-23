@@ -70,7 +70,8 @@ asyncio.run(main())
 2. **一个作用域内，每个类型只有一个实例。** 两个各自构造的根是两张互不相干的图。
 3. **依赖在 `@init` 之后才可用。** 在 `__init__` 中读取依赖会抛 `LifecycleError`。
 4. **全部 `@init` 完成之后，才有任何 `@start` 运行。**
-5. **`stop()` 是唯一的回收路径。** 正常结束与失败结束共用，重复调用幂等。
+5. **`stop()` 是唯一的回收路径。** 正常结束与失败结束共用，重复调用幂等，回收之后图可以
+   再次启动。
 
 ## 安装
 
@@ -86,5 +87,6 @@ pip install canary-framework
 - [单元](canary.md)：`Canary` 基类的四个动作。
 - [依赖声明](dependency-injection.md)：`dep()` 与作用域。
 - [生命周期](lifecycle.md)：阶段、栅栏、失败与回收。
-- [架构](architecture.md)：分层与依赖方向。
+- [常见用法](patterns.md)：测试替身、按配置选择实现、接入宿主、重试。
 - [API 参考](api-reference.md)：全部公开名字。
+- [版本与兼容性](versioning.md)：1.x 承诺什么。

@@ -75,8 +75,8 @@ cannot recurse along dependencies. It runs in reverse entry order instead.
 3. **Dependencies exist from `@init` onward.** Reading one in `__init__` raises
    `LifecycleError`.
 4. **Every `@init` completes before any `@start` runs.**
-5. **`stop()` is the single reclamation path.** Success and failure share it, and it is
-   idempotent.
+5. **`stop()` is the single reclamation path.** Success and failure share it, it is idempotent,
+   and it leaves the graph ready to start again.
 
 ## Install
 
@@ -92,5 +92,6 @@ Requires Python 3.12 or newer. Installing pulls in no third-party packages.
 - [Units](canary.md): the four actions on `Canary`.
 - [Dependencies](dependency-injection.md): `dep()` and scopes.
 - [Lifecycle](lifecycle.md): phases, the barrier, failure and reclamation.
-- [Architecture](architecture.md): layering and dependency direction.
+- [Patterns](patterns.md): test doubles, configuration, hosting, retry.
 - [API Reference](api-reference.md): every public name.
+- [Versioning & Compatibility](versioning.md): what 1.x promises.

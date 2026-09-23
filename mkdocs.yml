@@ -53,13 +53,33 @@ plugins:
         - locale: zh
           name: 中文
           build: true
+          site_description: 面向普通 Python 类的依赖注入与生命周期框架，零依赖
+          nav_translations:
+            Home: 首页
+            What's New in 1.0: 1.0 新特性
+            Quick Start: 快速开始
+            Guide: 指南
+            Units: 单元
+            Dependencies: 依赖
+            Lifecycle: 生命周期
+            Patterns: 常见用法
+            Reference: 参考
+            API Reference: API 参考
+            Architecture: 架构
+            Versioning & Compatibility: 版本与兼容性
+            Upgrading from 0.9.x: 从 0.9.x 升级
+            Project: 项目
+            Contributing: 贡献指南
+            Governance: 项目治理
+            Changelog: 变更日志
 
 markdown_extensions:
   - admonition
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      check_paths: true
   - pymdownx.superfences
   - pymdownx.details
   - pymdownx.tabbed:
@@ -75,14 +95,22 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - What's New: whats-new.md
+  - What's New in 1.0: whats-new.md
   - Quick Start: quickstart.md
-  - Core:
+  - Guide:
       - Units: canary.md
       - Dependencies: dependency-injection.md
       - Lifecycle: lifecycle.md
-  - Architecture: architecture.md
-  - API Reference: api-reference.md
+      - Patterns: patterns.md
+  - Reference:
+      - API Reference: api-reference.md
+      - Architecture: architecture.md
+      - Versioning & Compatibility: versioning.md
+      - Upgrading from 0.9.x: upgrading-from-0.9.md
+  - Project:
+      - Contributing: contributing.md
+      - Governance: governance.md
+      - Changelog: https://github.com/HotcocoaCanary/Canary-Framework/blob/main/CHANGELOG.md
 
 extra:
   social:

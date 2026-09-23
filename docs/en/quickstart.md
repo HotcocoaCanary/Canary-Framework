@@ -129,3 +129,5 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 ```
+
+More hosts, test doubles and retry: see [Patterns](patterns.md).

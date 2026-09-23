@@ -123,3 +123,5 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 ```
+
+更多宿主、测试替身与重试的写法见[常见用法](patterns.md)。
