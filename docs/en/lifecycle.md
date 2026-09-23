@@ -110,7 +110,9 @@ async with service:     # start, stop
 A phase declared with `after=start` is undone along with `start`, and has to be advanced
 again after the restart.
 
-A failed or cancelled advance leaves no record, so calling it again runs it again. Units that
+A failed or cancelled advance keeps its record only until the call that ran it returns — so
+within one `start()` a failure is not run a second time by another path — and calling it
+again afterwards runs it again. Units that
 had already completed the phase are not run twice, and a unit that re-enters `@start` keeps
 one entry in the ledger:
 

@@ -207,3 +207,31 @@ async def test_a_deep_dependency_chain_does_not_hit_the_recursion_limit() -> Non
     root = unit()
     await root.init()
     assert len(scope_of(root).instances) == 5000
+
+
+async def test_a_failing_dependency_reached_by_two_paths_runs_once() -> None:
+    runs: list[str] = []
+
+    class Flaky(Canary):
+        @start
+        def connect(self) -> None:
+            runs.append("flaky")
+            raise RuntimeError("boom")
+
+    class Middle(Canary):
+        flaky = dep(Flaky)
+
+    class Root(Canary):
+        flaky = dep(Flaky)
+        middle = dep(Middle)
+
+    root = Root()
+    await advance(root, init)
+    with pytest.raises(RuntimeError, match="boom"):
+        await advance(root, start)
+    assert runs == ["flaky"]
+
+    # 推进结束后失败记录被清除，因此可以重试
+    with pytest.raises(RuntimeError, match="boom"):
+        await advance(root, start)
+    assert runs == ["flaky", "flaky"]

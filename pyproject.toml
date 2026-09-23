@@ -54,6 +54,7 @@ dev = [
     "ruff>=0.15.15",
     "mypy>=1.11",
     "pre-commit>=4.3.0",
+    "hypothesis>=6.100",
 ]
 
 [tool.pytest.ini_options]

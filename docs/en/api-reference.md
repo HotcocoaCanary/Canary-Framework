@@ -95,7 +95,7 @@ The state one run shares.
 | Attribute | Description |
 |---|---|
 | `instances` | `dict[type, object]`, type to shared instance. |
-| `phases` | `dict[tuple[type, str], Future]`, each advance in progress or completed. Failed advances leave no record. |
+| `phases` | `dict[tuple[type, str], Future]`, each advance in progress or completed. A failed advance's record is dropped when the `advance()` that ran it returns. |
 | `entered` | `dict[str, dict[type, object]]`, phase name to the units that entered, keyed by type, in entry order. |
 | `known` | `dict[str, Phase]`, the phases advanced in this scope. |
 
