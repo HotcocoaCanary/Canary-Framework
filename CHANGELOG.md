@@ -4,6 +4,12 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Documentation
+
+- Why Canary: the comparison is re-measured with 1.1.0; the Canary column is unchanged.
+
+  「为什么选 Canary」用 1.1.0 重新实测，Canary 一列结果不变。
+
 ## [1.1.0] — 2026-09-23
 
 The engine now runs on an explicit dependency graph, and `stop()` is a unit action. Two changes

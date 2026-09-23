@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "canary-framework==1.0.1",
+#     "canary-framework==1.1.0",
 #     "dishka==1.10.1",
 #     "dependency-injector==4.49.1",
 #     "injector==0.24.0",
