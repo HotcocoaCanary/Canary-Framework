@@ -88,6 +88,7 @@ Requires Python 3.12 or newer. Installing pulls in no third-party packages.
 
 ## Next
 
+- [Why Canary](why-canary.md): where it fits, where it does not, and a measured comparison.
 - [Quick Start](quickstart.md): a working example in ten minutes.
 - [Units](canary.md): the four actions on `Canary`.
 - [Dependencies](dependency-injection.md): `dep()` and scopes.
