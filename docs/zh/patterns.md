@@ -35,7 +35,7 @@ async def test_register(service: UserService) -> None:
     assert service.database.rows == [{"name": "ada"}]
 ```
 
-替身运行自己的钩子，推进自己的类声明的依赖。规则见[单元 › 替身](canary.md#substitutes)。
+替身运行自己的钩子，进入自己的类声明的依赖。规则见[单元 › 替身](canary.md#substitutes)。
 
 ## 按配置选择实现
 
@@ -85,7 +85,7 @@ class Database(Canary):
 
 ## 钩子里的阻塞操作
 
-同步钩子在事件循环里执行。耗时的同步钩子会拖住所有与它一起推进的单元，而不只是依赖它的
+同步钩子在事件循环里执行。耗时的同步钩子会拖住所有与它一起进入的单元，而不只是依赖它的
 单元。把阻塞调用放到线程里：
 
 ```python
@@ -110,7 +110,7 @@ except TimeoutError:
     log.warning("shutdown timed out")
 ```
 
-到期时正在执行的钩子被取消，不会重试。还没轮到的单元留在台账里，再调用一次 `stop()`
+到期时正在执行的钩子被取消，不会重试。还没轮到的单元仍持有它获取的东西，再调用一次 `stop()`
 会从那里继续回收。
 
 ## 接入宿主

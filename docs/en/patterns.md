@@ -35,7 +35,7 @@ async def test_register(service: UserService) -> None:
     assert service.database.rows == [{"name": "ada"}]
 ```
 
-The double runs its own hooks and advances the dependencies its own class declares. See
+The double runs its own hooks and enters the dependencies its own class declares. See
 [Units › Substitutes](canary.md#substitutes) for the rules.
 
 ## Choosing an implementation from configuration
@@ -88,7 +88,7 @@ dependencies it brought up. Write `@stop` to release only what was actually acqu
 
 ## Blocking work in hooks
 
-Synchronous hooks run on the event loop. A slow one holds up every unit advancing alongside it,
+Synchronous hooks run on the event loop. A slow one holds up every unit entering alongside it,
 not just its dependents. Move blocking calls to a thread:
 
 ```python
@@ -113,8 +113,8 @@ except TimeoutError:
     log.warning("shutdown timed out")
 ```
 
-Hooks running when the deadline hits are cancelled and not retried. Units not reached yet stay
-in the ledger, so calling `stop()` again carries on from there.
+Hooks running when the deadline hits are cancelled and not retried. Units not reached yet keep
+what they acquired, so calling `stop()` again carries on from there.
 
 ## Hosting
 

@@ -67,7 +67,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Entering `async with` advances `init` then `start`; leaving reclaims. The whole graph
+Entering `async with` enters `init` then `start`; leaving reclaims. The whole graph
 (`Config` → `Database` → `UserService`) comes up in dependency order on its own.
 
 ## The four actions

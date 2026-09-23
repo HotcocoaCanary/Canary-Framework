@@ -1,4 +1,4 @@
-"""回收：逆序、单个失败不中断、幂等、等待进行中的推进。"""
+"""离开：依赖者先于依赖、单个失败不中断、幂等、等待进行中的进入。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from canary_framework import Canary, advance, dep, init, scope_of, start, stop, unwind
+from canary_framework import Canary, Phase, dep, enter, init, leave, start, stop
 
 pytestmark = pytest.mark.integration
 
@@ -34,8 +34,8 @@ async def test_units_are_reclaimed_in_reverse_order() -> None:
             seen.append("root")
 
     root = Root()
-    await advance(root, init)
-    await advance(root, start)
+    await enter(root, init)
+    await enter(root, start)
     await root.stop()
 
     assert seen == ["root", "middle", "leaf"]
@@ -64,8 +64,8 @@ async def test_one_failing_stop_does_not_abort_the_rest() -> None:
             seen.append("root")
 
     root = Root()
-    await advance(root, init)
-    await advance(root, start)
+    await enter(root, init)
+    await enter(root, start)
 
     with pytest.raises(ExceptionGroup) as caught:
         await root.stop()
@@ -84,8 +84,8 @@ async def test_reclaiming_twice_is_idempotent() -> None:
             seen.append("stop")
 
     unit = Unit()
-    await advance(unit, init)
-    await advance(unit, start)
+    await enter(unit, init)
+    await enter(unit, start)
     await unit.stop()
     await unit.stop()
 
@@ -101,30 +101,36 @@ async def test_reclaiming_something_that_never_started_is_a_no_op() -> None:
     await Unit().stop()
 
 
-async def test_unwind_reclaims_whatever_entered_the_named_phase() -> None:
+async def test_leave_runs_the_leave_phase_the_given_phase_declares() -> None:
+    cool = Phase("cool")
+    warm = Phase("warm", after=init, leave=cool)
     seen: list[str] = []
 
     class Leaf(Canary):
-        @init
-        def prepare(self) -> None: ...
+        @warm
+        def heat(self) -> None: ...
 
-        @stop
+        @cool
         def go(self) -> None:
             seen.append("leaf")
 
     class Root(Canary):
         leaf = dep(Leaf)
 
-        @stop
+        @warm
+        def heat(self) -> None: ...
+
+        @cool
         def go(self) -> None:
             seen.append("root")
 
     root = Root()
-    await advance(root, init)
+    await enter(root, init)
+    await enter(root, warm)
 
-    # 只推进过 init，所以按 init 的台账回收；start 的台账是空的。
-    assert await unwind(scope_of(root), stop, undoing=start) == []
-    assert await unwind(scope_of(root), stop, undoing=init) == []
+    await leave(root, start)  # 从未进入 start：什么都不做
+    assert seen == []
+    await leave(root, warm)
     assert seen == ["root", "leaf"]
 
 

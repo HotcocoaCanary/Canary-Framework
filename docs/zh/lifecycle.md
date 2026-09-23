@@ -8,7 +8,7 @@
 from canary_framework import init, start, stop
 ```
 
-它们既是标记方法用的装饰器，也是 `advance()` 与 `unwind()` 的参数。
+它们既是标记方法用的装饰器，也是 `enter()` 与 `leave()` 的参数。
 
 ```python
 class Database(Canary):
@@ -26,9 +26,9 @@ class Database(Canary):
 钩子可以是同步的，也可以是 `async def`——框架按返回值判断是否需要等待，因此返回协程的
 同步函数同样成立。
 
-## 推进：依赖在前 {#advancing}
+## 进入：依赖在前 {#advancing}
 
-`await unit.init()` 在依赖图上推进一次 `init`：先推进依赖，再运行自身的钩子。
+`await unit.init()` 在依赖图上进入一次 `init`：先进入依赖，再运行自身的钩子。
 
 ```python
 class Config(Canary): ...
@@ -48,7 +48,7 @@ await Service().init()      # Config -> Database -> Service
 三条性质：
 
 - **同一个单元的同一个阶段只运行一次**，无论有多少单元依赖它。
-- **互不依赖的单元同时推进**，因此耗时贴着依赖链的关键路径，而不是所有单元之和。
+- **互不依赖的单元同时进入**，因此耗时贴着依赖链的关键路径，而不是所有单元之和。
 - **图检查通过之前不运行任何钩子。** 依赖图先于一切构建，因此环、或 `start()` 时某个单元的
   `@init` 尚未运行，都在任何钩子运行之前报告。
 
@@ -71,9 +71,9 @@ Config.start -> Database.start -> Service.start
 LifecycleError: Service: @init has not run, call it before @start
 ```
 
-## 记账与回收
+## 停止
 
-单元一进入 `@start` 就被记入台账——记的是"进入"而非"完成"，因此启动到一半失败的单元
+单元从 `@start` **开始**时就持有它获取的东西，而不是等它完成——因此启动到一半失败的单元
 同样会被回收。
 
 `stop()` 是唯一的回收路径。它停止本单元（除非仍被使用），再以同样的方式尝试它的每个依赖：
@@ -95,7 +95,7 @@ LifecycleError: Service: @init has not run, call it before @start
 
 ## 再次启动 {#starting-again}
 
-回收时，被回收单元在 `start` 上的推进记录一并撤销，因此停止之后可以再次启动。`@init`
+回收时，被回收单元在 `start` 上的进入记录一并撤销，因此停止之后可以再次启动。`@init`
 没有配对的回收阶段，它的记录保留，重启时不会再次运行：
 
 ```python
@@ -105,7 +105,7 @@ async with service:     # start、stop
     ...
 ```
 
-以 `after=start` 声明的阶段随 `start` 一起撤销，重启之后需要重新推进。
+以 `after=start` 声明的阶段随 `start` 一起撤销，重启之后需要重新进入。
 
 失败的 `start()` 已经释放了它获取的东西（见下文），因此重试就是再调用一次。已经完成该阶段
 的单元不会重复运行：
@@ -142,20 +142,22 @@ C.start → A.start → B.start ✗ → B.stop → A.stop → C.stop → start()
 `ExceptionGroup` 抛出，即使只有一个：
 
 ```
-ExceptionGroup: 1 error(s) while stopping
+ExceptionGroup: 1 error(s) while leaving @start
   RuntimeError: 关闭失败
     raised by Database.close
 ```
 
 ## 自定义阶段
 
-`Phase` 是公开的，加一个阶段不需要注册：
+`Phase` 是公开的，加一个阶段不需要注册。`Canary` 的方法只是两个函数的薄包装——
+`unit.start()` 即 `enter(unit, start)`，`unit.stop()` 即 `leave(unit, start)`——自定义阶段
+直接使用它们：
 
 ```python
-from canary_framework import Phase, advance, init
+from canary_framework import Phase, enter, init, leave
 
 rollback = Phase("rollback")
-migrate = Phase("migrate", after=init, undo=rollback)
+migrate = Phase("migrate", after=init, leave=rollback)
 
 
 class Schema(Canary):
@@ -167,19 +169,14 @@ class Schema(Canary):
 
 
 await unit.init()
-await advance(unit, migrate)
+await enter(unit, migrate)      # 运行 @migrate，依赖在前
+await leave(unit, migrate)      # 运行 @rollback，本单元在前
 ```
 
-`after` 声明前驱：前驱阶段尚未完成时推进本阶段会抛 `LifecycleError`，而不是静默跳过。
+`after` 声明前驱：尚未进入前驱时进入本阶段会抛 `LifecycleError`，而不是静默跳过。
 
-`undo` 声明撤销本阶段的阶段，与 `stop` 撤销 `start` 完全相同：`@migrate` 失败的单元立即执行
-它的 `@rollback`，失败的推进释放它为此启动的一切。撤销全部已迁移的单元：
-
-```python
-from canary_framework import scope_of, unwind
-
-errors = await unwind(scope_of(unit), rollback, undoing=migrate)
-```
+`leave` 声明离开本阶段时运行的阶段，与 `start` 的 `stop` 完全相同：`leave()` 按与 `stop()`
+相同的规则运行它们，`@migrate` 失败的单元也立即运行自己的 `@rollback`。
 
 ## 接入宿主
 

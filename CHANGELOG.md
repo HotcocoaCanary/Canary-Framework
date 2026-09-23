@@ -6,7 +6,23 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ### Changed
 
-The engine now runs on an explicit dependency graph, built when a unit is first advanced
+- **BREAKING: the engine functions are renamed**, for phases of your own
+  ([#27](https://github.com/HotcocoaCanary/Canary-Framework/issues/27)).
+  `init()`, `start()`, `stop()` and `async with` are unchanged — they are these functions:
+
+  | Before | Now |
+  |---|---|
+  | `advance(unit, phase)` | `enter(unit, phase)` |
+  | `unwind(scope_of(unit), rollback, undoing=migrate)` | `leave(unit, migrate)` |
+
+  `leave()` follows the same rules as `stop()` — the unit first, skipped while in use, then its
+  dependencies — and raises an `ExceptionGroup` when leave hooks fail, where `unwind()` returned
+  a list. `unit.start()` is `enter(unit, start)`; `unit.stop()` is `leave(unit, start)`.
+
+  引擎函数改名：`advance` → `enter`，`unwind(scope, rollback, undoing=migrate)` →
+  `leave(unit, migrate)`。`leave()` 与 `stop()` 规则相同，离开钩子失败时抛 `ExceptionGroup`。
+
+The engine now runs on an explicit dependency graph, built when a unit is first entered
 ([#25](https://github.com/HotcocoaCanary/Canary-Framework/issues/25)):
 
 - **`stop()` is a unit action.** It stops the unit unless a dependent is starting, running or
@@ -24,7 +40,11 @@ The engine now runs on an explicit dependency graph, built when a unit is first 
   Hooks on unrelated branches used to run before the error surfaced.
 - When the caller cancels `start()`, the rollback completes before the cancellation propagates;
   `@stop` errors during it go to the event loop's exception handler.
-- Advancing no longer recurses, so no call-stack trampolining is needed for deep chains.
+- Entering no longer recurses, so no call-stack trampolining is needed for deep chains.
+- `Scope`'s inspection attributes change shape: `phases`, `entered`, `releasing` and `stopping`
+  give way to `tracks` — each unit's explicit state in each phase — and the method
+  `entered(phase)` ([#28](https://github.com/HotcocoaCanary/Canary-Framework/issues/28)). These
+  attributes are outside the compatibility promise.
 
   引擎改为基于显式依赖图：`stop()` 成为单元的动作，先停本单元（仍被使用时跳过），再递归尝试
   依赖；失败的 `start()` 自行回收——失败的单元立即执行 `@stop`，依赖不足的单元不启动并释放
@@ -35,13 +55,20 @@ The engine now runs on an explicit dependency graph, built when a unit is first 
 
 - Python 3.15 support: tested in CI and listed in the classifiers.
   ([#21](https://github.com/HotcocoaCanary/Canary-Framework/issues/21))
-- `Phase(..., undo=...)` names the phase that undoes it; `start`'s is `stop`. A unit that fails
-  or is cancelled in a phase with an `undo` runs its undo hooks at once.
+- `Phase(..., leave=...)` names the phase whose hooks run when this one is left; `start`'s is
+  `stop`. `leave()` runs them, and a unit that fails or is cancelled while entering runs them at
+  once.
 - `Scope.key_of(unit)` returns the type a unit is registered under. `Scope.graph` and
   `Scope.dependents` expose the dependency graph for inspection.
 
-  支持 Python 3.15；新增 `Phase(undo=...)`；新增 `Scope.key_of()`；`Scope.graph` 与
+  支持 Python 3.15；新增 `Phase(leave=...)`；新增 `Scope.key_of()`；`Scope.graph` 与
   `Scope.dependents` 可用于观察依赖图。
+
+### Removed
+
+- `advance()` and `unwind()`, replaced by `enter()` and `leave()` (see Changed).
+
+  移除 `advance()` 与 `unwind()`，由 `enter()` 与 `leave()` 取代。
 
 ### Fixed
 
@@ -49,18 +76,17 @@ Found by the new randomised lifecycle tests
 ([#20](https://github.com/HotcocoaCanary/Canary-Framework/issues/20)):
 
 - A dependency that fails while reached through two paths in one `start()` is no longer run a
-  second time. Since 1.0.0 a failed advance dropped its record immediately, so a concurrent
-  path could start the same unit again within the same call. The record is now kept until the
-  `advance()` that ran it returns; retrying afterwards still works.
-- When a sibling dependency fails, cancelling the remaining work no longer cancels an advance
-  shared with other paths. A cancelled waiter used to cancel the shared advance itself, which
-  then raised `InvalidStateError` from inside the framework when it finished.
+  second time. Since 1.0.0 a failed unit forgot its failure immediately, so a concurrent path
+  could start the same unit again within the same call. Every unit is now claimed once per call.
+- When a sibling dependency fails, cancelling the remaining work no longer cancels a start
+  shared with other paths. A cancelled waiter used to cancel the shared start itself, which then
+  raised `InvalidStateError` from inside the framework when it finished.
 - One failure reached through several paths is reported once. It used to appear several times
   in an `ExceptionGroup` claiming that several units had failed.
-- `start()` on a provided substitute advances it under the type it replaces, not its own type.
+- `start()` on a provided substitute enters it under the type it replaces, not its own type.
 
   随机化测试发现并修复三处问题：同一次 `start()` 中失败的依赖可能被另一条路径再运行一遍；
-  等待共享推进的任务被取消时会连带取消该推进，导致框架内部抛出 `InvalidStateError`；
+  等待共享启动的任务被取消时会连带取消该启动，导致框架内部抛出 `InvalidStateError`；
   经多条路径到达的同一个失败会在 `ExceptionGroup` 中重复出现。
 
 ### Documentation

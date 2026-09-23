@@ -7,8 +7,8 @@ import pytest
 from canary_framework import (
     Canary,
     ConstructionError,
-    advance,
     dep,
+    enter,
     init,
     scope_of,
 )
@@ -31,7 +31,7 @@ async def test_one_instance_per_type_across_the_whole_graph() -> None:
         right = dep(Right)
 
     root = Root()
-    await advance(root, init)
+    await enter(root, init)
     assert root.left.shared is root.right.shared
 
 
@@ -46,7 +46,7 @@ async def test_a_unit_that_needs_constructor_arguments_is_refused_with_an_action
         needs = dep(NeedsArgs)
 
     with pytest.raises(ConstructionError, match="Declare what it needs with dep"):
-        await advance(Root(), init)
+        await enter(Root(), init)
 
 
 async def test_a_type_error_raised_by_the_constructor_itself_propagates_unchanged() -> None:
@@ -58,7 +58,7 @@ async def test_a_type_error_raised_by_the_constructor_itself_propagates_unchange
         angry = dep(Angry)
 
     with pytest.raises(TypeError, match="my own problem"):
-        await advance(Root(), init)
+        await enter(Root(), init)
 
 
 def test_a_root_gets_one_scope_and_keeps_it() -> None:

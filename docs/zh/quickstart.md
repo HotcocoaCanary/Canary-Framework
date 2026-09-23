@@ -66,7 +66,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`async with` 进入时依次推进 `init` 与 `start`，退出时回收。整张图（`Config` →
+`async with` 进入时依次进入 `init` 与 `start`，退出时回收。整张图（`Config` →
 `Database` → `UserService`）自己按依赖顺序就位。
 
 ## 四个动作

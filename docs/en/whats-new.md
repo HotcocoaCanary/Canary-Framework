@@ -19,7 +19,7 @@ async with service:
     assert service.repository.database is service.database     # both the fake
 ```
 
-The provided unit runs its own hooks and advances the dependencies its own class declares.
+The provided unit runs its own hooks and enters the dependencies its own class declares.
 
 Assigning to a dependency attribute now raises `AttributeError` pointing to `provide()`. In
 0.10 it silently replaced that one attribute while the rest of the graph, and the lifecycle,

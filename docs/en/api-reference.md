@@ -6,7 +6,7 @@ Every public name is exported from `canary_framework`.
 from canary_framework import (
     Canary, dep,                                  # declaration
     init, start, stop, Phase,                     # phases
-    advance, unwind, Scope, scope_of, deps_of,    # engine
+    enter, leave, Scope, scope_of, deps_of,       # engine
     CanaryError, DeclarationError, ConstructionError,
     CircularDependencyError, LifecycleError,      # exceptions
 )
@@ -54,42 +54,50 @@ class Database(Canary):
     async def connect(self) -> None: ...
 ```
 
-`start`'s predecessor is `init`, and `stop` undoes it. `stop` is not advanced by `advance()`; `Canary.stop()`
-consumes the ledger with it.
+`start`'s predecessor is `init`, and leaving it runs `stop`:
+`start = Phase("start", after=init, leave=stop)`.
 
-### `class Phase(name, *, after=None, undo=None)`
+### `class Phase(name, *, after=None, leave=None)`
 
 A phase. Calling it marks a method as one of its hooks.
 
 | Parameter | Description |
 |---|---|
-| `name` | The phase name; the scope keys its advance records and ledgers by it. |
-| `after` | The predecessor phase. Advancing before it has finished raises `LifecycleError`. |
-| `undo` | The phase that undoes this one. A unit that fails or is cancelled in this phase runs its `undo` hooks at once, and the failed advance releases what it brought up. `start`'s is `stop`. |
+| `name` | The phase name; the scope keys each unit's state in the phase by it. |
+| `after` | The predecessor phase. Entering before it has been entered raises `LifecycleError`. |
+| `leave` | The phase whose hooks run when this one is left: by `leave()`, and at once for a unit that fails or is cancelled while entering. `start`'s is `stop`. |
 
 ```python
-migrate = Phase("migrate", after=init)
+rollback = Phase("rollback")
+migrate = Phase("migrate", after=init, leave=rollback)
 ```
 
 ## Engine
 
-### `async advance(unit, phase)`
+`Canary`'s methods are these two functions: `unit.init()` is `enter(unit, init)`,
+`unit.start()` is `enter(unit, start)`, and `unit.stop()` is `leave(unit, start)`. Call them
+directly for phases of your own.
 
-Advance `phase` across `unit`'s dependency graph: dependencies first, then the unit's own
-hooks. One unit runs one phase exactly once; independent units advance concurrently. The graph
-is checked first — a cycle, or a unit whose predecessor phase has not run, is reported before
-any hook runs. A failure does not cancel other units; when `phase` has an `undo`, a unit that
-fails runs its `undo` hooks at once and the call releases what it brought up before raising.
+### `async enter(unit, phase)`
 
-### `async unwind(scope, phase, *, undoing)`
+Enter `phase` across `unit`'s dependency graph: dependencies first, then the unit's own hooks.
+One unit runs one phase exactly once; independent units enter concurrently. The graph is
+checked first — a cycle, or a unit that has not entered the predecessor phase, is reported
+before any hook runs. A failure does not cancel other units; when `phase` has a `leave`, a unit
+that fails runs its leave hooks at once, and the call releases what it brought up before
+raising.
 
-Release every unit in `undoing`'s ledger, running `phase`'s hooks on each: a unit still used by
-another is released after its user. One failing hook does not abort the pass; errors are collected
-and returned as a list. The ledger is drained either way. Advances of `undoing`, and of phases declared after it, that are still in flight are
-awaited first.
+### `async leave(unit, phase)`
+
+Leave `phase` on `unit`: the unit first — skipped, without an error, while a dependent is
+entering, entered or leaving — then each of its dependencies the same way. Runs the hooks of
+`phase.leave`. On the root, the whole graph. Waits for the unit to finish entering if it is
+still entering. One failing hook does not stop the rest; the errors are raised together as an
+`ExceptionGroup`. Raises `LifecycleError` when `phase` declares no `leave`.
 
 ```python
-errors = await unwind(scope_of(unit), stop, undoing=start)
+await enter(unit, migrate)
+await leave(unit, migrate)      # runs @rollback
 ```
 
 ### `class Scope`
@@ -99,13 +107,12 @@ The state one run shares.
 | Attribute | Description |
 |---|---|
 | `instances` | `dict[type, object]`, type to shared instance. |
-| `phases` | `dict[tuple[type, str], Future]`, each advance in progress or completed. A failed advance's record is dropped when the `advance()` that ran it returns. |
-| `entered` | `dict[str, dict[type, object]]`, phase name to the units that entered, keyed by type, in entry order. |
-| `known` | `dict[str, Phase]`, the phases advanced in this scope. |
 | `graph` | `dict[type, tuple[type, ...]]`, the dependency graph: each unit's dependencies, in topological order. |
 | `dependents` | `dict[type, list[type]]`, the graph's reverse edges. |
+| `tracks` | `dict[tuple[type, str], Track]`, each unit's state in each phase. |
+| `known` | `dict[str, Phase]`, the phases entered in this scope. |
 
-`phases`, `entered`, `known`, `graph` and `dependents` are for inspection; their shape is not covered by the
+`graph`, `dependents`, `tracks` and `known` are for inspection; their shape is not covered by the
 [compatibility promise](versioning.md#public-api).
 
 | Method | Description |
@@ -115,6 +122,7 @@ The state one run shares.
 | `provide(cls, unit)` | Make `unit` the instance of `cls` for the whole graph. Call before the lifecycle begins. |
 | `resolve(cls)` | The type standing in for `cls`: a provided unit's type, or `cls`. |
 | `key_of(unit)` | The type `unit` is registered under: for a provided unit, the type it replaces. |
+| `entered(phase)` | The units holding what `phase` acquired — entered and not yet left — by type. |
 
 ### `scope_of(unit)`
 
@@ -134,7 +142,7 @@ All inherit `CanaryError`, so one `except CanaryError` catches everything.
 | `DeclarationError` | `dep()` was given something that is not a `Canary` subclass. |
 | `ConstructionError` | A unit requires constructor arguments. Carries `unit`. |
 | `CircularDependencyError` | The dependency graph has a cycle; raised before any hook runs. Carries `cycle`, the path that reaches it. |
-| `LifecycleError` | A unit used outside its lifecycle: a dependency read in `__init__`, or a phase advanced before its predecessor. |
+| `LifecycleError` | A unit used outside its lifecycle: a dependency read in `__init__`, or a phase entered before its predecessor. |
 
 Several reclamation failures are combined into the standard library's `ExceptionGroup`, which
 is not a `CanaryError`.

@@ -11,7 +11,7 @@
    恰好被回收一次，且启动完成（如果完成了）一定早于回收，不会有资源在回收之后才获取。
    失败或被取消的 ``@start`` 在下一次进入之前一定已被回收。
 2. **回收安全**：回收一个单元时，依赖它且仍持有资源的单元都已回收。
-3. **推进顺序**：一个单元开始某个阶段时，它的依赖都已完成该阶段。
+3. **进入顺序**：一个单元开始某个阶段时，它的依赖都已完成该阶段。
 4. **``@init`` 只运行一次**。
 5. **异常如实**：调用方收到的异常都来自钩子，框架内部的异常不外泄；有钩子失败时调用方
    一定收到异常。
@@ -140,7 +140,7 @@ async def drive(
         for _ in range(n):
             await asyncio.sleep(0)
 
-    # 无法抛给调用方的错误（被取消的推进回滚时撤销钩子的失败）交给事件循环的异常处理器
+    # 无法抛给调用方的错误（被取消的进入回滚时离开钩子的失败）交给事件循环的异常处理器
     asyncio.get_running_loop().set_exception_handler(
         lambda _loop, context: (
             caught.append(context["exception"]) if "exception" in context else None
@@ -221,7 +221,7 @@ def check(scenario: Scenario, log: list[Event], caught: list[BaseException]) -> 
                     raise AssertionError(f"U{index}: {event!r} while {state}: {sequence}")
         assert state == "idle", f"U{index} still holds its resource: {sequence}"
 
-    # 2/3/4. 按时刻检查回收安全、推进顺序与 @init 次数
+    # 2/3/4. 按时刻检查回收安全、进入顺序与 @init 次数
     holding: set[int] = set()
     done: dict[str, set[int]] = {"init": set(), "start": set()}
     for index, event in log:
@@ -260,7 +260,7 @@ def check(scenario: Scenario, log: list[Event], caught: list[BaseException]) -> 
         reported = [leaf for leaf in found if isinstance(leaf, HookError)]
         assert len({id(leaf) for leaf in reported}) == len(reported), f"reported twice: {exc!r}"
     if any(event.endswith("_raise") for _, event in log):
-        # 回滚中撤销钩子的失败以 note 附在引发回滚的异常上（被取消时即 CancelledError）
+        # 回滚中离开钩子的失败以 note 附在引发回滚的异常上（被取消时即 CancelledError）
         notes = [
             note
             for exc in caught
@@ -281,7 +281,7 @@ REACHED_TWICE = Scenario(
     kind="context",
     trigger=0,
 )
-#: 等待共享推进的任务被取消时连带取消了该推进，推进结束时抛出 InvalidStateError。
+#: 等待共享进入的任务被取消时连带取消了该进入，进入结束时抛出 InvalidStateError。
 WAITER_CANCELLED = Scenario(
     units=(
         UnitSpec((), FAIL, FAIL, FAIL),

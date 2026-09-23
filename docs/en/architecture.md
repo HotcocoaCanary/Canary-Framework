@@ -10,7 +10,7 @@ errors            exceptions, usable by any layer
    ▲
 meta              declaration: phase / dep / introspect
    ▲
-flow              lifecycle flow: scope / graph / invoke / advance / unwind
+flow              lifecycle flow: scope / graph / invoke / enter / leave
    ▲
 canary            facade: the Canary base class and dep()
 ```
@@ -29,11 +29,11 @@ This is not merely documented — `tests/test_layering.py` parses every module's
 | `core/meta/phase.py` | `Phase` plus `init` / `start` / `stop` |
 | `core/meta/dep.py` | The `Dep` descriptor |
 | `core/meta/introspect.py` | One MRO walk reading dependencies and hooks, cached per class |
-| `core/flow/scope.py` | `Scope`, `scope_of`, no-argument construction |
+| `core/flow/scope.py` | `Scope`, each unit's state in each phase, no-argument construction |
 | `core/flow/graph.py` | Building the dependency graph and detecting cycles |
 | `core/flow/invoke.py` | Calling one hook |
-| `core/flow/advance.py` | Advancing a phase over the graph, dependencies first |
-| `core/flow/unwind.py` | Reclaiming over the graph, dependents first |
+| `core/flow/enter.py` | `enter()`: entering a phase over the graph, dependencies first |
+| `core/flow/leave.py` | `leave()`: leaving a phase over the graph, the unit first |
 | `core/canary.py` | The `Canary` base class and `dep()` |
 
 ## Markers, not rewriting
@@ -62,7 +62,7 @@ Hooks resolve by **attribute name**, so the semantics match ordinary methods:
 
 ## The dependency graph
 
-The first time a unit is advanced, it joins the scope's dependency graph together with
+The first time a unit is entered, it joins the scope's dependency graph together with
 everything it depends on. Nodes are the types units are registered under; edges come from
 `dep()` declarations, resolved through `Scope.provide()` substitutions. The graph is static —
 `dep()` is a class-level declaration and substitutions are refused once the lifecycle has begun
@@ -72,41 +72,55 @@ Building it is an iterative depth-first walk. A **cycle** is found there, before
 and reported with the path that reaches it. A node joins only after its dependencies have, so
 the graph's insertion order is itself a topological order.
 
+## Unit state
+
+Each unit has one state per phase:
+
+| State | Meaning |
+|---|---|
+| idle | Not entered, or left |
+| entering | Claimed by an `enter()`: waiting for its dependencies, or running its hooks |
+| entered | Every hook succeeded |
+| failed | Failed or cancelled while entering, and not left yet |
+| leaving | Running its leave hooks — it still uses its dependencies meanwhile |
+
+A unit is **in use** while a dependent is entering, entered, failed or leaving. That one
+definition decides both when a unit may be left and whether a dependency may start. Waiting
+still uses futures — a dependent waits on the outcome of its dependency's entering, and a
+second `leave()` of the same unit waits on the first — but what a unit *is* is always read from
+its state, never pieced together.
+
 ## The two rules
 
-**Advancing** runs dependencies first. Every node the call reaches gets a task that waits for
-its dependencies and then runs its hooks, so independent units advance concurrently and nothing
-recurses. What is recorded is the advance itself (a future) rather than a done-flag, so "not
-started / in progress / finished" needs no state machine: key absent, future pending, future
-done. A node another call is already advancing is awaited, not run again.
+**Entering** runs dependencies first. `enter()` claims the idle units the call reaches and gives
+each a task that waits for its dependencies and then runs its hooks, so independent units enter
+concurrently and nothing recurses. A unit another call is already entering is waited on, not
+run again.
 
-**Releasing** runs the unit first. Releasing a unit skips it while something still uses it —
-a dependent that is starting, running or stopping — and otherwise runs its undo hooks; either
-way it then tries each dependency the same way, concurrently, each in a task of its own. A unit
-that was skipped or never ran is passed through once per call; a unit that actually stopped
-always carries on to its dependencies, since one of them may have just lost its last user.
-The work of one call is therefore proportional to the size of the graph.
+**Leaving** runs the unit first. `leave()` skips a unit that is in use and otherwise runs its
+leave hooks; either way it then tries each dependency the same way, concurrently, each in a
+task of its own. A unit that was skipped or idle is passed through once per call; a unit that
+actually left always carries on to its dependencies, since one of them may have just lost its
+last user. The work of one call is therefore proportional to the size of the graph.
 
 The two rules mirror each other on the same graph, and that symmetry is what makes `stop()` a
-unit action like `init()` and `start()`. A phase names the phase that undoes it with `undo`;
-`start`'s is `stop`.
+unit action like `init()` and `start()`. A phase names the phase that runs when it is left with
+`leave`; `start`'s is `stop`.
 
 ## Concurrency and failure
 
-A failure does not cancel other units: every node finishes on its own. A node whose
-dependencies did not all complete runs no hooks and fails with the same exception. When the
-phase has an `undo`, a node that fails or is cancelled releases itself at once — without the
-in-use check, since the dependents waiting on it never used it — and then tries its
-dependencies. So a failed advance returns only after everything it brought up has been
-released, except what other running units still use.
+A failure does not cancel other units: every unit finishes on its own. A unit whose dependencies
+did not all enter runs no hooks and fails with the same exception. When the phase has a `leave`,
+a unit that fails or is cancelled leaves at once — without the in-use check, since the
+dependents waiting on it never used it — and then tries its dependencies. So a failed `enter()`
+returns only after everything it brought up has been released, except what other running units
+still use. Without a `leave`, failed units return to idle when the call returns, so it can be
+retried.
 
 The failures are then reduced to the real ones — a failure reached through several paths is
-reported once. Waiting on another node's advance never cancels it. When the caller cancels an
-advance, the same rollback completes before the cancellation propagates; undo errors that a
-cancellation cannot carry go to the event loop's exception handler.
-
-The ledger records which units entered a phase: it is how a unit that failed halfway through
-`@start` is known to need `@stop`.
+reported once. Waiting on another unit never cancels it. When the caller cancels `enter()`, the
+same rollback completes before the cancellation propagates; leave errors that a cancellation
+cannot carry go to the event loop's exception handler.
 
 ## Invariants
 

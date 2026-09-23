@@ -68,7 +68,7 @@ async def test_a_provided_unit_runs_its_own_hooks_and_reads_its_own_dependencies
     assert seen == ["fake.start(real://)", "fake.stop"]
 
 
-async def test_a_provided_unit_advances_the_dependencies_its_own_type_declares() -> None:
+async def test_a_provided_unit_enters_the_dependencies_its_own_type_declares() -> None:
     seen: list[str] = []
 
     class Clock(Canary):

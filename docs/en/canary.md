@@ -65,7 +65,7 @@ class Database(Canary):
 
 The constraint is deliberate: `@start` has a matching `@stop`, while construction has no
 matching destructor. Deferring anything that needs the outside world to a lifecycle hook puts
-every such action into a phase that is ledgered and can be reclaimed in reverse.
+every such action into a phase that is reclaimed when the unit stops.
 
 ## Any unit can be the entry point
 
@@ -120,7 +120,7 @@ async with service:
 ```
 
 Every `dep(Database)` in the graph now returns that instance, and it takes part in the
-lifecycle as its own type: its own hooks run, and the dependencies it declares advance first.
+lifecycle as its own type: its own hooks run, and the dependencies it declares enter first.
 
 Providing is refused once the scope already holds a `Database`, and when the instance is not a
 `Database`. Assigning to a dependency attribute (`service.database = ...`) raises
