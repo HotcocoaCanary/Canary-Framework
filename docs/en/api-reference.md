@@ -81,7 +81,8 @@ hooks. One unit runs one phase exactly once; independent dependencies advance co
 
 Drain `undoing`'s ledger in reverse, running `phase`'s hooks on each unit. One failing hook
 does not abort the pass; errors are collected and returned as a list. The ledger is drained
-either way.
+either way. Advances of `undoing`, and of phases declared after it, that are still in flight are
+awaited first.
 
 ```python
 errors = await unwind(scope_of(unit), stop, undoing=start)
