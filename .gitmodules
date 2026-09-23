@@ -1,0 +1,4 @@
+[submodule "examples"]
+	path = examples
+	url = https://github.com/HotcocoaCanary/Canary-Framework-Example.git
+	branch = main

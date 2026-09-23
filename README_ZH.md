@@ -122,7 +122,9 @@ app = FastAPI(lifespan=lifespan)
   [1.0 新特性](https://hotcocoacanary.github.io/Canary-Framework/zh/whats-new/)、
   [常见用法](https://hotcocoacanary.github.io/Canary-Framework/zh/patterns/)、
   [从 0.9.x 升级](https://hotcocoacanary.github.io/Canary-Framework/zh/upgrading-from-0.9/)
-- 一个五层的完整示例：[`examples/library/`](examples/library)
+- 完整示例——FastAPI 服务与常驻守护进程：
+  [Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example)
+  （以子模块挂在 [`examples/`](examples)）
 
 ## 社区
 
