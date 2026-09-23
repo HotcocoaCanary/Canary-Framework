@@ -103,13 +103,24 @@ class FakeDatabase(Database):
         self.pool = InMemoryPool()
 ```
 
-在图中替换某个实例，直接给属性赋值：
+在生命周期开始之前把替身登记进作用域，它就替换了图中的那个实例：
 
 ```python
+from canary_framework import scope_of
+
 service = UserService()
-await service.init()
-service.database = FakeDatabase()
+scope_of(service).provide(Database, FakeDatabase())
+
+async with service:
+    ...
 ```
+
+之后图中所有 `dep(Database)` 都取回这个实例，它按自身的类型参与生命周期：运行自己的钩子，
+自己声明的依赖先推进。
+
+作用域里已经有 `Database` 时，或实例不是 `Database` 时，登记会被拒绝。给依赖属性赋值
+（`service.database = ...`）会抛 `AttributeError`：赋值只会改到这一个属性，图中其余单元
+仍然取回原来的实例。
 
 ## `stop()` 是图的动作
 

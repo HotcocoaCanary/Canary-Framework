@@ -166,7 +166,7 @@ async def test_the_ledger_is_always_a_valid_topological_order() -> None:
     await advance(root, init)
     await advance(root, start)
 
-    order = [type(unit) for unit in scope_of(root).entered["start"]]
+    order = [type(unit) for unit in scope_of(root).entered["start"].values()]
     assert order.index(Config) < order.index(Database)
     assert order.index(Config) < order.index(Cache)
     assert order.index(Database) < order.index(Root)

@@ -2,6 +2,37 @@
 
 This project follows Keep a Changelog and Semantic Versioning.
 
+## [Unreleased]
+
+### Added
+
+- `Scope.provide(cls, unit)` replaces a dependency across the whole graph: every `dep(cls)`
+  returns `unit`, which runs its own hooks and advances the dependencies its own type
+  declares. `Scope.resolve(cls)` returns the type standing in for `cls`.
+
+  `Scope.provide(cls, unit)` 在整张图上替换一个依赖：所有 `dep(cls)` 都取回 `unit`，它运行
+  自己的钩子，推进自身类型声明的依赖。
+
+### Changed
+
+- **BREAKING: `Scope.entered[phase]` is a `dict[type, object]`**, keyed by the type that was
+  advanced, instead of a list. A unit that re-enters a phase keeps a single entry.
+- Assigning to a dependency attribute raises `AttributeError` pointing to `provide()`. It used
+  to replace that one attribute silently while the rest of the graph kept the original.
+
+### Fixed
+
+- A stopped graph can start again. `stop()` left the `start` records in place, so a second
+  `start()` returned without running anything. It now undoes `start`, and every phase declared
+  after it, for each unit it reclaims; `@init` is not rerun.
+- A failed or cancelled advance can be retried. The failure used to be cached, so every later
+  call re-raised the first exception without running anything.
+- `start()` after a failed `init()` raises `LifecycleError` instead of proceeding, because the
+  failed `init` no longer counts as completed.
+
+  停止的图可以再次启动；失败的推进可以重试；`init()` 失败之后调用 `start()` 会抛
+  `LifecycleError` 而不是继续执行。
+
 ## [0.10.0] — 2026-09-14
 
 A complete rewrite of the core. Not compatible with 0.9.x; there is no compatibility layer.

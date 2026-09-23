@@ -91,13 +91,16 @@ errors = await unwind(scope_of(unit), stop, undoing=start)
 | 属性 | 说明 |
 |---|---|
 | `instances` | `dict[type, object]`，类型到共享实例。 |
-| `phases` | `dict[tuple[type, str], Future]`，每次推进本身。 |
-| `entered` | `dict[str, list[object]]`，阶段名到进入该阶段的单元，按进入顺序。 |
+| `phases` | `dict[tuple[type, str], Future]`，进行中或已完成的推进。失败的推进不留记录。 |
+| `entered` | `dict[str, dict[type, object]]`，阶段名到进入该阶段的单元，以类型为键，按进入顺序。 |
+| `known` | `dict[str, Phase]`，本作用域推进过的阶段。 |
 
 | 方法 | 说明 |
 |---|---|
 | `instance(cls)` | 返回该类型在本作用域内的唯一实例，首次取用时无参构造。 |
 | `adopt(unit)` | 把实例登记进本作用域。 |
+| `provide(cls, unit)` | 把 `unit` 登记为整张图上 `cls` 的实例。须在生命周期开始之前调用。 |
+| `resolve(cls)` | `cls` 的实际类型：登记过替身时为替身的类型，否则为 `cls`。 |
 
 ### `scope_of(unit)`
 

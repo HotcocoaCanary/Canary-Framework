@@ -110,7 +110,7 @@ from canary_framework import scope_of
 
 scope = scope_of(root)
 scope.instances          # type -> instance
-scope.entered["start"]   # units that entered start, in entry order
+scope.entered["start"]   # type -> unit that entered start, in entry order
 ```
 
 ## Cycles
