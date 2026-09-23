@@ -47,14 +47,16 @@ asyncio.run(main())
 
 The whole framework is two rules.
 
-**Advancing** recurses along dependencies: a unit enters a phase only after its dependencies
-have completed that phase. One unit runs one phase exactly once no matter how many units
-depend on it, and independent dependencies advance concurrently.
+**Advancing** runs dependencies first: a unit enters a phase only after its dependencies have
+completed it. One unit runs one phase exactly once no matter how many units depend on it, and
+independent units advance concurrently.
 
-**Unwinding** is linear, driven by a ledger: a dependency graph is not a tree, so reclamation
-cannot recurse along dependencies. It runs in reverse entry order instead.
+**Releasing** runs the unit first: stopping a unit stops it — unless something still uses it —
+then tries its dependencies the same way, so what nothing else uses goes down with it. A failed
+`start()` releases what it brought up before it raises.
 
-`init` / `start` / `stop` are three names for these two rules.
+Both run on the dependency graph, built before any hook runs — which is also where cycles are
+caught. `init` / `start` / `stop` are three names for these two rules.
 
 ## Core concepts
 

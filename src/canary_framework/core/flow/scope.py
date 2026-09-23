@@ -21,7 +21,16 @@ class Scope:
     一次运行共享的状态。
     """
 
-    __slots__ = ("entered", "instances", "known", "phases")
+    __slots__ = (
+        "dependents",
+        "entered",
+        "graph",
+        "instances",
+        "known",
+        "phases",
+        "releasing",
+        "stopping",
+    )
 
     def __init__(self) -> None:
         #: 类型到共享实例。经 :meth:`provide` 登记的实例可以是该类型的子类实例。
@@ -34,6 +43,14 @@ class Scope:
         self.entered: dict[str, dict[type, object]] = defaultdict(dict)
         #: 阶段名到在本作用域推进过的阶段对象，回收时据此找出以被撤销阶段为前驱的阶段。
         self.known: dict[str, Phase] = {}
+        #: 依赖图：键到它依赖的键。插入顺序是拓扑序（依赖在前），见 ``flow.graph``。
+        self.graph: dict[type, tuple[type, ...]] = {}
+        #: 依赖图的反向边：键到依赖它的键。
+        self.dependents: dict[type, list[type]] = {}
+        #: (键, 阶段名) 到正在进行的一次释放：同一个单元同时被多条路径释放时，后到者只等待。
+        self.releasing: dict[tuple[type, str], Future[None]] = {}
+        #: 正在执行撤销钩子的 (键, 阶段名)。执行期间它仍在使用自己的依赖。
+        self.stopping: set[tuple[type, str]] = set()
 
     def instance(self, cls: type) -> object:
         """Return the single instance of *cls* in this scope, constructing it on first use.
@@ -71,7 +88,7 @@ class Scope:
         """
         if not isinstance(unit, cls):
             raise TypeError(f"provide({cls.__name__}, ...): {unit!r} is not a {cls.__name__}")
-        if cls in self.instances:
+        if cls in self.instances or cls in self.graph:
             raise LifecycleError(
                 f"provide({cls.__name__}, ...): this scope already has a {cls.__name__}. "
                 f"Provide replacements before the lifecycle begins."
@@ -83,6 +100,17 @@ class Scope:
             )
         setattr(unit, SCOPE, self)
         self.instances[cls] = unit
+
+    def key_of(self, unit: object) -> type:
+        """Return the type *unit* is registered under in this scope.
+
+        返回 *unit* 在本作用域内登记的键。经 :meth:`provide` 登记的替身，键是被替换的类型
+        而不是它自身的类型；未登记时返回它自身的类型。
+        """
+        for cls, instance in self.instances.items():
+            if instance is unit:
+                return cls
+        return type(unit)
 
     def resolve(self, cls: type) -> type:
         """Return the type that will stand in for *cls*: a provided unit's own type, or *cls*.

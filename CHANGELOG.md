@@ -4,12 +4,44 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+The engine now runs on an explicit dependency graph, built when a unit is first advanced
+([#25](https://github.com/HotcocoaCanary/Canary-Framework/issues/25)):
+
+- **`stop()` is a unit action.** It stops the unit unless a dependent is starting, running or
+  stopping, then tries each of its dependencies the same way. On the root that is the whole
+  graph, as before. On a unit that is still in use it now does nothing: it used to reclaim the
+  whole graph from whichever unit it was called on, so `await service.database.stop()` must
+  become `await service.stop()`.
+- **A failed `start()` cleans up after itself.** A unit whose `@start` raises runs its `@stop` at
+  once; units that depend on it do not start and release what they were waiting on. `start()`
+  raises only after everything it brought up has been released, except what other running units
+  use. Retrying no longer needs a `stop()` first — and a retry without one no longer runs
+  `@start` twice against a single `@stop`.
+- **A failure no longer cancels the units starting alongside it**; they finish and are released.
+- **Cycles, and units whose predecessor phase has not run, are reported before any hook runs.**
+  Hooks on unrelated branches used to run before the error surfaced.
+- When the caller cancels `start()`, the rollback completes before the cancellation propagates;
+  `@stop` errors during it go to the event loop's exception handler.
+- Advancing no longer recurses, so no call-stack trampolining is needed for deep chains.
+
+  引擎改为基于显式依赖图：`stop()` 成为单元的动作，先停本单元（仍被使用时跳过），再递归尝试
+  依赖；失败的 `start()` 自行回收——失败的单元立即执行 `@stop`，依赖不足的单元不启动并释放
+  依赖，重试前不再需要 `stop()`；失败不再取消同时启动的其他单元；环与缺失的前驱阶段在任何
+  钩子运行之前报告。
+
 ### Added
 
 - Python 3.15 support: tested in CI and listed in the classifiers.
   ([#21](https://github.com/HotcocoaCanary/Canary-Framework/issues/21))
+- `Phase(..., undo=...)` names the phase that undoes it; `start`'s is `stop`. A unit that fails
+  or is cancelled in a phase with an `undo` runs its undo hooks at once.
+- `Scope.key_of(unit)` returns the type a unit is registered under. `Scope.graph` and
+  `Scope.dependents` expose the dependency graph for inspection.
 
-  支持 Python 3.15：CI 测试矩阵与 classifier 均已加入。
+  支持 Python 3.15；新增 `Phase(undo=...)`；新增 `Scope.key_of()`；`Scope.graph` 与
+  `Scope.dependents` 可用于观察依赖图。
 
 ### Fixed
 
@@ -25,6 +57,7 @@ Found by the new randomised lifecycle tests
   then raised `InvalidStateError` from inside the framework when it finished.
 - One failure reached through several paths is reported once. It used to appear several times
   in an `ExceptionGroup` claiming that several units had failed.
+- `start()` on a provided substitute advances it under the type it replaces, not its own type.
 
   随机化测试发现并修复三处问题：同一次 `start()` 中失败的依赖可能被另一条路径再运行一遍；
   等待共享推进的任务被取消时会连带取消该推进，导致框架内部抛出 `InvalidStateError`；

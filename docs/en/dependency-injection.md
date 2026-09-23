@@ -130,6 +130,7 @@ A.b = dep(B)
 CircularDependencyError: circular dependency: A -> B -> A
 ```
 
-The exception carries the path actually walked. Cycles are hard to write in practice: `dep(B)`
+The dependency graph is built before any hook runs, so a cycle is reported before anything
+starts — even units on unrelated branches. The exception carries the path that reaches it. Cycles are hard to write in practice: `dep(B)`
 is evaluated in the class body, so `B` must already exist and a direct mutual dependency cannot
 be expressed.

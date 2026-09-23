@@ -27,7 +27,7 @@ belong to several phases. Hooks may be synchronous or `async def` — the framew
 whether to await by looking at the return value, so a synchronous function returning a
 coroutine works too.
 
-## Advancing recurses along dependencies
+## Advancing: dependencies first {#advancing}
 
 `await unit.init()` advances `init` across the graph: dependencies first, then the unit's own
 hooks.
@@ -47,11 +47,13 @@ class Service(Canary):
 await Service().init()      # Config -> Database -> Service
 ```
 
-Two properties:
+Three properties:
 
 - **One unit runs one phase exactly once**, no matter how many units depend on it.
-- **Independent dependencies advance concurrently**, so elapsed time tracks the graph's
-  critical path rather than the sum of all units.
+- **Independent units advance concurrently**, so elapsed time tracks the graph's critical path
+  rather than the sum of all units.
+- **Nothing runs until the graph checks out.** The dependency graph is built first, so a cycle,
+  or a unit whose `@init` has not run before `start()`, is reported before any hook runs.
 
 ## The barrier
 
@@ -78,18 +80,20 @@ LifecycleError: Service: @init has not run, call it before @start
 A unit is recorded in the ledger as it **enters** `@start`, not when it completes — so a unit
 that fails halfway is reclaimed too.
 
-`stop()` drains the ledger in reverse and is the single reclamation path:
+`stop()` is the single reclamation path. It stops the unit unless something still uses it, then
+tries each of its dependencies the same way:
 
 | When called | Behaviour |
 |---|---|
-| Never started | Ledger empty, no-op |
-| Only `init()` ran | `start` ledger empty, no-op |
-| After a normal start | Reclaims in reverse |
-| `start()` failed midway | Reclaims whatever entered `@start`, including the one that failed |
-| `start()` still running | Waits for it to finish, succeed or fail, then reclaims in reverse |
-| Called again | Ledger already drained, no-op |
+| Never started | Nothing to stop; its dependencies are still tried |
+| Only `init()` ran | Nothing entered `@start`, no-op |
+| After a normal start | Stops the unit, then the dependencies nothing else uses |
+| Still in use — a dependent is starting, running or stopping | Skips the unit, no error; its dependencies are still tried |
+| `start()` still running | Waits for it to finish, then decides |
+| Called again | Nothing left, no-op |
 
-One rule covers all six cases, which is why there is no state machine.
+A dependency shared by several units stops once the last of them has stopped. See
+[Units › `stop()` is a unit action](canary.md#stop-is-a-unit-action) for examples.
 
 Because `stop()` waits for an in-flight `start()`, do not call it from inside a `@start` hook of
 the same graph: it would wait for itself. To bound shutdown, wrap the call in `asyncio.timeout`.
@@ -110,53 +114,39 @@ async with service:     # start, stop
 A phase declared with `after=start` is undone along with `start`, and has to be advanced
 again after the restart.
 
-A failed or cancelled advance keeps its record only until the call that ran it returns — so
-within one `start()` a failure is not run a second time by another path — and calling it
-again afterwards runs it again. Units that
-had already completed the phase are not run twice, and a unit that re-enters `@start` keeps
-one entry in the ledger:
+A failed `start()` has already released what it acquired (see below), so retrying is simply
+calling it again. Units that completed the phase are not run twice:
 
 ```python
 try:
     await service.start()
 except ConnectionError:
-    await service.stop()     # reclaim what started
-await service.start()        # retry
+    await service.start()    # the failed attempt already cleaned up after itself
 ```
 
 ## Failure
 
-**Startup failure.** When any `@start` raises, the ledger is unwound in reverse and the
-original exception is re-raised unchanged:
+**Startup failure.** `start()` cleans up after itself:
 
-```python
-class Leaf(Canary):
-    @start
-    def go(self) -> None: ...
+- a unit whose `@start` raises runs its own `@stop` at once;
+- units that depend on it do not start, and release the dependencies they were waiting on;
+- units starting alongside it are not cancelled — they finish, then are released if nothing
+  else uses them.
 
-    @stop
-    def bye(self) -> None:
-        print("leaf reclaimed")
+When `start()` raises, everything it brought up has been stopped, except what other running
+units still use. With `X → A, B`, `A → C`, `B → C` and `B` failing:
 
-
-class Root(Canary):
-    leaf = dep(Leaf)
-
-    @start
-    def go(self) -> None:
-        raise RuntimeError("startup failed")
-
-
-async with Root():        # prints "leaf reclaimed", then raises RuntimeError
-    ...
+```
+C.start → A.start → B.start ✗ → B.stop → A.stop → C.stop → start() raises B's error
 ```
 
-If reclamation itself fails, that error is attached as a note on the original exception rather
-than replacing it.
+Errors raised by `@stop` during this rollback are attached as notes on the original exception.
+If the caller cancels `start()`, the same rollback runs before the cancellation propagates; a
+cancellation cannot carry `@stop` errors, so they go to the event loop's exception handler.
 
-**Several units failing at once.** Under concurrent advancement, simultaneous failures are
-combined into one `ExceptionGroup`; a lone failure is re-raised as-is, matching sequential
-behaviour.
+**Several units failing at once.** A failure does not cancel other units. When several fail,
+the failures are combined into one `ExceptionGroup`; a lone failure is re-raised as-is, and one
+failure reached through several paths is reported once.
 
 **Reclamation failure.** One failing `@stop` does not abort the pass; the remaining units are
 reclaimed and everything is raised at the end as one `ExceptionGroup`, even for a single error:
@@ -174,12 +164,16 @@ ExceptionGroup: 1 error(s) while stopping
 ```python
 from canary_framework import Phase, advance, init
 
-migrate = Phase("migrate", after=init)
+rollback = Phase("rollback")
+migrate = Phase("migrate", after=init, undo=rollback)
 
 
 class Schema(Canary):
     @migrate
     async def apply(self) -> None: ...
+
+    @rollback
+    async def revert(self) -> None: ...
 
 
 await unit.init()
@@ -189,7 +183,9 @@ await advance(unit, migrate)
 `after` declares a predecessor: advancing a phase whose predecessor has not finished raises
 `LifecycleError` instead of silently skipping it.
 
-To give a new phase a reclamation pass, use `unwind()` — the pairing lives at the call site:
+`undo` names the phase that undoes it, exactly as `stop` undoes `start`: a unit whose `@migrate`
+fails runs its `@rollback` at once, and the failed advance releases what it brought up. To undo
+everything that migrated:
 
 ```python
 from canary_framework import scope_of, unwind

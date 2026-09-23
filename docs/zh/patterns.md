@@ -80,7 +80,7 @@ class Database(Canary):
 
 ## 执行到一半失败的钩子
 
-单元在 `@start` 开始时就已记入台账，因此执行到一半抛出的 `@start` 同样会由 `@stop` 回收。
+执行到一半抛出的 `@start` 会立即运行本单元的 `@stop`，`start()` 随后释放它启动的依赖。
 `@stop` 应只释放实际获取到的资源——上例中 `driver` 默认为 `None` 正是为此。
 
 ## 钩子里的阻塞操作
@@ -99,8 +99,8 @@ class Index(Canary):
 
 ## 限时关闭
 
-`stop()` 逐个等待每个 `@stop`，也会等待仍在进行的 `start()`。需要给关闭设期限时，用
-`asyncio.timeout` 包住它：
+`stop()` 等待每个 `@stop` 完成——依赖者在前，互不依赖的单元同时进行——也会等待仍在进行的
+`start()`。需要给关闭设期限时，用 `asyncio.timeout` 包住它：
 
 ```python
 try:
@@ -110,7 +110,7 @@ except TimeoutError:
     log.warning("shutdown timed out")
 ```
 
-到期时正在执行的那个钩子被取消，不会重试。还没轮到的单元留在台账里，再调用一次 `stop()`
+到期时正在执行的钩子被取消，不会重试。还没轮到的单元留在台账里，再调用一次 `stop()`
 会从那里继续回收。
 
 ## 接入宿主
@@ -154,7 +154,8 @@ asyncio.run(main())
 
 ## 重启与重试
 
-`stop()` 会撤销 `start`，因此停止的图可以再次启动；失败的推进直接再调用一次即可：
+`stop()` 会撤销 `start`，因此停止的图可以再次启动。失败的 `start()` 已经释放了它启动的一切，
+重试就是再调用一次：
 
 ```python
 for attempt in range(3):
@@ -162,7 +163,6 @@ for attempt in range(3):
         await service.start()
         break
     except ConnectionError:
-        await service.stop()
         if attempt == 2:
             raise
         await asyncio.sleep(2**attempt)

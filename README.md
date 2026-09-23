@@ -76,12 +76,16 @@ disconnected
 
 ## Two rules
 
-**Advancing** recurses along dependencies: a unit enters a phase only after its dependencies
-have completed it. One unit runs one phase exactly once no matter how many units depend on it,
-and independent dependencies advance concurrently.
+**Advancing** runs dependencies first: a unit enters a phase only after its dependencies have
+completed it. One unit runs one phase exactly once no matter how many units depend on it, and
+independent units advance concurrently.
 
-**Unwinding** is linear: a dependency graph is not a tree, so reclamation runs over a ledger in
-reverse entry order.
+**Releasing** runs the unit first: stopping a unit stops it — unless something still uses it —
+then tries its dependencies the same way, so what nothing else uses goes down with it. A failed
+`start()` releases what it brought up before it raises.
+
+Both run on the dependency graph, built before any hook runs — which is also where cycles are
+caught.
 
 `init` / `start` / `stop` are three names for these two rules. Adding a fourth phase is one
 line: `Phase("migrate", after=init)`.
@@ -92,12 +96,13 @@ line: `Phase("migrate", after=init)`.
   `dep(SomethingElse)` is a type error. No plugin required.
 - **Plain classes.** Decorators only mark methods; units stay subclassable, mixable, nestable,
   and lifecycle methods can be overridden with `super()`.
-- **Failure paths are part of the design.** A failing `start()` reclaims what started; `stop()`
+- **Failure paths are part of the design.** A failing `start()` releases what it started; `stop()`
   is the single reclamation path, shared by success and failure, and is idempotent. A stopped
   graph starts again; a failed advance can be retried.
 - **Test doubles without mocks.** `scope_of(service).provide(Database, FakeDatabase())` swaps a
   dependency across the whole graph, and the double runs its own lifecycle.
-- **Concurrent by default.** Independent units advance together, scheduled by dependency.
+- **Concurrent by default.** Independent units start together and stop together, scheduled by
+  the dependency graph.
 - **Zero dependencies.** A test asserts that a full lifecycle imports nothing from
   site-packages.
 
