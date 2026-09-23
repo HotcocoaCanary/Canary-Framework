@@ -21,10 +21,10 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           cache-dependency-glob: "pyproject.toml"
 
@@ -60,17 +60,17 @@ jobs:
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
 
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           cache-dependency-glob: "pyproject.toml"
 
