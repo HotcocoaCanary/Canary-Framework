@@ -94,18 +94,19 @@ phase.
   reclaimed by `@stop`.
 - **`@stop`**: release what `@start` acquired.
 
-## A complete example
+## Complete examples
 
-`examples/library/` in the repository is a five-layer graph:
+[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example) holds two
+real projects, deliberately different in shape. It is also checked out at `examples/` as a
+submodule of this repository.
 
-```
-LibraryApp → LibraryService → three repositories → Database → Config
-```
-
-Run it:
+- **library** — a library management system with RAG: a request-driven HTTP API on FastAPI.
+- **telemetry** — device telemetry and alerting: a long-running daemon on the core alone.
 
 ```bash
-python examples/library/main.py
+git clone https://github.com/HotcocoaCanary/Canary-Framework-Example.git
+cd Canary-Framework-Example/library
+uv sync && uv run pytest && uv run python main.py
 ```
 
 ## Hosting

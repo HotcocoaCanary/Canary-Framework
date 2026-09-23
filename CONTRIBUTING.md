@@ -19,6 +19,13 @@ uv sync --all-extras
 uv run pre-commit install
 ```
 
+`examples/` 是 [Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example)
+的子模块，需要时拉取 / `examples/` is a submodule; fetch it when needed:
+
+```bash
+git submodule update --init
+```
+
 ## 开发流程 / Workflow
 
 1. Fork 本仓库，从 `main` 创建分支 / Fork the repo and branch from `main`

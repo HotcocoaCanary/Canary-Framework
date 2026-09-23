@@ -91,16 +91,16 @@ await service.stop()     # 逆序全部 @stop
 
 ## 完整示例
 
-仓库的 `examples/library/` 是一个五层的依赖图：
+[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example) 收录了两个
+形态刻意不同的真实项目，并以子模块的形式挂在本仓库的 `examples/`。
 
-```
-LibraryApp → LibraryService → 三个 Repository → Database → Config
-```
-
-运行：
+- **library**：智能图书馆管理系统 + RAG，基于 FastAPI 的请求驱动 HTTP API。
+- **telemetry**：设备遥测采集与告警，只用核心的常驻守护进程。
 
 ```bash
-python examples/library/main.py
+git clone https://github.com/HotcocoaCanary/Canary-Framework-Example.git
+cd Canary-Framework-Example/library
+uv sync && uv run pytest && uv run python main.py
 ```
 
 ## 接入宿主

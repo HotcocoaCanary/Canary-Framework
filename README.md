@@ -127,7 +127,9 @@ breaking changes before 2.0, and removals are deprecated for at least one minor 
   [What's new in 1.0](https://hotcocoacanary.github.io/Canary-Framework/whats-new/),
   [patterns](https://hotcocoacanary.github.io/Canary-Framework/patterns/),
   [upgrading from 0.9.x](https://hotcocoacanary.github.io/Canary-Framework/upgrading-from-0.9/)
-- A complete five-layer example: [`examples/library/`](examples/library)
+- Complete examples — a FastAPI service and a long-running daemon:
+  [Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example)
+  (checked out at [`examples/`](examples) as a submodule)
 
 ## Community
 
