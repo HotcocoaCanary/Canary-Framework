@@ -1,29 +1,77 @@
 name: Release & Publish
 
+# 推送 vX.Y.Z tag 触发：校验版本 → 测试 → 构建 → 发布到 PyPI（需在 publish 环境审批）→ 创建 GitHub Release。
+# tag 必须指向 main 或维护分支（N.x）上的提交。
+
 on:
   push:
-    branches:
-      - "releases/v*"
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+rc[0-9]+"
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  test:
+  verify:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
           cache-dependency-glob: "pyproject.toml"
+
       - name: Set up Python
         run: uv python install 3.12
 
       - name: Install dependencies
         run: uv sync --extra dev
+
+      - name: Read version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the tagged commit is on main or a maintenance branch
+        run: |
+          BRANCHES=$(git branch -r --contains "$GITHUB_SHA" --format='%(refname:short)')
+          echo "$BRANCHES"
+          if ! echo "$BRANCHES" | grep -Eq '^origin/(main|[0-9]+\.x)$'; then
+            echo "::error::$GITHUB_REF_NAME does not point to a commit on main or a N.x branch"
+            exit 1
+          fi
+
+      - name: Verify version matches pyproject.toml and __version__
+        env:
+          EXPECTED: ${{ steps.version.outputs.version }}
+        run: |
+          uv run python - <<'EOF'
+          import os
+          import tomllib
+
+          from canary_framework import __version__
+
+          expected = os.environ["EXPECTED"]
+          with open("pyproject.toml", "rb") as f:
+              declared = tomllib.load(f)["project"]["version"]
+          assert declared == expected, f"pyproject.toml {declared} != tag {expected}"
+          assert __version__ == expected, f"__version__ {__version__} != tag {expected}"
+          print(f"Version {expected} OK")
+          EOF
+
+      - name: Verify CHANGELOG has an entry for this version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: grep -q "^## \[$VERSION\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no [$VERSION] section"; exit 1; }
 
       - name: Lint
         run: uv run ruff check src/ tests/
@@ -35,65 +83,80 @@ jobs:
         run: uv run mypy src/ tests/
 
       - name: Test
-        run: uv run pytest --cov=src/canary_framework --cov-fail-under=70
+        run: uv run pytest --cov=src/canary_framework --cov-fail-under=95
 
-  release:
-    needs: test
+  build:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
-        with:
-          cache-dependency-glob: "pyproject.toml"
-      - name: Extract version from branch
-        id: version
-        run: |
-          BRANCH="${{ github.ref_name }}"
-          VERSION="${BRANCH#releases/v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Verify version matches pyproject.toml
-        run: |
-          EXPECTED="${{ steps.version.outputs.version }}"
-          ACTUAL=$(uv run python -c "import tomllib; f=open('pyproject.toml','rb'); d=tomllib.load(f); print(d['project']['version'])")
-          if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "ERROR: Branch version '$EXPECTED' != pyproject.toml version '$ACTUAL'"
-            exit 1
-          fi
-          echo "Version $EXPECTED verified"
-
-      - name: Verify version matches __init__.py
-        run: |
-          EXPECTED="${{ steps.version.outputs.version }}"
-          ACTUAL=$(uv run python -c "from canary_framework import __version__; print(__version__)")
-          if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "ERROR: Branch version '$EXPECTED' != __init__.py __version__ '$ACTUAL'"
-            exit 1
-          fi
-          echo "Version $EXPECTED confirmed in __init__.py"
 
       - name: Build
         run: uv build
 
       - name: Check package (twine)
-        run: uv run --with twine twine check dist/*
+        run: uvx twine check --strict dist/*
 
-      - name: Create tag
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: publish
+      url: https://pypi.org/project/canary-framework/${{ needs.verify.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: [verify, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract release notes from CHANGELOG
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          git tag "${{ steps.version.outputs.tag }}"
-          git push origin "${{ steps.version.outputs.tag }}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          cat notes.md
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            --title "${{ steps.version.outputs.tag }}" \
+          FLAGS=()
+          if [[ "$VERSION" == *rc* ]]; then FLAGS+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
             --generate-notes \
+            "${FLAGS[@]}" \
             dist/*
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1

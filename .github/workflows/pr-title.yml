@@ -1,0 +1,43 @@
+name: PR title
+
+# squash 合并时 PR 标题即 main 上的提交信息，因此标题必须符合 conventional commits；
+# 同时按类型打 label，供 .github/release.yml 给发布说明分组。
+# 使用 pull_request_target 以便给来自 fork 的 PR 打 label；本 workflow 不检出也不执行 PR 的代码。
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check title and label by type
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: ${{ github.event.pull_request.title }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          PATTERN='^(feat|fix|perf|refactor|docs|test|build|ci|chore|revert)(\([a-z0-9./_-]+\))?(!)?: .+'
+          if ! [[ "$TITLE" =~ $PATTERN ]]; then
+            echo "::error::PR title must follow conventional commits, e.g. 'fix(scope): 描述' or 'feat!: 描述'. Got: $TITLE"
+            exit 1
+          fi
+          TYPE="${BASH_REMATCH[1]}"
+          BREAKING="${BASH_REMATCH[3]}"
+
+          case "$TYPE" in
+            feat) LABEL=enhancement ;;
+            fix) LABEL=bug ;;
+            perf) LABEL=performance ;;
+            docs) LABEL=documentation ;;
+            *) LABEL=maintenance ;;
+          esac
+          gh pr edit "$NUMBER" --add-label "$LABEL"
+          if [[ -n "$BREAKING" ]]; then
+            gh pr edit "$NUMBER" --add-label breaking
+          fi

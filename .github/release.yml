@@ -1,0 +1,19 @@
+# GitHub Release 自动生成的说明按 label 分组；label 由 pr-title workflow 按 PR 标题类型添加。
+changelog:
+  exclude:
+    labels: [ignore-for-release]
+  categories:
+    - title: 💥 Breaking changes
+      labels: [breaking]
+    - title: ✨ Features
+      labels: [enhancement]
+    - title: 🐛 Fixes
+      labels: [bug]
+    - title: ⚡ Performance
+      labels: [performance]
+    - title: 📝 Documentation
+      labels: [documentation]
+    - title: 🔧 Maintenance
+      labels: [maintenance, dependencies]
+    - title: Other changes
+      labels: ["*"]

@@ -1,0 +1,22 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        核心保持最小：能用现有 API（`Canary`、`dep()`、阶段）在单元里实现的，优先作为用法与文档，而不是新 API。
+        The core stays minimal: what can be built from the existing API inside a unit is preferred as a documented pattern rather than a new API.
+  - type: textarea
+    attributes:
+      label: 场景 / Use case
+      description: 你想解决什么问题？/ What problem are you solving?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 现有 API 的写法 / With today's API
+      description: 用现在的 API 怎么写，哪里不够？/ How would you write it today, and what falls short?
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 设想 / Proposal

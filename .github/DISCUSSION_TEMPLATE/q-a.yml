@@ -1,0 +1,17 @@
+labels: [question]
+body:
+  - type: textarea
+    attributes:
+      label: 问题 / Question
+      description: 你想做什么，遇到了什么？/ What are you trying to do, and what happened?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: 最小代码 / Minimal code
+      description: 能复现问题的最小单元定义与调用 / The smallest units and calls that show it
+      render: python
+  - type: input
+    attributes:
+      label: 版本 / Versions
+      placeholder: "canary-framework 1.0.0, Python 3.12"
