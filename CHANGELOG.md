@@ -4,6 +4,20 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-09-23
+
+The first stable release. The core introduced in 0.10 is kept; from here on the public API
+follows Semantic Versioning — no breaking changes before 2.0, and removals are deprecated for at
+least one minor release first. See the
+[versioning policy](https://hotcocoacanary.github.io/Canary-Framework/versioning/).
+
+第一个稳定版本，沿用 0.10 引入的核心。自此公开 API 遵循语义化版本：2.0 之前不做破坏性变更，
+任何移除都至少提前一个次版本弃用。
+
+Upgrading from 0.10: replace `service.dep = Fake()` with `scope_of(service).provide(Dep, Fake())`,
+and iterate `scope.entered[phase].values()`. Upgrading from 0.9.x: see
+[Upgrading from 0.9.x](https://hotcocoacanary.github.io/Canary-Framework/upgrading-from-0.9/).
+
 ### Added
 
 - `Scope.provide(cls, unit)` replaces a dependency across the whole graph: every `dep(cls)`
@@ -32,6 +46,23 @@ This project follows Keep a Changelog and Semantic Versioning.
 
   停止的图可以再次启动；失败的推进可以重试；`init()` 失败之后调用 `start()` 会抛
   `LifecycleError` 而不是继续执行。
+
+### Documentation
+
+- New pages: What's New in 1.0, Patterns (test doubles, choosing an implementation from
+  configuration, hosting, retry), Versioning & Compatibility, Contributing and Governance.
+  The 0.10 release notes became "Upgrading from 0.9.x".
+
+  新增页面：1.0 新特性、常见用法、版本与兼容性、贡献指南与项目治理；中文站导航完成翻译。
+
+### Infrastructure
+
+- Releases are triggered by pushing a `vX.Y.Z` tag instead of a `releases/v*` branch; PyPI
+  publishing requires approval in the `publish` environment. CI type-checks tests, builds the
+  docs strictly, requires 95% coverage and checks PR titles against Conventional Commits.
+
+  发布改为推送 tag 触发，PyPI 发布需在 publish 环境审批；CI 增加文档严格构建、PR 标题检查，
+  覆盖率门槛提高到 95%。
 
 ## [0.10.0] — 2026-09-14
 
