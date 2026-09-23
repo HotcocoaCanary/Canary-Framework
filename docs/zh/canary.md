@@ -28,7 +28,7 @@ class Database(Canary):
 | `Unit()` | 无参构造。不运行任何钩子，依赖此时尚不可用。 |
 | `await unit.init()` | 沿依赖推进 `init` 阶段。 |
 | `await unit.start()` | 沿依赖推进 `start` 阶段。 |
-| `await unit.stop()` | 按台账逆序回收。 |
+| `await unit.stop()` | 停止本单元，再停止不再被需要的依赖。 |
 
 `async with unit` 是便利写法：进入时依次调用 `init()` 与 `start()`，退出时调用
 `stop()`。三个动作都经由本类的方法，因此子类的覆盖在这条路径上同样生效。
@@ -122,14 +122,38 @@ async with service:
 （`service.database = ...`）会抛 `AttributeError`：赋值只会改到这一个属性，图中其余单元
 仍然取回原来的实例。
 
-## `stop()` 是图的动作
+## `stop()` 是单元的动作 {#stop-is-a-unit-action}
 
-`init()` 与 `start()` 是单元的动作，沿依赖向下推进。`stop()` 不同：它回收整个作用域的
-台账，因此在图中任意一个单元上调用效果相同。
+三个动作都属于被调用的那个单元，`stop()` 与 `start()` 互为镜像：
+
+| | 顺序 | 在图上 |
+|---|---|---|
+| `start()` | 先依赖，后本单元 | 拉起本单元需要的依赖 |
+| `stop()` | 先本单元，后依赖 | 回收不再被其他单元使用的依赖 |
+
+`stop()` 停止本单元——除非它仍被使用，即有依赖者正在启动、运行或停止——再以同样的方式
+尝试它的每个依赖。停止根单元即回收整张图，因为它的依赖不再被任何单元使用：
 
 ```python
-await service.database.stop()     # 回收整张图，不只是 database
+await service.stop()        # service，然后 database 与 cache，最后 config
 ```
 
-原因是回收不能分治：`Database` 可能同时被多个单元依赖，单独停掉它会让还在使用它的单元
-失效。
+与仍在运行的单元共享的依赖继续运行：
+
+```python
+await root.left.start()
+await root.right.start()    # 二者都依赖 Shared
+await root.left.stop()      # left 停止；shared 继续运行，right 还需要它
+await root.right.stop()     # right，然后 shared
+```
+
+停止一个仍被使用的单元时，它被跳过，不报错。它的依赖仍会被尝试，但它们正被它使用，因此
+什么都不会停止：
+
+```python
+async with service:
+    await service.database.stop()    # service 仍在使用 database：什么都不会发生
+```
+
+同时停止一个单元与它的使用者，每个单元只停止一次。作用域持有整张依赖图，因此总是知道谁还
+在使用一个单元。

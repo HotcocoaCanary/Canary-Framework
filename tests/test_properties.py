@@ -1,18 +1,22 @@
 """性质测试：随机依赖图 × 随机钩子行为 × 随机调用时序，断言生命周期的不变量。
 
 图、每个钩子让出事件循环的次数与是否失败、调用方的时序（正常进出、``start()`` 进行中
-``stop()``、``start()`` 进行中被取消、停止后再次启动）都由 hypothesis 生成。耗时用"让出
-事件循环若干次"表示而不是真实的时间，因此每个例子都是确定的，失败时可以稳定复现。
+``stop()``、``start()`` 进行中被取消、停止后再次启动、随机启动与停止部分单元、只调用
+``start()``）都由 hypothesis 生成。耗时用"让出事件循环若干次"表示而不是真实的时间，因此每个例子都是确定的，
+失败时可以稳定复现。
 
 每个场景结束时都会再 ``stop()`` 一次，代表应用最终关闭。之后检查：
 
 1. **配对**：每个单元的事件序列形如 ``(start_begin [start_end] stop)*``——每次进入 ``@start``
    恰好被回收一次，且启动完成（如果完成了）一定早于回收，不会有资源在回收之后才获取。
+   失败或被取消的 ``@start`` 在下一次进入之前一定已被回收。
 2. **回收安全**：回收一个单元时，依赖它且仍持有资源的单元都已回收。
 3. **推进顺序**：一个单元开始某个阶段时，它的依赖都已完成该阶段。
 4. **``@init`` 只运行一次**。
 5. **异常如实**：调用方收到的异常都来自钩子，框架内部的异常不外泄；有钩子失败时调用方
    一定收到异常。
+6. **停止一个单元**：``stop()`` 返回后，它仍持有资源当且仅当它仍被使用。
+7. **失败的启动自行回收**：``start()`` 失败返回时，它为此获取的一切都已释放。
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
-from canary_framework import Canary, dep, init, start, stop
+from canary_framework import Canary, dep, init, scope_of, start, stop
 
 pytestmark = pytest.mark.integration
 
@@ -52,6 +56,9 @@ class Scenario:
     units: tuple[UnitSpec, ...]
     kind: str
     trigger: int
+    #: "partial" 场景中依次直接启动、再依次停止的单元
+    starts: tuple[int, ...] = ()
+    stops: tuple[int, ...] = ()
 
 
 rare_failure = st.builds(
@@ -74,8 +81,14 @@ def scenarios(draw: st.DrawFn) -> Scenario:
                 stop=draw(rare_failure),
             )
         )
-    kind = draw(st.sampled_from(["context", "stop_during_start", "cancel_start", "restart"]))
-    return Scenario(tuple(units), kind, draw(st.integers(0, 12)))
+    kind = draw(
+        st.sampled_from(
+            ["context", "stop_during_start", "cancel_start", "restart", "partial", "bare_start"]
+        )
+    )
+    picks = st.lists(st.integers(0, size - 1), max_size=size + 2)
+    starts, stops = (draw(picks), draw(picks)) if kind == "partial" else ([], [])
+    return Scenario(tuple(units), kind, draw(st.integers(0, 12)), tuple(starts), tuple(stops))
 
 
 Event = tuple[int, str]
@@ -87,8 +100,12 @@ def build(units: tuple[UnitSpec, ...], log: list[Event]) -> type[Canary]:
     def hook(index: int, phase: str, spec: Hook):  # type: ignore[no-untyped-def]
         async def run(self: Canary) -> None:
             log.append((index, f"{phase}_begin" if phase != "stop" else "stop"))
-            for _ in range(spec.ticks):
-                await asyncio.sleep(0)
+            try:
+                for _ in range(spec.ticks):
+                    await asyncio.sleep(0)
+            except asyncio.CancelledError:
+                log.append((index, f"{phase}_cancel"))
+                raise
             if spec.fails:
                 log.append((index, f"{phase}_raise"))
                 raise HookError(f"U{index}.{phase}")
@@ -104,7 +121,9 @@ def build(units: tuple[UnitSpec, ...], log: list[Event]) -> type[Canary]:
         namespace["on_start"] = start(hook(index, "start", spec.start))
         namespace["on_stop"] = stop(hook(index, "stop", spec.stop))
         classes.append(type(f"U{index}", (Canary,), namespace))
-    return type("Root", (Canary,), {f"d{i}": dep(c) for i, c in enumerate(classes)})
+    root = type("Root", (Canary,), {f"d{i}": dep(c) for i, c in enumerate(classes)})
+    root.units = classes  # type: ignore[attr-defined]
+    return root
 
 
 async def settle(awaitable: object, caught: list[BaseException]) -> None:
@@ -114,10 +133,19 @@ async def settle(awaitable: object, caught: list[BaseException]) -> None:
         caught.append(exc)
 
 
-async def drive(scenario: Scenario, root: Canary, caught: list[BaseException]) -> None:
+async def drive(
+    scenario: Scenario, root: Canary, caught: list[BaseException], log: list[Event]
+) -> None:
     async def ticks(n: int) -> None:
         for _ in range(n):
             await asyncio.sleep(0)
+
+    # 无法抛给调用方的错误（被取消的推进回滚时撤销钩子的失败）交给事件循环的异常处理器
+    asyncio.get_running_loop().set_exception_handler(
+        lambda _loop, context: (
+            caught.append(context["exception"]) if "exception" in context else None
+        )
+    )
 
     match scenario.kind:
         case "context":
@@ -132,6 +160,23 @@ async def drive(scenario: Scenario, root: Canary, caught: list[BaseException]) -
                 await ticks(scenario.trigger)
                 await settle(root.stop(), caught)
                 await settle(starting, caught)
+        case "partial":
+            await settle(root.init(), caught)
+            if not caught:
+                scope = scope_of(root)
+                units = [scope.instance(cls) for cls in type(root).units]  # type: ignore[attr-defined]
+                for index in scenario.starts:
+                    await settle(units[index].start(), caught)  # type: ignore[attr-defined]
+                for index in scenario.stops:
+                    await settle(units[index].stop(), caught)  # type: ignore[attr-defined]
+                    log.append((index, "stop_returned"))
+        case "bare_start":
+            await settle(root.init(), caught)
+            if not caught:
+                before = len(caught)
+                await settle(root.start(), caught)
+                if len(caught) > before:
+                    log.append((-1, "start_failed"))
         case "cancel_start":
             await settle(root.init(), caught)
             if not caught:
@@ -157,9 +202,10 @@ def check(scenario: Scenario, log: list[Event], caught: list[BaseException]) -> 
     units = scenario.units
     dependents = {i: [j for j, u in enumerate(units) if i in u.deps] for i in range(len(units))}
 
-    # 1. 配对：(start_begin [start_end] stop)*
+    # 1. 配对：(start_begin [start_end] stop)*；失败或被取消之后只能是 stop
+    watched = {"start_begin", "start_end", "start_raise", "start_cancel", "stop"}
     for index in range(len(units)):
-        sequence = [e for i, e in log if i == index and e in {"start_begin", "start_end", "stop"}]
+        sequence = [e for i, e in log if i == index and e in watched]
         state = "idle"
         for event in sequence:
             match state, event:
@@ -167,7 +213,9 @@ def check(scenario: Scenario, log: list[Event], caught: list[BaseException]) -> 
                     state = "starting"
                 case "starting", "start_end":
                     state = "started"
-                case (("starting" | "started"), "stop"):
+                case "starting", ("start_raise" | "start_cancel"):
+                    state = "failed"
+                case (("starting" | "started" | "failed"), "stop"):
                     state = "idle"
                 case _:
                     raise AssertionError(f"U{index}: {event!r} while {state}: {sequence}")
@@ -195,6 +243,13 @@ def check(scenario: Scenario, log: list[Event], caught: list[BaseException]) -> 
                 assert not still, f"U{index} reclaimed while {still} still depend on it"
                 holding.discard(index)
                 done["start"].discard(index)
+            case "stop_returned":
+                in_use = any(j in holding for j in dependents[index])
+                assert (index in holding) == in_use, (
+                    f"U{index} holds={index in holding} while in use={in_use} after stop()"
+                )
+            case "start_failed":
+                assert not holding, f"a failed start() left {sorted(holding)} running"
 
     # 5. 异常如实：只有钩子的失败（或取消），同一个失败不重复报告
     allowed = (HookError, asyncio.CancelledError)
@@ -205,9 +260,16 @@ def check(scenario: Scenario, log: list[Event], caught: list[BaseException]) -> 
         reported = [leaf for leaf in found if isinstance(leaf, HookError)]
         assert len({id(leaf) for leaf in reported}) == len(reported), f"reported twice: {exc!r}"
     if any(event.endswith("_raise") for _, event in log):
-        assert any(isinstance(leaf, HookError) for exc in caught for leaf in leaves(exc)), (
-            "a hook failed but no caller saw the failure"
-        )
+        # 回滚中撤销钩子的失败以 note 附在引发回滚的异常上（被取消时即 CancelledError）
+        notes = [
+            note
+            for exc in caught
+            for leaf in leaves(exc)
+            for note in getattr(leaf, "__notes__", ())
+        ]
+        assert any(isinstance(leaf, HookError) for exc in caught for leaf in leaves(exc)) or any(
+            "HookError" in note for note in notes
+        ), "a hook failed but no caller saw the failure"
 
 
 OK, FAIL = Hook(ticks=0, fails=False), Hook(ticks=0, fails=True)
@@ -245,5 +307,5 @@ def test_lifecycle_invariants_hold_for_any_graph_and_timing(scenario: Scenario) 
     log: list[Event] = []
     caught: list[BaseException] = []
     root = build(scenario.units, log)()
-    asyncio.run(drive(scenario, root, caught))
+    asyncio.run(drive(scenario, root, caught, log))
     check(scenario, log, caught)

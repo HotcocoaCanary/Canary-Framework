@@ -21,8 +21,8 @@ from canary_framework import (
 | 成员 | 说明 |
 |---|---|
 | `async init()` | 沿依赖推进 `init` 阶段。 |
-| `async start()` | 沿依赖推进 `start` 阶段。未先 `init()` 时抛 `LifecycleError`。 |
-| `async stop()` | 按台账逆序回收整个作用域。幂等。 |
+| `async start()` | 沿依赖推进 `start` 阶段。失败时先释放它启动的一切再抛出。未先 `init()` 时抛 `LifecycleError`。 |
+| `async stop()` | 停止本单元（有依赖者正在启动、运行或停止时跳过），再以同样的方式尝试它的依赖。在根单元上即整张图。幂等。 |
 | `async __aenter__()` | 依次调用 `init()` 与 `start()`，失败时回收并原样抛出。返回自身。 |
 | `async __aexit__(...)` | 调用 `stop()`，不吞掉异常。 |
 
@@ -53,9 +53,9 @@ class Database(Canary):
     async def connect(self) -> None: ...
 ```
 
-`start` 的前驱是 `init`。`stop` 不由 `advance()` 推进，由 `Canary.stop()` 按台账消费。
+`start` 的前驱是 `init`，由 `stop` 撤销。`stop` 不由 `advance()` 推进，由 `Canary.stop()` 按台账消费。
 
-### `class Phase(name, *, after=None)`
+### `class Phase(name, *, after=None, undo=None)`
 
 一个阶段。可调用，调用的效果是给方法打上本阶段的标记。
 
@@ -63,6 +63,7 @@ class Database(Canary):
 |---|---|
 | `name` | 阶段名。作用域用它作为推进记录与台账的键。 |
 | `after` | 前驱阶段。前驱未完成时推进本阶段抛 `LifecycleError`。 |
+| `undo` | 撤销本阶段的阶段。在本阶段失败或被取消的单元立即执行 `undo` 的钩子，失败的推进释放它启动的一切。`start` 的是 `stop`。 |
 
 ```python
 migrate = Phase("migrate", after=init)
@@ -73,12 +74,15 @@ migrate = Phase("migrate", after=init)
 ### `async advance(unit, phase)`
 
 在 `unit` 的依赖图上推进一次 `phase`：先推进依赖，再运行自身的钩子。同一个单元的同一个
-阶段只运行一次；互不依赖的依赖同时推进。
+阶段只运行一次；互不依赖的单元同时推进。依赖图先被检查——环、或前驱阶段尚未运行的单元，
+都在任何钩子运行之前报告。一个失败不会取消其他单元；`phase` 声明了 `undo` 时，失败的单元
+立即执行 `undo` 的钩子，这次调用在释放它启动的一切之后才抛出。
 
 ### `async unwind(scope, phase, *, undoing)`
 
-逆序消费 `undoing` 阶段的台账，在每个单元上执行 `phase` 的钩子。单个钩子失败不中断回收，
-异常被收集并作为列表返回。台账无论成败都会排空。开始之前先等待 `undoing` 及以它为前驱的
+释放 `undoing` 阶段台账中的全部单元，在每个单元上执行 `phase` 的钩子：仍被其他单元使用的
+单元在使用者之后释放。单个钩子失败不中断回收，异常被收集并作为列表返回。台账无论成败都会
+排空。开始之前先等待 `undoing` 及以它为前驱的
 阶段上进行中的推进结束。
 
 ```python
@@ -95,8 +99,10 @@ errors = await unwind(scope_of(unit), stop, undoing=start)
 | `phases` | `dict[tuple[type, str], Future]`，进行中或已完成的推进。失败推进的记录在运行它的 `advance()` 返回时清除。 |
 | `entered` | `dict[str, dict[type, object]]`，阶段名到进入该阶段的单元，以类型为键，按进入顺序。 |
 | `known` | `dict[str, Phase]`，本作用域推进过的阶段。 |
+| `graph` | `dict[type, tuple[type, ...]]`，依赖图：每个单元的依赖，按拓扑序。 |
+| `dependents` | `dict[type, list[type]]`，依赖图的反向边。 |
 
-`phases`、`entered` 与 `known` 用于观察，其结构不在[兼容性承诺](versioning.md#public-api)范围内。
+`phases`、`entered`、`known`、`graph` 与 `dependents` 用于观察，其结构不在[兼容性承诺](versioning.md#public-api)范围内。
 
 | 方法 | 说明 |
 |---|---|
@@ -104,6 +110,7 @@ errors = await unwind(scope_of(unit), stop, undoing=start)
 | `adopt(unit)` | 把实例登记进本作用域。 |
 | `provide(cls, unit)` | 把 `unit` 登记为整张图上 `cls` 的实例。须在生命周期开始之前调用。 |
 | `resolve(cls)` | `cls` 的实际类型：登记过替身时为替身的类型，否则为 `cls`。 |
+| `key_of(unit)` | `unit` 在本作用域内登记的类型；替身为它所替换的类型。 |
 
 ### `scope_of(unit)`
 
@@ -122,7 +129,7 @@ errors = await unwind(scope_of(unit), stop, undoing=start)
 | `CanaryError` | 基类，本身不抛出。 |
 | `DeclarationError` | `dep()` 的参数不是 `Canary` 子类。 |
 | `ConstructionError` | 单元需要构造参数。携带 `unit`。 |
-| `CircularDependencyError` | 依赖成环。携带 `cycle`，是实际走过的路径。 |
+| `CircularDependencyError` | 依赖成环；在任何钩子运行之前抛出。携带 `cycle`，即走到环上的路径。 |
 | `LifecycleError` | 在生命周期之外使用单元：`__init__` 中读取依赖，或前驱阶段未完成。 |
 
 回收阶段的多个失败合并为标准库的 `ExceptionGroup`，不是 `CanaryError` 的子类。

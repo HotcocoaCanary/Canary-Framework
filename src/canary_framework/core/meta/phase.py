@@ -25,13 +25,17 @@ class Phase:
     :param name: 阶段名。作用域用它作为推进记录与台账的键。
     :param after: 前驱阶段。声明之后，本阶段在某个单元上运行之前，该单元的前驱阶段
         必须已经完成，否则抛出 :class:`LifecycleError`。
+    :param undo: 撤销本阶段的阶段。声明之后，本阶段的钩子获取的东西由 *undo* 的钩子释放：
+        一个单元在本阶段失败或被取消时立即执行 *undo* 的钩子，停止一个单元时也执行它们。
+        ``start`` 的 *undo* 是 ``stop``。
     """
 
-    __slots__ = ("after", "name")
+    __slots__ = ("after", "name", "undo")
 
-    def __init__(self, name: str, *, after: Phase | None = None) -> None:
+    def __init__(self, name: str, *, after: Phase | None = None, undo: Phase | None = None) -> None:
         self.name = name
         self.after = after
+        self.undo = undo
 
     def __call__[F: Callable[..., object]](self, fn: F) -> F:
         """Mark *fn* as a hook of this phase, and return it unchanged.
@@ -46,5 +50,5 @@ class Phase:
 
 
 init = Phase("init")
-start = Phase("start", after=init)
 stop = Phase("stop")
+start = Phase("start", after=init, undo=stop)

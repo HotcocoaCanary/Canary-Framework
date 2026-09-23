@@ -29,7 +29,7 @@ Beyond that it stays a plain Python class: it can be subclassed, mixed in and ne
 | `Unit()` | Construct with no arguments. No hooks run; dependencies are not available yet. |
 | `await unit.init()` | Advance the `init` phase along dependencies. |
 | `await unit.start()` | Advance the `start` phase along dependencies. |
-| `await unit.stop()` | Reclaim the ledger in reverse. |
+| `await unit.stop()` | Stop this unit, then the dependencies nothing else still needs. |
 
 `async with unit` is the convenience form: entering calls `init()` then `start()`, leaving
 calls `stop()`. All three go through this class's own methods, so a subclass's overrides apply
@@ -127,15 +127,39 @@ Providing is refused once the scope already holds a `Database`, and when the ins
 `AttributeError`: it would change only that one attribute, leaving the rest of the graph on
 the original.
 
-## `stop()` is a graph action
+## `stop()` is a unit action {#stop-is-a-unit-action}
 
-`init()` and `start()` are unit actions: they advance down the dependencies. `stop()` is
-different — it reclaims the whole scope's ledger, so calling it on any unit in the graph has
-the same effect.
+All three actions belong to the unit they are called on, and `stop()` mirrors `start()`:
+
+| | Order | Across the graph |
+|---|---|---|
+| `start()` | dependencies first, then the unit | pulls up what the unit needs |
+| `stop()` | the unit first, then its dependencies | takes down what nothing else still uses |
+
+`stop()` stops the unit unless something still uses it — a dependent that is starting, running
+or stopping — and then tries each of its dependencies the same way. Stopping the root takes
+the whole graph down, because nothing else uses its dependencies:
 
 ```python
-await service.database.stop()     # reclaims the whole graph, not just database
+await service.stop()        # service, then database and cache, then config
 ```
 
-Reclamation cannot be divided: `Database` may be depended on by several units, and stopping it
-alone would break the ones still using it.
+A dependency shared with a unit that is still running stays up:
+
+```python
+await root.left.start()
+await root.right.start()    # both use Shared
+await root.left.stop()      # left stops; shared stays, right still needs it
+await root.right.stop()     # right, then shared
+```
+
+Stopping a unit that is still in use skips it without an error. Its dependencies are still
+tried, and they are in use by it, so nothing stops:
+
+```python
+async with service:
+    await service.database.stop()    # service still uses database: nothing happens
+```
+
+Stopping a unit and its user at the same time stops each unit once. The scope holds the whole
+dependency graph, so it always knows who still uses a unit.

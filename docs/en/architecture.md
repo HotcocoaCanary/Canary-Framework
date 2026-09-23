@@ -10,7 +10,7 @@ errors            exceptions, usable by any layer
    ▲
 meta              declaration: phase / dep / introspect
    ▲
-flow              lifecycle flow: scope / invoke / advance / unwind
+flow              lifecycle flow: scope / graph / invoke / advance / unwind
    ▲
 canary            facade: the Canary base class and dep()
 ```
@@ -30,9 +30,10 @@ This is not merely documented — `tests/test_layering.py` parses every module's
 | `core/meta/dep.py` | The `Dep` descriptor |
 | `core/meta/introspect.py` | One MRO walk reading dependencies and hooks, cached per class |
 | `core/flow/scope.py` | `Scope`, `scope_of`, no-argument construction |
+| `core/flow/graph.py` | Building the dependency graph and detecting cycles |
 | `core/flow/invoke.py` | Calling one hook |
-| `core/flow/advance.py` | Advancing one phase along dependencies |
-| `core/flow/unwind.py` | Reclaiming the ledger in reverse |
+| `core/flow/advance.py` | Advancing a phase over the graph, dependencies first |
+| `core/flow/unwind.py` | Reclaiming over the graph, dependents first |
 | `core/canary.py` | The `Canary` base class and `dep()` |
 
 ## Markers, not rewriting
@@ -59,32 +60,53 @@ Hooks resolve by **attribute name**, so the semantics match ordinary methods:
 - A subclass overriding it without re-marking it removes the hook.
 - Mixin hooks under different names all apply, base class first.
 
+## The dependency graph
+
+The first time a unit is advanced, it joins the scope's dependency graph together with
+everything it depends on. Nodes are the types units are registered under; edges come from
+`dep()` declarations, resolved through `Scope.provide()` substitutions. The graph is static —
+`dep()` is a class-level declaration and substitutions are refused once the lifecycle has begun
+— so it is built once and never changes.
+
+Building it is an iterative depth-first walk. A **cycle** is found there, before any hook runs,
+and reported with the path that reaches it. A node joins only after its dependencies have, so
+the graph's insertion order is itself a topological order.
+
 ## The two rules
 
-**Advancing** is the only recursion. What is memoised is the advance itself (a future) rather
-than a done-flag, so "not started / in progress / finished" needs no separate state machine:
-key absent, future pending, future done. Cycle detection rides on the same thing — a cycle is
-exactly a unit that is not finished yet and sits on the current path.
+**Advancing** runs dependencies first. Every node the call reaches gets a task that waits for
+its dependencies and then runs its hooks, so independent units advance concurrently and nothing
+recurses. What is recorded is the advance itself (a future) rather than a done-flag, so "not
+started / in progress / finished" needs no state machine: key absent, future pending, future
+done. A node another call is already advancing is awaited, not run again.
 
-Depth-first plus memoisation produces a completion order that is already a valid topological
-order, so there is no separate topological sort in the framework.
+**Releasing** runs the unit first. Releasing a unit skips it while something still uses it —
+a dependent that is starting, running or stopping — and otherwise runs its undo hooks; either
+way it then tries each dependency the same way, concurrently, each in a task of its own. A unit
+that was skipped or never ran is passed through once per call; a unit that actually stopped
+always carries on to its dependencies, since one of them may have just lost its last user.
+The work of one call is therefore proportional to the size of the graph.
 
-**Unwinding** is the only rule that does not recurse. A dependency graph is not a tree, so
-reclamation runs linearly over the ledger in reverse. This is the one asymmetry in the model:
-construction divides, reclamation does not.
+The two rules mirror each other on the same graph, and that symmetry is what makes `stop()` a
+unit action like `init()` and `start()`. A phase names the phase that undoes it with `undo`;
+`start`'s is `stop`.
 
-## Concurrency
+## Concurrency and failure
 
-A unit's dependencies advance concurrently, scheduled by dependency — each unit waits only on
-its own dependencies. When one fails, its siblings are cancelled and awaited, and the exception
-group is reduced back to the single real failure.
+A failure does not cancel other units: every node finishes on its own. A node whose
+dependencies did not all complete runs no hooks and fails with the same exception. When the
+phase has an `undo`, a node that fails or is cancelled releases itself at once — without the
+in-use check, since the dependents waiting on it never used it — and then tries its
+dependencies. So a failed advance returns only after everything it brought up has been
+released, except what other running units still use.
 
-Under concurrency the ledger order is still a valid topological order (a unit enters only after
-all of its dependencies have completed), so reverse reclamation remains correct.
+The failures are then reduced to the real ones — a failure reached through several paths is
+reported once. Waiting on another node's advance never cancels it. When the caller cancels an
+advance, the same rollback completes before the cancellation propagates; undo errors that a
+cancellation cannot carry go to the event loop's exception handler.
 
-A single dependency is awaited directly to save a task, but every so many levels the call stack
-is handed back to the event loop, so dependency-chain depth is not bounded by Python's
-recursion limit.
+The ledger records which units entered a phase: it is how a unit that failed halfway through
+`@start` is known to need `@stop`.
 
 ## Invariants
 
@@ -95,5 +117,8 @@ recursion limit.
 5. Every `@init` completes before any `@start` runs.
 6. `stop()` is the single reclamation path, shared by success and failure, and is idempotent.
    It undoes the `start` records it reclaims, so the graph can start again.
-7. The framework knows no shells; hosting is either a context manager or the three explicit
+7. A unit is never stopped while a unit that depends on it is starting, running or stopping.
+8. A failed `start()` returns only after releasing what it brought up.
+9. Cycles are reported before any hook runs.
+10. The framework knows no shells; hosting is either a context manager or the three explicit
    methods.

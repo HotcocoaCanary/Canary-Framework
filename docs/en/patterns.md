@@ -82,8 +82,8 @@ dependencies are static, so every declared unit is brought up whether it is used
 
 ## Hooks that fail halfway
 
-A unit enters the ledger as soon as its `@start` begins, so a `@start` that raises halfway is
-still reclaimed by `@stop`. Write `@stop` to release only what was actually acquired — above,
+A `@start` that raises halfway runs its unit's `@stop` at once, and `start()` then releases the
+dependencies it brought up. Write `@stop` to release only what was actually acquired — above,
 `driver` defaults to `None` for exactly this reason.
 
 ## Blocking work in hooks
@@ -102,8 +102,8 @@ Quick synchronous hooks — reading a setting, building a small object — are f
 
 ## Bounding shutdown
 
-`stop()` waits for every `@stop` in turn, and for any `start()` still in flight. To give
-shutdown a deadline, wrap it in `asyncio.timeout`:
+`stop()` waits for every `@stop` — dependents first, independent units concurrently — and for
+any `start()` still in flight. To give shutdown a deadline, wrap it in `asyncio.timeout`:
 
 ```python
 try:
@@ -113,8 +113,8 @@ except TimeoutError:
     log.warning("shutdown timed out")
 ```
 
-The hook that was running when the deadline hit is cancelled and not retried. Units that had not
-been reached yet stay in the ledger, so calling `stop()` again carries on from there.
+Hooks running when the deadline hits are cancelled and not retried. Units not reached yet stay
+in the ledger, so calling `stop()` again carries on from there.
 
 ## Hosting
 
@@ -157,8 +157,8 @@ asyncio.run(main())
 
 ## Restart and retry
 
-`stop()` undoes `start`, so a stopped graph can start again, and a failed advance can simply be
-called again:
+`stop()` undoes `start`, so a stopped graph can start again. A failed `start()` has already
+released what it brought up, so retrying is just calling it again:
 
 ```python
 for attempt in range(3):
@@ -166,7 +166,6 @@ for attempt in range(3):
         await service.start()
         break
     except ConnectionError:
-        await service.stop()
         if attempt == 2:
             raise
         await asyncio.sleep(2**attempt)

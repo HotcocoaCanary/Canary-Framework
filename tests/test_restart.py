@@ -87,7 +87,7 @@ async def test_a_failed_init_can_be_retried_and_start_waits_for_it() -> None:
     assert attempts == [0, 1]
 
 
-async def test_retrying_without_stop_does_not_reclaim_a_unit_twice() -> None:
+async def test_a_failed_start_releases_itself_so_retrying_needs_no_stop() -> None:
     stopped: list[str] = []
     attempts: list[int] = []
 
@@ -109,10 +109,11 @@ async def test_retrying_without_stop_does_not_reclaim_a_unit_twice() -> None:
     await service.init()
     with pytest.raises(RuntimeError):
         await service.start()
+    assert stopped == ["flaky"], "the failed start released what it had entered"
+
     await service.start()
     await service.stop()
-
-    assert stopped == ["flaky"]
+    assert stopped == ["flaky", "flaky"], "every entry into @start is paired with one @stop"
 
 
 async def test_a_phase_that_requires_start_must_run_again_after_a_restart() -> None:

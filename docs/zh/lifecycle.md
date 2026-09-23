@@ -26,7 +26,7 @@ class Database(Canary):
 钩子可以是同步的，也可以是 `async def`——框架按返回值判断是否需要等待，因此返回协程的
 同步函数同样成立。
 
-## 推进：沿依赖递归
+## 推进：依赖在前 {#advancing}
 
 `await unit.init()` 在依赖图上推进一次 `init`：先推进依赖，再运行自身的钩子。
 
@@ -45,10 +45,12 @@ class Service(Canary):
 await Service().init()      # Config -> Database -> Service
 ```
 
-两条性质：
+三条性质：
 
 - **同一个单元的同一个阶段只运行一次**，无论有多少单元依赖它。
-- **互不依赖的依赖同时推进**，因此耗时贴着依赖链的关键路径，而不是所有单元之和。
+- **互不依赖的单元同时推进**，因此耗时贴着依赖链的关键路径，而不是所有单元之和。
+- **图检查通过之前不运行任何钩子。** 依赖图先于一切构建，因此环、或 `start()` 时某个单元的
+  `@init` 尚未运行，都在任何钩子运行之前报告。
 
 ## 栅栏
 
@@ -74,18 +76,19 @@ LifecycleError: Service: @init has not run, call it before @start
 单元一进入 `@start` 就被记入台账——记的是"进入"而非"完成"，因此启动到一半失败的单元
 同样会被回收。
 
-`stop()` 逆序消费台账，是唯一的回收路径：
+`stop()` 是唯一的回收路径。它停止本单元（除非仍被使用），再以同样的方式尝试它的每个依赖：
 
 | 调用时机 | 行为 |
 |---|---|
-| 从未启动 | 台账为空，空操作 |
-| 只 `init()` 过 | `start` 台账为空，空操作 |
-| 正常启动之后 | 逆序回收 |
-| `start()` 中途失败 | 回收进入过 `@start` 的单元，含失败的那一个 |
-| `start()` 仍在进行 | 等它结束（无论成败），再逆序回收 |
-| 重复调用 | 台账已排空，空操作 |
+| 从未启动 | 本单元无可停止；仍会尝试它的依赖 |
+| 只 `init()` 过 | 没有单元进入过 `@start`，空操作 |
+| 正常启动之后 | 停止本单元，再停止不再被其他单元使用的依赖 |
+| 仍被使用——有依赖者正在启动、运行或停止 | 跳过本单元，不报错；仍会尝试它的依赖 |
+| `start()` 仍在进行 | 等它结束，再作判断 |
+| 重复调用 | 已无可回收，空操作 |
 
-一条规则覆盖全部六种情形，因此不需要状态机。
+被多个单元共享的依赖，在最后一个使用者停止之后才停止。示例见
+[单元 › `stop()` 是单元的动作](canary.md#stop-is-a-unit-action)。
 
 由于 `stop()` 会等待进行中的 `start()`，不要在同一张图的 `@start` 钩子里调用它：那会等待
 自身。需要限时关闭时，用 `asyncio.timeout` 包住这次调用。
@@ -104,48 +107,36 @@ async with service:     # start、stop
 
 以 `after=start` 声明的阶段随 `start` 一起撤销，重启之后需要重新推进。
 
-失败或被取消的推进只保留记录到运行它的那次调用返回为止——因此在同一次 `start()` 中，
-失败不会被其他路径再运行一遍——之后再次调用会重新运行。已经完成该阶段的单元不会重复运行，
-重新进入 `@start` 的单元在台账中只保留一条：
+失败的 `start()` 已经释放了它获取的东西（见下文），因此重试就是再调用一次。已经完成该阶段
+的单元不会重复运行：
 
 ```python
 try:
     await service.start()
 except ConnectionError:
-    await service.stop()     # 回收已启动的部分
-await service.start()        # 重试
+    await service.start()    # 失败的那次已经自行清理
 ```
 
 ## 失败
 
-**启动失败。** 任一 `@start` 抛出时，台账里的单元逆序回收，随后原样抛出最初的异常：
+**启动失败。** `start()` 自行清理：
 
-```python
-class Leaf(Canary):
-    @start
-    def go(self) -> None: ...
+- `@start` 抛出的单元立即执行自己的 `@stop`；
+- 依赖它的单元不启动，并释放它们正在等待的依赖；
+- 与它同时启动的单元不会被取消——它们执行完毕，若不再被其他单元使用则随即释放。
 
-    @stop
-    def bye(self) -> None:
-        print("leaf 回收")
+`start()` 抛出时，它启动的一切都已停止，仍被其他运行中单元使用的除外。以 `X → A、B`、
+`A → C`、`B → C`、`B` 失败为例：
 
-
-class Root(Canary):
-    leaf = dep(Leaf)
-
-    @start
-    def go(self) -> None:
-        raise RuntimeError("启动失败")
-
-
-async with Root():        # 打印 "leaf 回收"，然后抛出 RuntimeError
-    ...
+```
+C.start → A.start → B.start ✗ → B.stop → A.stop → C.stop → start() 抛出 B 的异常
 ```
 
-回收过程中再出错时，该异常作为 note 附在最初那个异常上，不会盖住它。
+回滚中 `@stop` 抛出的异常作为 note 附在最初那个异常上。调用方取消 `start()` 时，同样的回滚
+在取消传播之前完成；取消无法携带 `@stop` 的异常，因此它们交给事件循环的异常处理器。
 
-**多个单元同时失败。** 并发推进时若有多个单元同时抛出，异常合并为一个
-`ExceptionGroup`；只有一个失败时原样抛出，与顺序推进行为一致。
+**多个单元同时失败。** 一个失败不会取消其他单元。多个单元失败时合并为一个
+`ExceptionGroup`；只有一个失败时原样抛出，经多条路径到达的同一个失败只报告一次。
 
 **回收失败。** 单个 `@stop` 抛出不中断整轮回收，其余单元照常回收，最后合并为一个
 `ExceptionGroup` 抛出，即使只有一个：
@@ -163,12 +154,16 @@ ExceptionGroup: 1 error(s) while stopping
 ```python
 from canary_framework import Phase, advance, init
 
-migrate = Phase("migrate", after=init)
+rollback = Phase("rollback")
+migrate = Phase("migrate", after=init, undo=rollback)
 
 
 class Schema(Canary):
     @migrate
     async def apply(self) -> None: ...
+
+    @rollback
+    async def revert(self) -> None: ...
 
 
 await unit.init()
@@ -177,7 +172,8 @@ await advance(unit, migrate)
 
 `after` 声明前驱：前驱阶段尚未完成时推进本阶段会抛 `LifecycleError`，而不是静默跳过。
 
-需要给新阶段配一个回收阶段时用 `unwind()`，配对关系写在调用点：
+`undo` 声明撤销本阶段的阶段，与 `stop` 撤销 `start` 完全相同：`@migrate` 失败的单元立即执行
+它的 `@rollback`，失败的推进释放它为此启动的一切。撤销全部已迁移的单元：
 
 ```python
 from canary_framework import scope_of, unwind
