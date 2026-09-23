@@ -83,6 +83,36 @@ class Database(Canary):
 单元在 `@start` 开始时就已记入台账，因此执行到一半抛出的 `@start` 同样会由 `@stop` 回收。
 `@stop` 应只释放实际获取到的资源——上例中 `driver` 默认为 `None` 正是为此。
 
+## 钩子里的阻塞操作
+
+同步钩子在事件循环里执行。耗时的同步钩子会拖住所有与它一起推进的单元，而不只是依赖它的
+单元。把阻塞调用放到线程里：
+
+```python
+class Index(Canary):
+    @init
+    async def build(self) -> None:
+        self.index = await asyncio.to_thread(build_index, self.corpus.path)
+```
+
+很快就能完成的同步钩子——读一个配置、构造一个小对象——保持原样即可。
+
+## 限时关闭
+
+`stop()` 逐个等待每个 `@stop`，也会等待仍在进行的 `start()`。需要给关闭设期限时，用
+`asyncio.timeout` 包住它：
+
+```python
+try:
+    async with asyncio.timeout(10):
+        await service.stop()
+except TimeoutError:
+    log.warning("shutdown timed out")
+```
+
+到期时正在执行的那个钩子被取消，不会重试。还没轮到的单元留在台账里，再调用一次 `stop()`
+会从那里继续回收。
+
 ## 接入宿主
 
 框架不认识任何外壳。宿主接收异步上下文管理器时：

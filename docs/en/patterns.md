@@ -86,6 +86,36 @@ A unit enters the ledger as soon as its `@start` begins, so a `@start` that rais
 still reclaimed by `@stop`. Write `@stop` to release only what was actually acquired — above,
 `driver` defaults to `None` for exactly this reason.
 
+## Blocking work in hooks
+
+Synchronous hooks run on the event loop. A slow one holds up every unit advancing alongside it,
+not just its dependents. Move blocking calls to a thread:
+
+```python
+class Index(Canary):
+    @init
+    async def build(self) -> None:
+        self.index = await asyncio.to_thread(build_index, self.corpus.path)
+```
+
+Quick synchronous hooks — reading a setting, building a small object — are fine as they are.
+
+## Bounding shutdown
+
+`stop()` waits for every `@stop` in turn, and for any `start()` still in flight. To give
+shutdown a deadline, wrap it in `asyncio.timeout`:
+
+```python
+try:
+    async with asyncio.timeout(10):
+        await service.stop()
+except TimeoutError:
+    log.warning("shutdown timed out")
+```
+
+The hook that was running when the deadline hit is cancelled and not retried. Units that had not
+been reached yet stay in the ledger, so calling `stop()` again carries on from there.
+
 ## Hosting
 
 The framework knows nothing about shells. Hosts that take an async context manager:
