@@ -107,13 +107,25 @@ class FakeDatabase(Database):
         self.pool = InMemoryPool()
 ```
 
-To swap an instance in the graph, assign the attribute:
+To swap it into the graph, provide it to the scope before the lifecycle begins:
 
 ```python
+from canary_framework import scope_of
+
 service = UserService()
-await service.init()
-service.database = FakeDatabase()
+scope_of(service).provide(Database, FakeDatabase())
+
+async with service:
+    ...
 ```
+
+Every `dep(Database)` in the graph now returns that instance, and it takes part in the
+lifecycle as its own type: its own hooks run, and the dependencies it declares advance first.
+
+Providing is refused once the scope already holds a `Database`, and when the instance is not a
+`Database`. Assigning to a dependency attribute (`service.database = ...`) raises
+`AttributeError`: it would change only that one attribute, leaving the rest of the graph on
+the original.
 
 ## `stop()` is a graph action
 

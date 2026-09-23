@@ -6,6 +6,9 @@
 推进记录保存的是推进本身而非完成标志：键不存在表示未开始，未完成表示进行中（等待即可），
 已完成表示结束。三种情形因此无需另设状态机；环检测也不需要额外的"进行中"集合，因为环的
 唯一表现就是遇到一个尚未完成、且位于当前路径上的单元。
+
+失败或取消的推进在结束时移除自己的记录：正在等待它的调用方收到同一个异常，之后再推进
+则重新运行，因此失败可以重试。
 """
 
 from __future__ import annotations
@@ -53,19 +56,25 @@ async def _advance(cls: type, phase: Phase, scope: Scope, path: tuple[type, ...]
 
     _require_predecessor(cls, phase, scope)
 
+    scope.known.setdefault(phase.name, phase)
     future = scope.phases[key] = asyncio.get_running_loop().create_future()
     future.add_done_callback(_settled)
     try:
-        await _advance_deps(cls, phase, scope, (*path, cls))
+        # 按实际类型展开依赖：经 provide 登记的替身可能声明了不同的依赖。
+        await _advance_deps(scope.resolve(cls), phase, scope, (*path, cls))
         unit = scope.instance(cls)
-        # 进入即记账：推进到一半失败的单元同样需要回收。
-        scope.entered[phase.name].append(unit)
+        # 进入即记账：推进到一半失败的单元同样需要回收。重新进入时移到末尾，保持拓扑序。
+        ledger = scope.entered[phase.name]
+        ledger.pop(cls, None)
+        ledger[cls] = unit
         for hook in hooks_of(unit, phase):
             await invoke(hook)
     except asyncio.CancelledError:
+        _forget(scope, key, future)
         future.cancel()
         raise
     except BaseException as exc:
+        _forget(scope, key, future)
         future.set_exception(exc)
         raise
     else:
@@ -102,6 +111,15 @@ def _require_predecessor(cls: type, phase: Phase, scope: Scope) -> None:
     done = scope.phases.get((cls, phase.after.name))
     if done is None or not done.done():
         raise LifecycleError(f"{cls.__name__}: {phase.after} has not run, call it before {phase}")
+
+
+def _forget(scope: Scope, key: tuple[type, str], future: asyncio.Future[None]) -> None:
+    """Drop a failed advance's record, so that advancing again runs it again.
+
+    移除一次失败推进的记录。只移除自己那一条，以免误删之后的新推进。
+    """
+    if scope.phases.get(key) is future:
+        del scope.phases[key]
 
 
 def _settled(future: asyncio.Future[None]) -> None:

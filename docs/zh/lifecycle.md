@@ -86,6 +86,31 @@ LifecycleError: Service: @init has not run, call it before @start
 
 一条规则覆盖全部五种情形，因此不需要状态机。
 
+## 再次启动
+
+回收时，被回收单元在 `start` 上的推进记录一并撤销，因此停止之后可以再次启动。`@init`
+没有配对的回收阶段，它的记录保留，重启时不会再次运行：
+
+```python
+async with service:     # init、start、stop
+    ...
+async with service:     # start、stop
+    ...
+```
+
+以 `after=start` 声明的阶段随 `start` 一起撤销，重启之后需要重新推进。
+
+失败或被取消的推进不留记录，因此再次调用会重新运行。已经完成该阶段的单元不会重复运行，
+重新进入 `@start` 的单元在台账中只保留一条：
+
+```python
+try:
+    await service.start()
+except ConnectionError:
+    await service.stop()     # 回收已启动的部分
+await service.start()        # 重试
+```
+
 ## 失败
 
 **启动失败。** 任一 `@start` 抛出时，台账里的单元逆序回收，随后原样抛出最初的异常：

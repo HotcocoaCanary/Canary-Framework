@@ -90,6 +90,34 @@ that fails halfway is reclaimed too.
 
 One rule covers all five cases, which is why there is no state machine.
 
+## Starting again
+
+Reclamation also undoes the record of `start` for each unit it reclaims, so a stopped graph
+can start again. `@init` has no reclamation phase, so its record stays and it does not run a
+second time:
+
+```python
+async with service:     # init, start, stop
+    ...
+async with service:     # start, stop
+    ...
+```
+
+A phase declared with `after=start` is undone along with `start`, and has to be advanced
+again after the restart.
+
+A failed or cancelled advance leaves no record, so calling it again runs it again. Units that
+had already completed the phase are not run twice, and a unit that re-enters `@start` keeps
+one entry in the ledger:
+
+```python
+try:
+    await service.start()
+except ConnectionError:
+    await service.stop()     # reclaim what started
+await service.start()        # retry
+```
+
 ## Failure
 
 **Startup failure.** When any `@start` raises, the ledger is unwound in reverse and the

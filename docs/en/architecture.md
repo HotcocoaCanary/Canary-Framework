@@ -94,5 +94,6 @@ recursion limit.
 4. Dependencies exist from `@init` onward.
 5. Every `@init` completes before any `@start` runs.
 6. `stop()` is the single reclamation path, shared by success and failure, and is idempotent.
+   It undoes the `start` records it reclaims, so the graph can start again.
 7. The framework knows no shells; hosting is either a context manager or the three explicit
    methods.
