@@ -11,8 +11,8 @@
 一个单元失败时不取消其他单元：每个单元各自完成。依赖未能全部进入的单元不运行钩子，以同一
 个异常失败。阶段声明了 ``leave`` 时，失败或被取消的单元立即离开（见
 :mod:`~canary_framework.core.flow.leave`），因此一次失败的进入返回时，它为此获取的一切都已
-释放，仍被其他单元使用的除外。没有声明 ``leave`` 的阶段，失败的单元在本次调用返回时回到
-空闲，因此可以重试。
+释放，仍被其他单元使用的除外。没有声明 ``leave`` 的阶段，失败的单元没有获取任何东西，
+立即回到空闲，因此同样可以重试。
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from collections.abc import Awaitable
 from canary_framework.core.errors import LifecycleError
 from canary_framework.core.flow.graph import closure, include
 from canary_framework.core.flow.invoke import invoke
-from canary_framework.core.flow.leave import rollback
+from canary_framework.core.flow.leave import rollback, wait_all
 from canary_framework.core.flow.scope import Scope, State, scope_of
 from canary_framework.core.meta.introspect import hooks_of
 from canary_framework.core.meta.phase import Phase
@@ -55,9 +55,9 @@ async def _run(scope: Scope, phase: Phase, nodes: list[type]) -> None:
     """Enter *phase* on every idle node, each once its dependencies have entered.
 
     认领空闲的节点，各建一个任务；其余节点只被等待。每个任务各自完成——失败不取消其他
-    任务——之后把真实的失败汇总抛出。调用方取消时，取消全部任务并等待它们离开完毕：取消
-    之前已发生的真实失败优先抛出；否则照常抛出取消，离开钩子的失败交给事件循环的异常
-    处理器——取消本身无法携带它们。
+    任务，失败的节点由自己回滚——之后把真实的失败汇总抛出。调用方取消时，取消全部任务并
+    等待它们回滚完毕：取消之前已发生的真实失败优先抛出；否则照常抛出取消，离开钩子的失败
+    交给事件循环的异常处理器——取消本身无法携带它们。
     """
     for cls in nodes:  # 正在离开的节点先离开完，再决定是否认领
         while (leaving := scope.track(cls, phase).leaving) is not None:
@@ -82,24 +82,15 @@ async def _run(scope: Scope, phase: Phase, nodes: list[type]) -> None:
         for cls in claimed
     ]
     try:
-        if tasks:
-            try:
-                await asyncio.wait(tasks)
-            except asyncio.CancelledError:
-                for task in tasks:
-                    task.cancel()
-                await asyncio.wait(tasks)
-                _raise_failures(tasks)  # 取消之前已发生的真实失败优先，不被取消吞掉
-                for error in leave_errors:
-                    loop.call_exception_handler(
-                        {"message": "error while leaving a cancelled enter", "exception": error}
-                    )
-                raise
-            _raise_failures(tasks)
-    finally:
-        for cls in claimed:  # 没有 leave 的阶段：失败的节点回到空闲，以便重试
-            if (track := scope.track(cls, phase)).state is State.FAILED:
-                track.reset()
+        await wait_all(tasks)
+    except asyncio.CancelledError:
+        _raise_failures(tasks)  # 取消之前已发生的真实失败优先，不被取消吞掉
+        for error in leave_errors:
+            loop.call_exception_handler(
+                {"message": "error while leaving a cancelled enter", "exception": error}
+            )
+        raise
+    _raise_failures(tasks)
     if nodes[-1] not in claimed:  # 根节点正由另一次调用进入：等它的结果
         root = outcomes[nodes[-1]]
         await asyncio.wait([root])
@@ -198,11 +189,9 @@ def _raise_failures(tasks: list[asyncio.Task[None]]) -> None:
 
     抛出已结束任务中的真实失败，忽略取消。
     """
+    # 以 CancelledError 结束的任务本身就是 cancelled()，这里不会遇到取消
     failures = [task.exception() for task in tasks if not task.cancelled()]
-    real = [
-        exc for exc in failures if exc is not None and not isinstance(exc, asyncio.CancelledError)
-    ]
-    if real:
+    if real := [exc for exc in failures if exc is not None]:
         raise _one_failure(real)
 
 
