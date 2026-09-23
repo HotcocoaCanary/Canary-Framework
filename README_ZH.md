@@ -124,7 +124,7 @@ app = FastAPI(lifespan=lifespan)
 - [为什么选 Canary](https://hotcocoacanary.github.io/Canary-Framework/zh/why-canary/)——适合与不适合的
   场景，以及与 dishka、dependency-injector、injector、FastAPI `Depends` 的实测对比
 - [文档站](https://hotcocoacanary.github.io/Canary-Framework/zh/)——
-  [1.0 新特性](https://hotcocoacanary.github.io/Canary-Framework/zh/whats-new/)、
+  [1.1 新特性](https://hotcocoacanary.github.io/Canary-Framework/zh/whats-new/)、
   [常见用法](https://hotcocoacanary.github.io/Canary-Framework/zh/patterns/)、
   [从 0.9.x 升级](https://hotcocoacanary.github.io/Canary-Framework/zh/upgrading-from-0.9/)
 - 完整示例——FastAPI 服务与常驻守护进程：

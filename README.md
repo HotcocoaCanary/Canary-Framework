@@ -132,7 +132,7 @@ breaking changes before 2.0, and removals are deprecated for at least one minor 
   where it does not, and a measured comparison with dishka, dependency-injector, injector and
   FastAPI `Depends`
 - [Documentation](https://hotcocoacanary.github.io/Canary-Framework/) —
-  [What's new in 1.0](https://hotcocoacanary.github.io/Canary-Framework/whats-new/),
+  [What's new in 1.1](https://hotcocoacanary.github.io/Canary-Framework/whats-new/),
   [patterns](https://hotcocoacanary.github.io/Canary-Framework/patterns/),
   [upgrading from 0.9.x](https://hotcocoacanary.github.io/Canary-Framework/upgrading-from-0.9/)
 - Complete examples — a FastAPI service and a long-running daemon:
