@@ -13,8 +13,8 @@ from collections.abc import Callable
 from typing import NamedTuple, cast
 from weakref import WeakKeyDictionary
 
-from canary_framework.core.declare.dep import Dep
-from canary_framework.core.declare.phase import PHASES, Phase
+from canary_framework.core.meta.dep import Dep
+from canary_framework.core.meta.phase import PHASES, Phase
 
 _Bound = Callable[[], object]
 

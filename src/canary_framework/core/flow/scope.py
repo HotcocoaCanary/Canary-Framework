@@ -10,9 +10,9 @@ import inspect
 from asyncio import Future
 from collections import defaultdict
 
-from canary_framework.core.declare.dep import SCOPE
-from canary_framework.core.declare.phase import Phase
 from canary_framework.core.errors import ConstructionError, LifecycleError
+from canary_framework.core.meta.dep import SCOPE
+from canary_framework.core.meta.phase import Phase
 
 
 class Scope:

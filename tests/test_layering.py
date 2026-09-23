@@ -1,7 +1,7 @@
 """分层：依赖方向必须严格单向。
 
-这条测试把架构从"文档里的说法"变成"可执行的约束"：任何一次让 declare 反过来 import
-runtime 的改动，都会在这里失败。
+这条测试把架构从"文档里的说法"变成"可执行的约束"：任何一次让 meta 反过来 import
+flow 的改动，都会在这里失败。
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent / "src" / "canary_framewor
 # 层号越小越底层；一个模块只能 import 同层或更低层。
 LAYERS = {
     "core.errors": 0,
-    "core.declare": 1,
-    "core.runtime": 2,
+    "core.meta": 1,
+    "core.flow": 2,
     "core.canary": 3,
     "core": 4,
     "": 5,

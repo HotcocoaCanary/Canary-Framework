@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import asyncio
 
-from canary_framework.core.declare.introspect import deps_of, hooks_of
-from canary_framework.core.declare.phase import Phase
 from canary_framework.core.errors import CircularDependencyError, LifecycleError
-from canary_framework.core.runtime.invoke import invoke
-from canary_framework.core.runtime.scope import Scope, scope_of
+from canary_framework.core.flow.invoke import invoke
+from canary_framework.core.flow.scope import Scope, scope_of
+from canary_framework.core.meta.introspect import deps_of, hooks_of
+from canary_framework.core.meta.phase import Phase
 
 #: 调用栈每隔这么多层交还事件循环一次。单依赖本可直接 ``await`` 以省去一个任务，但连续
 #: 嵌套会触及 Python 的递归上限，因此每隔若干层改为创建任务。

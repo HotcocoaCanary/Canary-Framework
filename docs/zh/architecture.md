@@ -8,14 +8,14 @@
 ```
 errors            异常，任何一层都可使用
    ▲
-declare           声明层：phase / dep / introspect
+meta              声明层：phase / dep / introspect
    ▲
-runtime           运行层：scope / invoke / advance / unwind
+flow              运行层：scope / invoke / advance / unwind
    ▲
 canary            门面：Canary 基类与 dep()
 ```
 
-依赖方向严格单向：`canary → runtime → declare → errors`。只有 `canary` 同时依赖两边，
+依赖方向严格单向：`canary → flow → meta → errors`。只有 `canary` 同时依赖两边，
 那正是门面的职责。
 
 这条约束不只是文档里的说法——`tests/test_layering.py` 用 `ast` 解析每个模块的 import
@@ -26,13 +26,13 @@ canary            门面：Canary 基类与 dep()
 | 模块 | 内容 |
 |---|---|
 | `core/errors.py` | 五个异常，全部继承 `CanaryError` |
-| `core/declare/phase.py` | `Phase` 与 `init` / `start` / `stop` |
-| `core/declare/dep.py` | `Dep` 描述符 |
-| `core/declare/introspect.py` | 一次 MRO 遍历读出依赖与钩子，按类缓存 |
-| `core/runtime/scope.py` | `Scope`、`scope_of`、无参构造 |
-| `core/runtime/invoke.py` | 调用一个钩子 |
-| `core/runtime/advance.py` | 沿依赖递归推进一个阶段 |
-| `core/runtime/unwind.py` | 按台账逆序回收 |
+| `core/meta/phase.py` | `Phase` 与 `init` / `start` / `stop` |
+| `core/meta/dep.py` | `Dep` 描述符 |
+| `core/meta/introspect.py` | 一次 MRO 遍历读出依赖与钩子，按类缓存 |
+| `core/flow/scope.py` | `Scope`、`scope_of`、无参构造 |
+| `core/flow/invoke.py` | 调用一个钩子 |
+| `core/flow/advance.py` | 沿依赖递归推进一个阶段 |
+| `core/flow/unwind.py` | 按台账逆序回收 |
 | `core/canary.py` | `Canary` 基类与 `dep()` |
 
 ## 标记，而非改造

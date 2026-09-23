@@ -15,10 +15,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Collection
 
-from canary_framework.core.declare.introspect import hooks_of
-from canary_framework.core.declare.phase import Phase
-from canary_framework.core.runtime.invoke import invoke
-from canary_framework.core.runtime.scope import Scope
+from canary_framework.core.flow.invoke import invoke
+from canary_framework.core.flow.scope import Scope
+from canary_framework.core.meta.introspect import hooks_of
+from canary_framework.core.meta.phase import Phase
 
 
 async def unwind(scope: Scope, phase: Phase, *, undoing: Phase) -> list[Exception]:

@@ -8,14 +8,14 @@ on a class) from **interpretation** (the engine that reads them and drives).
 ```
 errors            exceptions, usable by any layer
    ▲
-declare           declaration: phase / dep / introspect
+meta              declaration: phase / dep / introspect
    ▲
-runtime           runtime: scope / invoke / advance / unwind
+flow              lifecycle flow: scope / invoke / advance / unwind
    ▲
 canary            facade: the Canary base class and dep()
 ```
 
-The dependency direction is strictly one-way: `canary → runtime → declare → errors`. Only
+The dependency direction is strictly one-way: `canary → flow → meta → errors`. Only
 `canary` depends on both sides, which is exactly a facade's job.
 
 This is not merely documented — `tests/test_layering.py` parses every module's imports with
@@ -26,13 +26,13 @@ This is not merely documented — `tests/test_layering.py` parses every module's
 | Module | Contents |
 |---|---|
 | `core/errors.py` | Five exceptions, all inheriting `CanaryError` |
-| `core/declare/phase.py` | `Phase` plus `init` / `start` / `stop` |
-| `core/declare/dep.py` | The `Dep` descriptor |
-| `core/declare/introspect.py` | One MRO walk reading dependencies and hooks, cached per class |
-| `core/runtime/scope.py` | `Scope`, `scope_of`, no-argument construction |
-| `core/runtime/invoke.py` | Calling one hook |
-| `core/runtime/advance.py` | Advancing one phase along dependencies |
-| `core/runtime/unwind.py` | Reclaiming the ledger in reverse |
+| `core/meta/phase.py` | `Phase` plus `init` / `start` / `stop` |
+| `core/meta/dep.py` | The `Dep` descriptor |
+| `core/meta/introspect.py` | One MRO walk reading dependencies and hooks, cached per class |
+| `core/flow/scope.py` | `Scope`, `scope_of`, no-argument construction |
+| `core/flow/invoke.py` | Calling one hook |
+| `core/flow/advance.py` | Advancing one phase along dependencies |
+| `core/flow/unwind.py` | Reclaiming the ledger in reverse |
 | `core/canary.py` | The `Canary` base class and `dep()` |
 
 ## Markers, not rewriting

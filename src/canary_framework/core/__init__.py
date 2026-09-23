@@ -1,6 +1,6 @@
 """The core: one base class, three phase decorators, and the engine that runs them.
 
-核心。声明与解释分开，依赖方向严格单向：``canary -> runtime -> declare -> errors``。
+核心。声明与解释分开，依赖方向严格单向：``canary -> flow -> meta -> errors``。
 
 - :class:`Canary` 是单元，:func:`dep` 声明它依赖谁。
 - ``@init`` / ``@start`` / ``@stop`` 标记单元在各阶段的行为。
@@ -22,8 +22,6 @@
 """
 
 from canary_framework.core.canary import Canary, dep
-from canary_framework.core.declare.introspect import deps_of
-from canary_framework.core.declare.phase import Phase, init, start, stop
 from canary_framework.core.errors import (
     CanaryError,
     CircularDependencyError,
@@ -31,9 +29,11 @@ from canary_framework.core.errors import (
     DeclarationError,
     LifecycleError,
 )
-from canary_framework.core.runtime.advance import advance
-from canary_framework.core.runtime.scope import Scope, scope_of
-from canary_framework.core.runtime.unwind import unwind
+from canary_framework.core.flow.advance import advance
+from canary_framework.core.flow.scope import Scope, scope_of
+from canary_framework.core.flow.unwind import unwind
+from canary_framework.core.meta.introspect import deps_of
+from canary_framework.core.meta.phase import Phase, init, start, stop
 
 __all__ = [
     "Canary",

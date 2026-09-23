@@ -26,7 +26,7 @@ class Dep[T]:
     :class:`LifecycleError`，而不是另建一张图。
 
     依赖不可赋值：赋值只会改到宿主的这一个属性，替换无法在整张图上生效。替换依赖用
-    :meth:`Scope.provide <canary_framework.core.runtime.scope.Scope.provide>`。
+    :meth:`Scope.provide <canary_framework.core.flow.scope.Scope.provide>`。
     """
 
     __slots__ = ("cls", "name")

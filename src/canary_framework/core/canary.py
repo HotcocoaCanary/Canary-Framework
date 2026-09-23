@@ -12,14 +12,14 @@ from __future__ import annotations
 import types
 from typing import Literal, Self
 
-from canary_framework.core.declare.dep import Dep
-from canary_framework.core.declare.phase import init as init_phase
-from canary_framework.core.declare.phase import start as start_phase
-from canary_framework.core.declare.phase import stop as stop_phase
 from canary_framework.core.errors import DeclarationError
-from canary_framework.core.runtime.advance import advance
-from canary_framework.core.runtime.scope import Scope, scope_of
-from canary_framework.core.runtime.unwind import unwind
+from canary_framework.core.flow.advance import advance
+from canary_framework.core.flow.scope import Scope, scope_of
+from canary_framework.core.flow.unwind import unwind
+from canary_framework.core.meta.dep import Dep
+from canary_framework.core.meta.phase import init as init_phase
+from canary_framework.core.meta.phase import start as start_phase
+from canary_framework.core.meta.phase import stop as stop_phase
 
 
 class Canary:
