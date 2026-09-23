@@ -17,6 +17,7 @@ from canary_framework import (
     scope_of,
     start,
 )
+from canary_framework.core.flow.graph import include
 
 pytestmark = pytest.mark.integration
 
@@ -235,3 +236,24 @@ async def test_a_failing_dependency_reached_by_two_paths_runs_once() -> None:
     with pytest.raises(RuntimeError, match="boom"):
         await enter(root, start)
     assert runs == ["flaky", "flaky"]
+
+
+def test_the_graph_lists_dependencies_first_in_declaration_order() -> None:
+    """依赖图的顺序是确定的：依赖在前，互不依赖的单元按声明顺序。
+
+    这是图本身的顺序（``scope.graph``、``entered()``）。互不依赖的单元同时进入，它们的钩子
+    实际开始的先后取决于各自等依赖的时间，不受这个顺序约束。
+    """
+
+    def unit(name: str, *deps: type[Canary]) -> type[Canary]:
+        return type(name, (Canary,), {f"d{i}": dep(d) for i, d in enumerate(deps)})
+
+    shared = unit("shared")
+    first = unit("first", shared)
+    second = unit("second", shared)
+    third = unit("third")
+    root = unit("root", first, second, third)()
+
+    scope = scope_of(root)
+    include(scope, type(root))
+    assert [cls.__name__ for cls in scope.graph] == ["shared", "first", "second", "third", "root"]

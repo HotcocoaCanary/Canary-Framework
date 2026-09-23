@@ -100,13 +100,13 @@ async def _run(scope: Scope, phase: Phase, nodes: list[type]) -> None:
         for cls in claimed:  # 没有 leave 的阶段：失败的节点回到空闲，以便重试
             if (track := scope.track(cls, phase)).state is State.FAILED:
                 track.reset()
-    # 根节点可能正由另一次调用进入
-    root = outcomes[nodes[-1]]
-    await asyncio.wait([root])
-    if root.cancelled():
-        raise asyncio.CancelledError()
-    if (failure := root.exception()) is not None:
-        raise failure
+    if nodes[-1] not in claimed:  # 根节点正由另一次调用进入：等它的结果
+        root = outcomes[nodes[-1]]
+        await asyncio.wait([root])
+        if root.cancelled():
+            raise asyncio.CancelledError()
+        if (failure := root.exception()) is not None:
+            raise failure
 
 
 async def _step(

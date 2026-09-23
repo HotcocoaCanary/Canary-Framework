@@ -77,18 +77,16 @@ def _scan(cls: type) -> Declaration:
     逆序遍历 ``__mro__``（基类到派生类），保证基类在前。先收集带过标记的属性名，再对
     每个名字做一次常规属性解析：只有解析到的那一个函数仍带标记时该钩子才成立。
     """
-    deps: dict[type, None] = {}
-    marked: list[str] = []
-    seen: set[str] = set()
+    deps: dict[type, None] = {}  # 有序集合：保留定义顺序并去重
+    marked: dict[str, None] = {}
     for owner in reversed(cls.__mro__):
         if owner is object:
             continue  # object 的成员既不是依赖也不带标记
         for name, value in vars(owner).items():
             if isinstance(value, Dep):
                 deps[value.cls] = None
-            elif name not in seen and callable(value) and _phases_of(value):
-                seen.add(name)
-                marked.append(name)
+            elif callable(value) and _phases_of(value):
+                marked.setdefault(name)
 
     hooks: dict[str, list[str]] = {}
     for name in marked:
