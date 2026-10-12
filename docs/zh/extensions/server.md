@@ -30,8 +30,9 @@ async with Gateway():
     ...
 ```
 
-`Server` 直接依赖的单元里，凡是 ASGI 应用（可调用）的都在它的端口上，各自应答自己的 `path`
-属性；没有 `path` 的应答 `/`。数据库、配置这类不可调用的依赖不受影响。
+`Server` 直接依赖的单元里，**可调用并且声明了 `path`** 的就是应用，各自在它的端口上应答
+自己的 `path`。两个条件缺一不可：数据库、配置不可调用；一个恰好写了 `__call__` 的策略对象
+没有 `path`——它们都只是普通依赖。
 
 | 阶段 | `Server` 做的事 |
 |---|---|
@@ -50,7 +51,7 @@ async with Gateway():
 
 ## 手写的应用单元
 
-任何可调用的单元都是应用单元，不需要继承什么：
+一个可调用、声明了 `path` 的单元就是应用单元，不需要继承什么：
 
 ```python
 class Metrics(Canary):
@@ -79,8 +80,50 @@ class Gateway(Server):
         self.app = fastapi_app
 ```
 
-`Server` 不向应用发 ASGI 的 lifespan 消息：启动与回收归 Canary 的生命周期。别的框架的应用
-若依赖自己的 lifespan，把那部分写成一个单元的 `@start` / `@stop`，让 `Server` 依赖它。
+### 应用自己的 lifespan
+
+`Server` 默认不向应用发 ASGI 的 lifespan 消息：启动与回收归 Canary 的生命周期。这对"先只换
+服务器"的迁移是个坑——老应用写在 `lifespan` / `on_event("startup")` 里的连接池、缓存预热会
+**悄悄不执行**，而接口照样能通。两种处理：
+
+- 用类参数打开：`class Gateway(Server, lifespan="on")`。应用的启动发生在 `Server` 的 `@start`
+  里、监听之前，回收发生在 `@stop` 里；应用启动失败就是 `Server` 启动失败，已启动的依赖
+  照常回收。本框架的应用单元此时已由 Canary 启动，只会应答，不会被重复驱动。
+- 或者把那部分搬成一个单元的 `@start` / `@stop`，让 `Server` 依赖它——迁移的终点通常是这个。
+
+### 在别的框架的接口里用单元
+
+别的框架的接口是模块级函数，不是单元的方法，依赖没法写成 `dep()`，要在请求时去图上取。
+以 FastAPI 为例，这座桥十来行：
+
+```python
+from canary_framework import Canary
+from canary_framework.test import unit
+from fastapi import Depends, FastAPI, Request
+
+
+def attach(app: FastAPI, root: Canary) -> None:
+    app.state.graph = root          # 在 Server 的 @init 里调用：attach(fastapi_app, self)
+
+
+def use[T: Canary](cls: type[T]) -> T:
+    async def resolve(request: Request) -> T:       # 必须是 async def
+        return unit(request.app.state.graph, cls)
+
+    return Depends(resolve)
+
+
+@fastapi_app.get("/readers/{reader_id}")
+async def show(reader_id: int, readers: ReaderService = use(ReaderService)) -> Reader:
+    return await readers.get(reader_id)
+```
+
+两点：
+
+- **依赖函数写成 `async def`。** FastAPI 会把同步的依赖函数放进线程池，每个请求多一次线程
+  切换；这里只是查一次字典，实测写成同步的会让吞吐掉到三分之一。
+- **按类型取单元用 `canary_framework.test.unit`。** 它虽然放在 `test` 包里，做的就是"从一张
+  图上按类型取回单元"这一件事，生产代码里用它没有问题。
 
 ## 路径怎么分发
 
@@ -118,8 +161,8 @@ class Gateway(Server, timeout_graceful_shutdown=10, proxy_headers=True):
 `timeout_graceful_shutdown` 值得设。不设时 `@stop` 会一直等到在途请求全部结束：一个不结束
 的长连接就能让停机卡住，排在它后面的数据库等依赖也得不到回收，进程最后被强行杀掉。
 
-`host` / `port` 仍是类属性；`app`、`lifespan`、`reload`、`workers` 在这里另有归属，传了会在
-定义类时抛出 `TypeError`。
+`host` / `port` 仍是类属性；`app`、`reload`、`workers` 在这里另有归属，传了会在定义类时抛出
+`TypeError`。`lifespan` 默认是 `"off"`，见上文。
 
 WebSocket 需要另装一个实现（`websockets` 或 `wsproto`），uvicorn 本身不带。
 

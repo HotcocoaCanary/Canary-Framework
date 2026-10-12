@@ -43,5 +43,8 @@ Everyday code reads a dependency from the unit that declares it (`daemon.collect
 Tests often need a unit they never declared a dependency on — that is what `unit` is for. The
 first argument can be any unit of the graph.
 
+All it does is return a unit of a graph by its type, so it is not limited to tests: it is also
+how another web framework's endpoints reach a unit; see [Web server](server.md).
+
 The graph is built when the lifecycle first begins; asking for a unit that is not there yet
 raises `LookupError`.

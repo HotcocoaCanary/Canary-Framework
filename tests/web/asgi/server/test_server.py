@@ -149,7 +149,7 @@ def test_a_subclass_inherits_class_parameters_and_overrides_its_own() -> None:
     assert Tuned.__canary_server__ == {"timeout_keep_alive": 1, "backlog": 32}
 
 
-@pytest.mark.parametrize("option", ["app", "host", "port", "lifespan", "workers", "reload"])
+@pytest.mark.parametrize("option", ["app", "host", "port", "workers", "reload"])
 def test_options_that_belong_elsewhere_are_refused(option: str) -> None:
     with pytest.raises(TypeError, match=f"{option} cannot be passed to uvicorn here"):
         type("Wrong", (Server,), {}, **{option: 1})
@@ -225,7 +225,10 @@ async def test_with_nothing_to_serve_the_start_fails_and_says_what_to_do() -> No
         database = dep(Database)
         port = 0
 
-    with pytest.raises(LifecycleError, match=r"Depend on an application unit, or assign self\.app"):
+    with pytest.raises(
+        LifecycleError,
+        match=r"Depend on an application unit \(callable, with a path attribute\), or assign",
+    ):
         async with Empty():
             raise AssertionError("unreachable")
     assert events == ["db start", "db stop"]

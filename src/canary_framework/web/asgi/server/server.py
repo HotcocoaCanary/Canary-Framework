@@ -18,7 +18,7 @@ from canary_framework.core import Canary, LifecycleError, deps_of, scope_of, sta
 from canary_framework.web.asgi import Application, dispatch
 
 #: 不能当作类参数传给 uvicorn 的选项：它们在这里另有归属。
-_OWNED = frozenset({"app", "host", "port", "uds", "fd", "lifespan", "reload", "workers"})
+_OWNED = frozenset({"app", "host", "port", "uds", "fd", "reload", "workers"})
 
 
 class Server(Canary):
@@ -26,11 +26,11 @@ class Server(Canary):
 
     服务器单元：监听一个端口。``host`` / ``port`` 是普通类属性，服务什么有两种给法。
 
-    **依赖即服务**——它直接依赖的单元里，凡是 ASGI 应用（可调用）的都在这个端口上，各自应答
-    自己的 ``path`` 属性（没有这个属性的应答 ``/``）::
+    **依赖即服务**——它直接依赖的单元里，可调用并且声明了 ``path`` 的就是应用，各自在这个
+    端口上应答自己的 ``path``。两个条件缺一不可：恰好可调用的普通协作者不会被当成应用::
 
         class Gateway(Server):
-            api = dep(LibraryApi)           # /
+            api = dep(LibraryApi)           # LibraryApi.path = "/"
             metrics = dep(Metrics)          # Metrics.path = "/metrics"
 
             port = 8010
@@ -58,13 +58,17 @@ class Server(Canary):
     ``timeout_graceful_shutdown`` 值得设：不设时 ``@stop`` 会一直等到在途请求全部结束，一个
     不结束的长连接就能让停机卡住，排在它后面的依赖也得不到回收。
 
-    生命周期归 Canary，所以它不向应用发 ASGI 的 lifespan 消息，信号也不由它接管：何时退出由
-    进程入口决定。它不必是根单元——守护进程顺带开一个管理端口，就是多一条 ``dep()``。
+    生命周期归 Canary，所以默认不向应用发 ASGI 的 lifespan 消息，信号也不由它接管：何时退出
+    由进程入口决定。被服务的应用若把初始化写在自己的 lifespan 里（别的框架的应用常常如此），
+    用 ``lifespan="on"`` 打开：应用的启动发生在本单元的 ``@start`` 里、监听之前，回收发生在
+    ``@stop`` 里。本框架的应用单元此时已由 Canary 启动，只会应答，不会被重复驱动。
+
+    它不必是根单元——守护进程顺带开一个管理端口，就是多一条 ``dep()``。
 
     :param options: 原样传给 ``uvicorn.Config(...)`` 的参数（``timeout_graceful_shutdown``、
         ``timeout_keep_alive``、``proxy_headers``、``ssl_certfile`` ……）。
     :raises TypeError: 传了在这里另有归属的选项：地址是 ``host`` / ``port`` 属性，应用是它
-        依赖的单元，lifespan、重载与多进程不归 uvicorn 管。
+        依赖的单元，重载与多进程不归 uvicorn 管。
     """
 
     #: 监听地址。
@@ -105,9 +109,9 @@ class Server(Canary):
         routes: dict[str, Application] = {}
         for cls in deps_of(type(self)):
             unit: Any = instances[cls]
-            if not callable(unit):
-                continue  # 不是应用：数据库、配置这类普通依赖
-            path = getattr(unit, "path", "/")
+            path = getattr(unit, "path", None)
+            if path is None or not callable(unit):
+                continue  # 不是应用：应用要可调用，并且声明了 path
             if path in routes:
                 raise LifecycleError(
                     f"{type(self).__name__}: two apps answer {path!r}. "
@@ -116,7 +120,8 @@ class Server(Canary):
             routes[path] = unit
         if not routes:
             raise LifecycleError(
-                f"{type(self).__name__}: nothing to serve. Depend on an application unit, "
+                f"{type(self).__name__}: nothing to serve. Depend on an application unit "
+                f"(callable, with a path attribute), "
                 f"or assign self.app in an @init hook."
             )
         return dispatch(routes)
@@ -128,7 +133,7 @@ class Server(Canary):
         sock = self._socket = _bind(self.host, self.port)
         self._declared = self.port
         self.port = sock.getsockname()[1]
-        options = {"log_config": None, **self.__canary_server__, "lifespan": "off"}
+        options = {"log_config": None, "lifespan": "off", **self.__canary_server__}
         server = self._uvicorn = _Uvicorn(uvicorn.Config(app, **options))
         serving = self._serving = asyncio.create_task(server.serve(sockets=[sock]))
         ready = asyncio.create_task(server.ready.wait())
@@ -137,7 +142,10 @@ class Server(Canary):
         finally:
             ready.cancel()
         if serving.done():
-            self._serving = None
+            # 没能开始服务：把绑定的端口还回去，再报告原因。
+            self._uvicorn = self._serving = self._socket = None
+            self.port, self._declared = self._declared, None
+            sock.close()
             serving.result()
             raise RuntimeError(f"{type(self).__name__}: the server exited while starting")
 
@@ -166,7 +174,14 @@ class _Uvicorn(uvicorn.Server):
         self.ready = asyncio.Event()
 
     async def startup(self, sockets: list[socket.socket] | None = None) -> None:
-        await super().startup(sockets=sockets)
+        try:
+            await super().startup(sockets=sockets)
+        except SystemExit:
+            # 应用的 lifespan 启动失败时 uvicorn 直接 sys.exit，那会绕过失败回收。
+            raise RuntimeError(
+                "the application's lifespan failed during startup; "
+                "the uvicorn.error logger has the traceback"
+            ) from None
         self.ready.set()
 
     @contextlib.contextmanager

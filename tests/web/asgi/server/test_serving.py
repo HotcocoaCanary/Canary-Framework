@@ -42,8 +42,9 @@ class Database(Canary):
 
 
 class Raw(Canary):
-    """手写的应用单元：一个可调用的单元。服务器只认这一点，外加可选的 ``path``。"""
+    """手写的应用单元：可调用，并且声明了 ``path``。服务器只认这两点。"""
 
+    path = "/"
     text = ""
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
@@ -86,7 +87,7 @@ def _url(server: Server, path: str) -> str:
 
 
 async def test_a_server_serves_every_app_unit_it_depends_on_on_one_port() -> None:
-    """可调用的依赖是应用，各自应答自己的 ``path``（没有就是 ``/``）；``Database`` 不可调用，不算。"""
+    """可调用并声明了 ``path`` 的依赖是应用，各自应答自己的 ``path``；``Database`` 不算。"""
     async with running(Gateway) as gateway, httpx.AsyncClient() as client:
         assert (await client.get(_url(gateway, "/readers"))).text.startswith("api /readers")
         assert (await client.get(_url(gateway, "/metrics"))).text.startswith("metrics /metrics")
@@ -190,3 +191,99 @@ async def test_it_serves_an_application_from_another_framework() -> None:
 
     async with running(Foreign) as server, httpx.AsyncClient() as client:
         assert (await client.get(_url(server, "/hello"))).json() == {"from": "fastapi"}
+
+
+async def test_a_callable_collaborator_without_a_path_is_not_an_application() -> None:
+    """恰好可调用的普通依赖（策略、工厂）不会被挂到端口上；有 ``path`` 而不可调用的也不会。"""
+
+    class Strategy(Canary):
+        def __call__(self, amount: int) -> int:
+            return amount * 2
+
+    class Labelled(Canary):
+        path = "/labelled"
+
+    class Narrow(Server):
+        metrics = dep(Metrics)
+        strategy = dep(Strategy)
+        labelled = dep(Labelled)
+        port = 0
+
+    async with running(Narrow) as server, httpx.AsyncClient() as client:
+        assert server.strategy(21) == 42
+        assert (await client.get(_url(server, "/metrics"))).status_code == 200
+        assert (await client.get(_url(server, "/"))).status_code == 404
+        assert (await client.get(_url(server, "/labelled"))).status_code == 404
+
+
+async def test_lifespan_can_be_turned_on_for_an_application_that_relies_on_it() -> None:
+    """默认不发 lifespan 消息；``lifespan="on"`` 时别的框架的应用照常启动与回收自己的东西。"""
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+
+    def build(ran: list[str]) -> FastAPI:
+        @asynccontextmanager
+        async def lifespan(_: FastAPI) -> Any:
+            ran.append("startup")
+            yield
+            ran.append("shutdown")
+
+        return FastAPI(lifespan=lifespan)
+
+    silent: list[str] = []
+    driven: list[str] = []
+
+    class Silent(Server):
+        port = 0
+
+        @init
+        def build(self) -> None:
+            self.app = build(silent)
+
+    class Driven(Server, lifespan="on"):
+        port = 0
+
+        @init
+        def build(self) -> None:
+            self.app = build(driven)
+
+    async with running(Silent), running(Driven):
+        assert (silent, driven) == ([], ["startup"])
+    assert (silent, driven) == ([], ["startup", "shutdown"])
+
+
+async def test_with_lifespan_on_the_application_units_are_not_driven_twice() -> None:
+    """应用单元已由 Canary 启动；服务器再发 lifespan 消息时，分发层只应答。"""
+
+    class Loud(Server, lifespan="on"):
+        api = dep(Api)
+        port = 0
+
+    async with running(Loud) as server, httpx.AsyncClient() as client:
+        assert (await client.get(_url(server, "/x"))).status_code == 200
+    assert events == ["db start", "api start", "api stop", "db stop"]
+
+
+async def test_an_application_whose_lifespan_fails_fails_the_start() -> None:
+    from contextlib import asynccontextmanager
+
+    from fastapi import FastAPI
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> Any:
+        raise RuntimeError("连不上数据库")
+        yield
+
+    class Broken(Server, lifespan="on"):
+        database = dep(Database)
+        port = 0
+
+        @init
+        def build(self) -> None:
+            self.app = FastAPI(lifespan=lifespan)
+
+    with pytest.raises(RuntimeError, match="lifespan failed during startup"):
+        async with Broken():
+            raise AssertionError("unreachable")
+    assert events == ["db start", "db stop"], "已启动的依赖照常回收"

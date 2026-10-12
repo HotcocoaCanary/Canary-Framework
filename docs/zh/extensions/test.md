@@ -39,4 +39,7 @@ async with running(TelemetryDaemon) as daemon:
 日常代码应当从声明依赖的单元上读（`daemon.collector.store`）。测试常常要够到一个自己没有
 声明过依赖的单元，这时用 `unit`。第一个参数可以是图上的任意单元。
 
+它做的只是"从一张图上按类型取回单元"，所以不限于测试：在别的 Web 框架的接口里取单元时用的
+也是它，见 [Web 服务器](server.md)。
+
 图在第一次进入生命周期时才建立；在那之前取一个尚不存在的单元会抛出 `LookupError`。
