@@ -35,7 +35,7 @@ class LibraryApi(App, title="图书馆 API", version="1.0.0"):
     async def not_found(self, _: Request, exc: Exception) -> JSONResponse:
         return JSONResponse({"msg": f"no reader {exc}"}, status_code=404)
 
-    @get
+    @get("/")
     async def index(self) -> dict[str, str]:
         return {"status": "ok"}
 

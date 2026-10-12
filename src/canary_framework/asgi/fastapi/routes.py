@@ -1,14 +1,18 @@
-"""Route marks.
+"""Route marks: FastAPI's own decorators, recorded.
 
-路由标记：``@get("/path")`` 只在方法上写一个标记，不改造方法，也不注册任何东西。读取标记、
-把绑定方法交给 FastAPI 的是 ``router.mount``。
+路由标记。名字、参数与默认值都是 FastAPI ``APIRouter`` 同名方法的——``@get(...)`` 只是把这次
+调用记在方法上，不改造方法，也不注册任何东西。把它原样重放到真正的 ``APIRouter`` 上的是
+``router.mount``。
 """
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol, cast, overload
+from typing import Any, Concatenate, Protocol
+
+from fastapi import APIRouter
 
 #: 写在方法上的标记：该方法是哪些接口，值为 :class:`Route` 的元组。
 ROUTES = "__canary_routes__"
@@ -16,75 +20,62 @@ ROUTES = "__canary_routes__"
 
 @dataclass(frozen=True, slots=True)
 class Route:
-    """One mark: an HTTP method, a path, and what else FastAPI was told.
+    """One recorded call: which ``APIRouter`` method, and with what arguments.
 
-    一条标记。
+    一次被记下的调用：``APIRouter`` 的哪个方法，带着什么参数。
     """
 
-    method: str
-    path: str
-    #: 原样传给 FastAPI ``add_api_route`` 的其余参数。
-    options: dict[str, Any] = field(default_factory=dict)
+    verb: str
+    args: tuple[Any, ...] = ()
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
 
 class _Mark(Protocol):
     def __call__[F: Callable[..., object]](self, fn: F, /) -> F: ...
 
 
-class Verb:
-    """An HTTP method, and the decorator that marks a unit's method as its endpoint.
+def _record[**P](method: Callable[Concatenate[APIRouter, P], Any]) -> Callable[P, _Mark]:
+    """把 ``APIRouter`` 的一个装饰器方法变成同名、同签名的标记。"""
+    verb = method.__name__
 
-    一个 HTTP 方法，同时是把单元的方法标记为接口的装饰器::
+    def mark(*args: P.args, **kwargs: P.kwargs) -> _Mark:
+        if args and not isinstance(args[0], str):
+            raise TypeError(f"@{verb} takes a path, as FastAPI's does: @{verb}('/')")
+        route = Route(verb, args, dict(kwargs))
 
-        @get("/{reader_id}")
-        async def get(self, reader_id: int) -> Reader: ...
+        def apply[F: Callable[..., object]](fn: F, /) -> F:
+            setattr(fn, ROUTES, (*getattr(fn, ROUTES, ()), route))
+            return fn
 
-        @post(status_code=201)
-        async def create(self, body: NewReader) -> Reader: ...
+        return apply
 
-        @get
-        async def search(self, keyword: str | None = None) -> list[Reader]: ...
-
-    路径省略时即所在路由单元的前缀本身。其余关键字参数原样传给 FastAPI 的
-    ``add_api_route``（``status_code``、``response_model``、``summary`` ……）。同一个方法
-    可以带多个标记。
-
-    :param method: HTTP 方法名，大写。
-    """
-
-    __slots__ = ("method",)
-
-    def __init__(self, method: str) -> None:
-        self.method = method
-
-    @overload
-    def __call__[F: Callable[..., object]](self, path: F, /) -> F: ...
-    @overload
-    def __call__(self, path: str = "", /, **options: Any) -> _Mark: ...
-    def __call__(self, path: Any = "", /, **options: Any) -> Any:
-        """Mark a method as an endpoint of this verb, and return it unchanged.
-
-        给方法打上本方法的标记，原样返回。
-        """
-        if callable(path):
-            return self._mark(path, Route(self.method, ""))
-        route = Route(self.method, path, options)
-        return cast("_Mark", lambda fn: self._mark(fn, route))
-
-    @staticmethod
-    def _mark[F: Callable[..., object]](fn: F, route: Route) -> F:
-        setattr(fn, ROUTES, (*getattr(fn, ROUTES, ()), route))
-        return fn
-
-    def __repr__(self) -> str:
-        return f"@{self.method.lower()}"
+    mark.__name__ = mark.__qualname__ = verb
+    native = inspect.signature(method)
+    # 运行时看到的签名也是 FastAPI 的（去掉 self），help() 与文档工具因此照常可用。
+    mark.__signature__ = native.replace(  # type: ignore[attr-defined]
+        parameters=list(native.parameters.values())[1:]
+    )
+    mark.__doc__ = (
+        f"Mark a unit's method as an endpoint; the arguments are those of FastAPI's "
+        f"``APIRouter.{verb}``.\n\n把单元的方法标记为接口，参数与 FastAPI 的 "
+        f"``APIRouter.{verb}`` 完全相同::\n\n"
+        f'    @{verb}("/{{reader_id}}")\n'
+        f"    async def show(self, reader_id: int) -> Reader: ...\n\n"
+        f"同一个方法可以带多个标记。\n"
+    )
+    return mark
 
 
-get = Verb("GET")
-post = Verb("POST")
-put = Verb("PUT")
-patch = Verb("PATCH")
-delete = Verb("DELETE")
+get = _record(APIRouter.get)
+post = _record(APIRouter.post)
+put = _record(APIRouter.put)
+patch = _record(APIRouter.patch)
+delete = _record(APIRouter.delete)
+head = _record(APIRouter.head)
+options = _record(APIRouter.options)
+trace = _record(APIRouter.trace)
+api_route = _record(APIRouter.api_route)
+websocket = _record(APIRouter.websocket)
 
 
 def routes_of(unit: object) -> list[tuple[Route, Callable[..., object]]]:

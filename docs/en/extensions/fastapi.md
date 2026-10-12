@@ -25,15 +25,15 @@ from canary_framework.asgi.fastapi import App, Router, get, post
 class ReaderApi(Router, prefix="/readers", tags=["readers"]):
     readers = dep(ReaderService)
 
-    @get
+    @get("")
     async def search(self, keyword: str | None = None) -> list[Reader]:
         return await self.readers.search(keyword)
 
     @get("/{reader_id}")
-    async def get(self, reader_id: int) -> Reader:
+    async def show(self, reader_id: int) -> Reader:
         return await self.readers.get(reader_id)
 
-    @post(status_code=201)
+    @post("", status_code=201)
     async def create(self, body: NewReader) -> Reader:
         return await self.readers.create(body)
 
@@ -64,16 +64,27 @@ asyncio.run(main())
 
 ## Route marks
 
-`get` / `post` / `put` / `patch` / `delete` mark a unit's method as an endpoint. They only
-write a mark and leave the method alone — the same idea as `@init` / `@start` / `@stop`.
+`get` / `post` / `put` / `patch` / `delete` / `head` / `options` / `trace` / `api_route` /
+`websocket` are the decorators of FastAPI's `APIRouter` by the same names: the same
+parameters and defaults, so your IDE's completion and FastAPI's documentation apply as they
+are. There is one difference — they only record the call on the method and leave the method
+alone; when the application starts, the call is replayed on a real `APIRouter`, decorating the
+**bound method**.
 
-- The signature is read by FastAPI: query and path parameters, request bodies and the
-  serialisation of the return value all follow FastAPI's rules.
-- With the path omitted, the endpoint is the router's prefix itself: `@get` above is
-  `GET /api/readers`.
-- Every other keyword argument goes to FastAPI unchanged (`status_code`, `response_model`,
-  `summary`, …).
-- Endpoints are bound methods, so they use the dependencies on `self`; there is no `Depends`.
+- Everything you know from FastAPI works: `response_model`, `status_code`, `dependencies`,
+  `Depends`, `WebSocket`, …
+- The path is required, as in FastAPI. `""` is the router's prefix itself: `@get("")` above
+  is `GET /api/readers`; an application's own endpoints have no prefix, so its root is `"/"`.
+- Endpoints are bound methods, so dependencies between units are the `dep()`s on `self`;
+  per-request things can still use `Depends`.
+
+It differs from plain FastAPI in two ways only, and they are why this package exists:
+endpoints are methods of units, and routers are aggregated by dependency rather than
+`include_router`. For a different and smaller web layer, see [`asgi.web`](web.md).
+
+!!! warning "Do not name a method `get`"
+    A method called `get` in the class body shadows the `@get` that follows it. Give the
+    method another name.
 
 Marks resolve by **attribute name**, like lifecycle hooks: overriding a method replaces it, and
 an override that is no longer marked is no longer an endpoint.
@@ -87,7 +98,7 @@ dependency graph; there is no separate registration step.
 It is still an ordinary unit:
 
 - it has its own dependencies and hooks;
-- its endpoints are ordinary methods, so a test can `await api.get(3)` without HTTP;
+- its endpoints are ordinary methods, so a test can `await api.show(3)` without HTTP;
 - it is not FastAPI's `APIRouter`, so no method or attribute name can collide with FastAPI.
 
 Class parameters other than `prefix` and `tags` go to `APIRouter` unchanged. A subclass
