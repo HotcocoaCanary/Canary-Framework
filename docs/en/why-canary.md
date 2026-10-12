@@ -31,8 +31,11 @@ Measured on 2026-09-23 with Python 3.13; library versions are pinned in the scri
   see below — or a library with scopes such as dishka.
 - **Domain classes that must not know about a framework.** Units subclass `Canary`. dishka,
   dependency-injector and injector wire plain classes through their `__init__` instead.
-- **Several instances of one type, or constructor arguments.** Units are constructed with no
-  arguments, one per type; values come from dependencies in `@init` or `@start`.
+- **A number of instances known only at run time, or constructor arguments.** Units are
+  constructed with no arguments, one per type; values come from dependencies in `@init` or
+  `@start`. A fixed number of instances can be written as subclasses — each subclass is a unit
+  of its own, see [Patterns](patterns.md#several-instances-of-one-kind) — but "start N of them
+  from configuration" cannot.
 - **Synchronous programs.** `init()`, `start()` and `stop()` are coroutines. Hooks may be
   synchronous, but something has to run an event loop.
 - **Maturity.** Canary is young and has one maintainer. The others have larger communities and

@@ -36,6 +36,36 @@ This is not merely documented — `tests/test_layering.py` parses every module's
 | `core/flow/leave.py` | `leave()`: leaving a phase over the graph, the unit first |
 | `core/canary.py` | The `Canary` base class and `dep()` |
 
+## Extensions
+
+`test`, `config` and `asgi` sit beside `core`; `asgi/fastapi` is a subpackage of `asgi`:
+
+| Package | Contents | Builds on | Third-party dependencies |
+|---|---|---|---|
+| `test/` | `running` and `unit` | `core` | none |
+| `config/` | `Settings` | `core` | pydantic-settings |
+| `asgi/` | `App`, `Server` and `dispatch`; inside, `server → app` | `core` | uvicorn |
+| `asgi/fastapi/` | `Router`, `App` and the route marks; inside, `app → router → routes` | `core`, `asgi` | FastAPI |
+
+`asgi` keeps three roles apart: contributors (routers) can be many; an
+application (`App`) is just a value and does not listen; a listener (`Server`) is one per port
+and serves the applications it depends on directly. What has to be unique is a unit that is
+depended on, not something on the inheritance chain.
+
+Three more constraints are asserted by `tests/test_layering.py`:
+
+- an extension imports only what others export publicly: `canary_framework.core`, never
+  `core.flow` or `core.meta`;
+- the directory tree is the dependency graph: a subpackage may build on its parent
+  (`asgi.fastapi → asgi`), a parent never imports a child, and siblings do not depend on each
+  other — again only as far as the package;
+- the top-level package imports no extension, so `import canary_framework` never loads a
+  third-party package.
+
+When two extensions need the same thing, it is extracted into their common parent, rather
+than one depending on the other — that is how `asgi` came about: wrapping another ASGI
+framework means one more subpackage under `asgi`.
+
 ## Markers, not rewriting
 
 Decorators write one marker on a method and never rewrite the class. Units keep every property

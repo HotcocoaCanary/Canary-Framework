@@ -64,6 +64,32 @@ jobs:
         with:
           files: ./coverage.xml
 
+  core-only:
+    # 核心与 canary_framework.test 必须在没有任何扩展依赖的环境里成立。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          cache-dependency-glob: "pyproject.toml"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install the core and its test tools only
+        run: uv sync --extra test
+
+      - name: Test without FastAPI or pydantic
+        run: |
+          uv run python -c "
+          import importlib.util as u
+          present = [m for m in ('fastapi', 'uvicorn', 'pydantic', 'pydantic_settings') if u.find_spec(m)]
+          assert not present, present
+          "
+          uv run pytest tests/core tests/test tests/test_layering.py
+
   docs:
     runs-on: ubuntu-latest
     steps:

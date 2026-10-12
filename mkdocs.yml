@@ -65,6 +65,9 @@ plugins:
             Dependencies: 依赖
             Lifecycle: 生命周期
             Patterns: 常见用法
+            Extensions: 扩展
+            Testing: 测试
+            Configuration: 配置
             Reference: 参考
             API Reference: API 参考
             Architecture: 架构
@@ -105,6 +108,11 @@ nav:
       - Dependencies: dependency-injection.md
       - Lifecycle: lifecycle.md
       - Patterns: patterns.md
+  - Extensions:
+      - Testing: extensions/test.md
+      - Configuration: extensions/config.md
+      - ASGI: extensions/asgi.md
+      - FastAPI: extensions/fastapi.md
   - Reference:
       - API Reference: api-reference.md
       - Architecture: architecture.md

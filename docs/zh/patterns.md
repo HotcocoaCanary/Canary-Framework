@@ -78,6 +78,37 @@ class Database(Canary):
 各个实现应在钩子里构造，而不是各自用 `dep()` 声明：依赖是静态的，声明过的单元无论是否
 用到都会被启动。
 
+## 同一种东西的多个实例
+
+一张图里每个**类型**一个实例，而子类是另一个类型。需要固定的几个同类实例时，各写一个子类：
+
+```python
+class Database(Canary):
+    dsn = "postgresql://primary/app"
+
+    @start
+    async def connect(self) -> None:
+        self.pool = await open_pool(self.dsn)
+
+    @stop
+    async def close(self) -> None:
+        await self.pool.close()
+
+
+class Replica(Database):
+    dsn = "postgresql://replica/app"
+
+
+class ReportService(Canary):
+    primary = dep(Database)
+    replica = dep(Replica)
+```
+
+`Database` 与 `Replica` 是两个单元：各有一个实例，各自运行继承来的钩子，各自被回收。
+
+数量要到运行时才知道的情形（按配置起 N 个）不能这样表达——依赖是写在类上的。这时由一个单元
+在自己的 `@start` 里创建并持有它们。
+
 ## 执行到一半失败的钩子
 
 执行到一半抛出的 `@start` 会立即运行本单元的 `@stop`，`start()` 随后释放它启动的依赖。

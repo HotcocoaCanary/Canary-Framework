@@ -120,6 +120,46 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 ```
 
+## Extensions
+
+Four optional packages sit beside the core. The core never imports them, so
+`pip install canary-framework` stays dependency-free.
+
+| Package | What it is | Install |
+|---|---|---|
+| [`canary_framework.test`](https://hotcocoacanary.github.io/Canary-Framework/extensions/test/) | `running()` and `unit()` — start a graph on test doubles | included |
+| [`canary_framework.config`](https://hotcocoacanary.github.io/Canary-Framework/extensions/config/) | `Settings` — a pydantic-settings model that is a unit | `canary-framework[config]` |
+| [`canary_framework.asgi`](https://hotcocoacanary.github.io/Canary-Framework/extensions/asgi/) | `App` and `Server` — applications are units, and one server listens for those it depends on | `canary-framework[asgi]` |
+| [`canary_framework.asgi.fastapi`](https://hotcocoacanary.github.io/Canary-Framework/extensions/fastapi/) | `Router` and `App` — FastAPI routes on units | `canary-framework[fastapi]` |
+
+```python
+from canary_framework import asgi, dep
+from canary_framework.asgi.fastapi import App, Router, get
+
+
+class ReaderApi(Router, prefix="/readers"):
+    readers = dep(ReaderService)
+
+    @get("/{reader_id}")
+    async def get(self, reader_id: int) -> Reader:
+        return await self.readers.get(reader_id)
+
+
+class LibraryApi(App, title="Library API"):
+    readers = dep(ReaderApi)
+
+
+class Gateway(asgi.Server):
+    api = dep(LibraryApi)  # another App unit here would share the port
+    port = 8010
+
+
+async with Gateway():  # dependencies start, then it listens
+    ...
+```
+
+Extensions are provisional: their API may still change in a minor release.
+
 ## Stability
 
 1.0 is the first stable release. The public API follows

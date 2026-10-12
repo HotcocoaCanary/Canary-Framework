@@ -80,6 +80,40 @@ Everything else depends on `Database` and never learns which backend is behind i
 Construct the backends inside the hook rather than declaring each one with `dep()`:
 dependencies are static, so every declared unit is brought up whether it is used or not.
 
+## Several instances of one kind
+
+A graph has one instance per **type**, and a subclass is another type. When you need a fixed
+few instances of the same kind, write a subclass for each:
+
+```python
+class Database(Canary):
+    dsn = "postgresql://primary/app"
+
+    @start
+    async def connect(self) -> None:
+        self.pool = await open_pool(self.dsn)
+
+    @stop
+    async def close(self) -> None:
+        await self.pool.close()
+
+
+class Replica(Database):
+    dsn = "postgresql://replica/app"
+
+
+class ReportService(Canary):
+    primary = dep(Database)
+    replica = dep(Replica)
+```
+
+`Database` and `Replica` are two units: one instance each, each running the hooks it inherits,
+each reclaimed on its own.
+
+A number known only at run time — "start N of them from configuration" — cannot be written
+this way, because dependencies are declared on the class. Have one unit create and hold them in
+its own `@start` instead.
+
 ## Hooks that fail halfway
 
 A `@start` that raises halfway runs its unit's `@stop` at once, and `start()` then releases the
