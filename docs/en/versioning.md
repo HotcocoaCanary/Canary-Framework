@@ -31,6 +31,17 @@ It does **not** cover:
   `Scope.instances`, `Scope.instance()`, `Scope.provide()`, `Scope.resolve()` and
   `Scope.key_of()` are covered.
 
+## Extensions {#extensions}
+
+`canary_framework.test`, `canary_framework.config`, `canary_framework.asgi` and
+`canary_framework.asgi.fastapi` ship with the core
+and share its version number, but are **provisional** for now: until each is declared stable,
+its API may change in a minor release, with every change recorded in the changelog. The
+stability promise above covers the core only.
+
+The core depends on no extension, and `import canary_framework` loads neither them nor their
+third-party dependencies.
+
 ## Deprecation
 
 A public name or behaviour is removed only in a major release, and only after at least one

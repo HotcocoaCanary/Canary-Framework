@@ -4,7 +4,68 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **Four extension packages beside the core**, each provisional — their API may change in a
+  minor release until declared stable. The core imports none of them, and
+  `import canary_framework` still loads no third-party package.
+
+  四个与核心平级的扩展包，目前均为暂行 API。核心不 import 它们，`import canary_framework`
+  依旧不带入任何第三方包。
+
+  - `canary_framework.test` — `running(Root, {Clock: ManualClock()})` starts a fresh graph on
+    test doubles and reclaims it on exit; `unit(root, cls)` reaches any unit of the graph by
+    type. No extra dependencies.
+
+    `running()` 带替身启动一张新的图并在退出时回收；`unit()` 按类型取回图上的单元。无额外依赖。
+  - `canary_framework.config` — `Settings`, a pydantic-settings `BaseSettings` that is also a
+    unit; `dep()` may be declared inside it. Install with `canary-framework[config]`.
+
+    `Settings`：同时是单元的 `BaseSettings`，模型内可以声明 `dep()`。
+  - `canary_framework.asgi` — applications and listening as two kinds of unit. `App` is one
+    ASGI application that does not listen; `Server` listens on one port and serves the `App`
+    units it depends on directly, each under its own `path`; `dispatch()` joins ASGI apps by
+    path prefix. A port in use raises `OSError` and what started is reclaimed. Install with
+    `canary-framework[asgi]`.
+
+    把"应用"与"监听"分成两种单元。`App` 是一个不监听的 ASGI 应用；`Server` 监听一个端口，
+    服务它直接依赖的 `App`，各自应答自己的 `path`；`dispatch()` 按路径前缀合并 ASGI 应用。
+    端口被占用时抛 `OSError`，已启动的依赖照常回收。
+  - `canary_framework.asgi.fastapi` — a subpackage of `asgi`, building on it. `Router` and
+    `App` are units, and `get` / `post` / `put` / `patch` / `delete` mark a unit's methods as
+    FastAPI endpoints. Depending on
+    a router mounts it; `App` is the FastAPI application; `mount()` puts a graph's routers on
+    a FastAPI app of your own. Install with
+    `canary-framework[fastapi]`.
+
+    `asgi` 的子包，建在它之上。`Router` 与 `App` 都是单元，路由标记把单元的方法标记为
+    FastAPI 接口。
+    依赖一个路由单元即挂载它；`App` 是 FastAPI 应用；`mount()` 把一张图上的路由挂到你自己的
+    FastAPI 应用上。
+- `tests/test_layering.py` asserts three more constraints: extensions import only public
+  exports, a subpackage builds on its parent and on nothing beside it (today
+  `asgi.fastapi → asgi`), and extensions are never imported by the top-level package.
+
+  分层测试新增三条约束：扩展包只用公开导出、子包只依赖父包而兄弟包互不依赖（目前只有
+  `asgi.fastapi → asgi`）、顶层包不 import 它们。
+
+### Changed
+
+- The `dev` extra now pulls in the extension dependencies; a new `test` extra holds only what
+  the core's tests need, and CI runs them in an environment without FastAPI or pydantic.
+  Existing tests moved to `tests/core/`.
+
+  `dev` 现在包含扩展包的依赖；新增只含核心测试所需的 `test`，CI 在没有 FastAPI 与 pydantic
+  的环境里跑核心测试。原有测试挪到 `tests/core/`。
+
 ### Documentation
+
+- Why Canary no longer says several instances of one type are unsupported: a fixed few are
+  written as subclasses, each a unit of its own (new section in Patterns). What is unsupported
+  is a number known only at run time.
+
+  「为什么选 Canary」不再说"同一类型的多个实例"不支持：固定的几个用子类表达，每个子类是独立的
+  单元（常见用法新增一节）；不支持的是数量在运行时才确定的情形。
 
 - Why Canary: the comparison is re-measured with 1.1.0; the Canary column is unchanged.
 

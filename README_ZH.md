@@ -113,6 +113,46 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 ```
 
+## 扩展包
+
+四个可选的包与核心平级。核心从不 import 它们，所以 `pip install canary-framework` 依旧
+零依赖。
+
+| 包 | 内容 | 安装 |
+|---|---|---|
+| [`canary_framework.test`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/test/) | `running()` 与 `unit()`：带替身启动一张图 | 已包含 |
+| [`canary_framework.config`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/config/) | `Settings`：同时是单元的 pydantic-settings 模型 | `canary-framework[config]` |
+| [`canary_framework.asgi`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/asgi/) | `App` 与 `Server`：应用是单元，一个服务器监听它依赖的全部应用 | `canary-framework[asgi]` |
+| [`canary_framework.asgi.fastapi`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/fastapi/) | `Router` 与 `App`：FastAPI 路由写在单元上 | `canary-framework[fastapi]` |
+
+```python
+from canary_framework import asgi, dep
+from canary_framework.asgi.fastapi import App, Router, get
+
+
+class ReaderApi(Router, prefix="/readers"):
+    readers = dep(ReaderService)
+
+    @get("/{reader_id}")
+    async def get(self, reader_id: int) -> Reader:
+        return await self.readers.get(reader_id)
+
+
+class LibraryApi(App, title="图书馆 API"):
+    readers = dep(ReaderApi)
+
+
+class Gateway(asgi.Server):
+    api = dep(LibraryApi)  # 再依赖一个应用单元，它就共用这个端口
+    port = 8010
+
+
+async with Gateway():  # 依赖先启动，然后开始监听
+    ...
+```
+
+扩展包目前是暂行的：API 仍可能在次版本中调整。
+
 ## 稳定性
 
 1.0 是第一个稳定版本。公开 API 遵循

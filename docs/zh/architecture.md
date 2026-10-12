@@ -36,6 +36,32 @@ canary            门面：Canary 基类与 dep()
 | `core/flow/leave.py` | `leave()`：在图上离开一个阶段，本单元在前 |
 | `core/canary.py` | `Canary` 基类与 `dep()` |
 
+## 扩展包
+
+`test`、`config`、`asgi` 与 `core` 平级，`asgi/fastapi` 是 `asgi` 的子包：
+
+| 包 | 内容 | 建在谁之上 | 第三方依赖 |
+|---|---|---|---|
+| `test/` | `running` 与 `unit` | `core` | 无 |
+| `config/` | `Settings` | `core` | pydantic-settings |
+| `asgi/` | `App`、`Server` 与 `dispatch`，内部 `server → app` | `core` | uvicorn |
+| `asgi/fastapi/` | `Router`、`App` 与路由标记，内部 `app → router → routes` | `core`、`asgi` | FastAPI |
+
+`asgi` 把三个角色分开：贡献者（路由单元）可以有很多；应用（`App`）只是一个
+值，自己不监听；监听器（`Server`）每个端口一个，服务它直接依赖的应用。需要唯一的东西是
+被依赖的单元，不放在继承链上。
+
+三条约束同样由 `tests/test_layering.py` 断言：
+
+- 扩展包只 import 别人的公开导出：`canary_framework.core`，不伸手进 `core.flow` /
+  `core.meta`；
+- 目录就是依赖关系：子包可以依赖父包（`asgi.fastapi → asgi`），父包不 import 子包，兄弟包
+  之间互不依赖，同样只到包为止；
+- 顶层包不 import 任何扩展包，因此 `import canary_framework` 始终不带入第三方包。
+
+两个扩展包需要同一样东西时，把它提取成它们共同的父包，而不是让一个依赖另一个——`asgi`
+就是这样分出来的：再包一个 ASGI 框架时，它是 `asgi` 下的又一个子包。
+
 ## 标记，而非改造
 
 装饰器只在方法上写一个标记，从不改造类。单元因此保持普通类的一切性质：可继承、可混入、

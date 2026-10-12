@@ -29,6 +29,15 @@ Canary Framework 从 1.0.0 起遵循[语义化版本](https://semver.org/lang/zh
   观察与调试，可能在次版本中变化。`Scope.instances`、`Scope.instance()`、`Scope.provide()`、
   `Scope.resolve()` 与 `Scope.key_of()` 在承诺范围内。
 
+## 扩展包 {#extensions}
+
+`canary_framework.test`、`canary_framework.config`、`canary_framework.asgi` 与
+`canary_framework.asgi.fastapi` 和核心一起发布、
+共用一个版本号，但目前是**暂行**的：在各自被宣布稳定之前，它们的 API 可能在次版本中调整，
+每一项都记录在变更日志中。上面的稳定性承诺只覆盖核心。
+
+核心不依赖任何扩展包，`import canary_framework` 也不会带入它们或它们的第三方依赖。
+
 ## 弃用
 
 公开的名字或行为只在主版本中移除，并且之前至少有一个次版本在使用它时发出
