@@ -42,15 +42,17 @@ This project follows Keep a Changelog and Semantic Versioning.
       启动并回收它的图。形参按名字与注解绑定，由 pydantic 校验；路由在 `@init` 时拍平成一张表，
       无法服务的声明当场抛 `DeclarationError`。没有依赖注入系统，也不做 OpenAPI。
     - `web.asgi.server` — `Server`, a unit that listens: binding the port is its `@start`,
-      closing is its `@stop`. It serves the application units it depends on directly (any
-      callable unit, each under its own `path`), or any ASGI application assigned to
-      `self.app` — a FastAPI object included. A port in use raises `OSError` and what started
+      closing is its `@stop`. It serves the application units it depends on directly (a unit
+      that is callable and declares a `path`), or any ASGI application assigned to `self.app`
+      — a FastAPI object included; `lifespan="on"` makes it drive that application's own
+      lifespan. A port in use raises `OSError` and what started
       is reclaimed; class parameters go to `uvicorn.Config`
       (`class Gateway(Server, timeout_graceful_shutdown=10)`). Install with
       `canary-framework[server]`.
 
-      `Server`：监听的单元。服务它直接依赖的应用单元（任何可调用的单元，各自应答自己的
-      `path`），或赋给 `self.app` 的任何 ASGI 应用，包括一个 FastAPI 对象。端口被占用时抛
+      `Server`：监听的单元。服务它直接依赖的应用单元（可调用并声明了 `path` 的单元），或赋给
+      `self.app` 的任何 ASGI 应用，包括一个 FastAPI 对象；`lifespan="on"` 时驱动该应用自己的
+      lifespan。端口被占用时抛
       `OSError`，已启动的依赖照常回收；类参数原样传给 `uvicorn.Config`。
     - `web.asgi.dispatch()` joins ASGI applications by path prefix; `canary-framework[web]`
       installs both sides.

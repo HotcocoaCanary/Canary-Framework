@@ -32,9 +32,10 @@ async with Gateway():
     ...
 ```
 
-Among the units a `Server` depends on directly, those that are ASGI applications (callable)
-are served on its port, each under its own `path` attribute; one without a `path` answers `/`.
-Dependencies that are not callable — a database, the settings — are not affected.
+Among the units a `Server` depends on directly, one that is **callable and declares a `path`**
+is an application, served on its port under that `path`. Both are required: a database or the
+settings are not callable; a strategy object that happens to define `__call__` has no `path` —
+they are ordinary dependencies.
 
 | Phase | What `Server` does |
 |---|---|
@@ -53,7 +54,8 @@ closing — and so does the database's. That is dependency order; nothing else a
 
 ## A hand-written application unit
 
-Any callable unit is an application unit; there is nothing to inherit:
+A unit that is callable and declares a `path` is an application unit; there is nothing to
+inherit:
 
 ```python
 class Metrics(Canary):
@@ -82,9 +84,58 @@ class Gateway(Server):
         self.app = fastapi_app
 ```
 
-`Server` sends the application no ASGI lifespan messages: starting and reclaiming belong to
-Canary's lifecycle. If the other framework's application relies on its own lifespan, write
-that part as a unit's `@start` / `@stop` and let the `Server` depend on it.
+### The application's own lifespan
+
+By default `Server` sends the application no ASGI lifespan messages: starting and reclaiming
+belong to Canary's lifecycle. That is a trap when migrating by "changing the server first" —
+the connection pool or cache warm-up an old application does in `lifespan` /
+`on_event("startup")` **silently does not happen**, while its endpoints still answer. Two ways
+out:
+
+- turn it on with a class parameter: `class Gateway(Server, lifespan="on")`. The application
+  starts inside the `Server`'s `@start`, before it listens, and is reclaimed inside `@stop`;
+  an application that fails to start fails the `Server`'s start, and what had started is
+  reclaimed as usual. This framework's application units have already been started by Canary
+  by then, so they only acknowledge and are not driven twice.
+- or move that part into a unit's `@start` / `@stop` and let the `Server` depend on it — where
+  a migration usually ends up.
+
+### Using units from another framework's endpoints
+
+Another framework's endpoints are module-level functions, not methods of units, so their
+dependencies cannot be `dep()`s and have to be looked up on the graph per request. With
+FastAPI the bridge is a dozen lines:
+
+```python
+from canary_framework import Canary
+from canary_framework.test import unit
+from fastapi import Depends, FastAPI, Request
+
+
+def attach(app: FastAPI, root: Canary) -> None:
+    app.state.graph = root          # called from the Server's @init: attach(fastapi_app, self)
+
+
+def use[T: Canary](cls: type[T]) -> T:
+    async def resolve(request: Request) -> T:       # must be async def
+        return unit(request.app.state.graph, cls)
+
+    return Depends(resolve)
+
+
+@fastapi_app.get("/readers/{reader_id}")
+async def show(reader_id: int, readers: ReaderService = use(ReaderService)) -> Reader:
+    return await readers.get(reader_id)
+```
+
+Two things:
+
+- **Write the dependency function as `async def`.** FastAPI runs a synchronous dependency in
+  a thread pool, one more thread switch per request; this one only looks up a dictionary, and
+  measured, the synchronous version cuts throughput to a third.
+- **Look units up by type with `canary_framework.test.unit`.** It lives in the `test` package,
+  but all it does is return a unit of a graph by its type, and using it in production code is
+  fine.
 
 ## How paths are dispatched
 
@@ -126,8 +177,9 @@ flight has finished: one long-lived connection that never ends holds the shutdow
 database and the other dependencies behind it are not reclaimed, and the process ends up
 being killed.
 
-`host` and `port` stay class attributes; `app`, `lifespan`, `reload` and `workers` belong
-elsewhere here, and passing one raises `TypeError` when the class is defined.
+`host` and `port` stay class attributes; `app`, `reload` and `workers` belong elsewhere here,
+and passing one raises `TypeError` when the class is defined. `lifespan` defaults to `"off"`;
+see above.
 
 WebSocket needs an implementation installed separately (`websockets` or `wsproto`); uvicorn
 does not bring one.
