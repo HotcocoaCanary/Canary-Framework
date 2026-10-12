@@ -3,8 +3,9 @@
 自省：读回一个类声明过的依赖与钩子。两者写在同一批类属性里，因此一次 MRO 遍历同时
 收集，结果按类缓存——声明在类创建之后不再变化。
 
-钩子按属性名解析，语义与普通方法一致：子类覆盖同名方法即替换，需要叠加时使用
-``super()``；不同名的混入钩子各自成立，基类在前。
+依赖与钩子都按属性名解析，语义与普通类属性一致：子类用同名属性覆盖即替换——换一条
+``dep()`` 就换掉那条依赖，换成别的东西就不再是依赖；钩子需要叠加时使用 ``super()``。
+不同名的各自成立，基类在前。
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ class Declaration(NamedTuple):
 
     一个类声明的全部内容。
 
-    :ivar deps: 它依赖的类型。基类在前，按定义顺序，按类型去重。
+    :ivar deps: 它依赖的类型。基类在前，按定义顺序，按类型去重；被子类同名属性覆盖掉的不算。
     :ivar hooks: 阶段名到该阶段钩子属性名的映射。基类在前。
     """
 
@@ -74,25 +75,41 @@ def hooks_of(unit: object, phase: Phase) -> list[_Bound]:
 def _scan(cls: type) -> Declaration:
     """Walk the MRO once, collecting dependencies and marked names together.
 
-    逆序遍历 ``__mro__``（基类到派生类），保证基类在前。先收集带过标记的属性名，再对
-    每个名字做一次常规属性解析：只有解析到的那一个函数仍带标记时该钩子才成立。
+    逆序遍历 ``__mro__``（基类到派生类），保证基类在前。先收集声明过依赖、带过标记的
+    属性名，再对每个名字做一次常规属性解析：只有解析到的那一个仍是依赖、仍带标记时才成立。
+    基类里的 ``thing = dep(Default)`` 被子类的 ``thing = dep(Replacement)`` 覆盖后，
+    ``Default`` 不再是依赖——否则它会被白白构造、启动一遍。
     """
-    deps: dict[type, None] = {}  # 有序集合：保留定义顺序并去重
+    declared: dict[str, None] = {}  # 有序集合：保留定义顺序并去重
     marked: dict[str, None] = {}
     for owner in reversed(cls.__mro__):
         if owner is object:
             continue  # object 的成员既不是依赖也不带标记
         for name, value in vars(owner).items():
             if isinstance(value, Dep):
-                deps[value.cls] = None
+                declared.setdefault(name)
             elif callable(value) and _phases_of(value):
                 marked.setdefault(name)
+
+    deps: dict[type, None] = {}
+    for name in declared:
+        resolved = _resolve(cls, name)
+        if isinstance(resolved, Dep):
+            deps[resolved.cls] = None
 
     hooks: dict[str, list[str]] = {}
     for name in marked:
         for phase_name in _phases_of(getattr(cls, name, None)):
             hooks.setdefault(phase_name, []).append(name)
     return Declaration(tuple(deps), {name: tuple(v) for name, v in hooks.items()})
+
+
+def _resolve(cls: type, name: str) -> object:
+    """按 MRO 找到 *name* 实际解析到的类属性，不触发描述符。"""
+    for owner in cls.__mro__:
+        if name in vars(owner):
+            return vars(owner)[name]
+    return None  # pragma: no cover —— name 取自 MRO 上某个类的 vars
 
 
 def _phases_of(obj: object) -> tuple[str, ...]:

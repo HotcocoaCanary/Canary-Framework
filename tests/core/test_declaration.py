@@ -68,3 +68,51 @@ def test_reading_a_dep_off_the_class_gives_back_the_declaration() -> None:
         anything = dep(Alpha)
 
     assert Uses.anything.cls is Alpha  # type: ignore[attr-defined]
+
+
+def test_a_dependency_overridden_by_name_is_replaced() -> None:
+    """依赖与钩子一样按属性名解析：子类换掉一条 ``dep()``，基类那条边就不在了。"""
+
+    class Default(Canary): ...
+
+    class Replacement(Default): ...
+
+    class Other(Canary): ...
+
+    class Base(Canary):
+        thing = dep(Default)
+        other = dep(Other)
+
+    class Derived(Base):
+        thing = dep(Replacement)
+
+    class Dropped(Base):
+        thing = None  # type: ignore[assignment]  # 换成别的东西：不再是依赖
+
+    class Added(Derived):
+        extra = dep(Default)
+
+    assert deps_of(Base) == (Default, Other)
+    assert deps_of(Derived) == (Replacement, Other), "顺序仍按首次声明的位置"
+    assert deps_of(Dropped) == (Other,)
+    assert deps_of(Added) == (Replacement, Other, Default)
+
+
+async def test_the_overridden_dependency_is_never_built() -> None:
+    built: list[str] = []
+
+    class Default(Canary):
+        def __init__(self) -> None:
+            built.append(type(self).__name__)
+
+    class Replacement(Default): ...
+
+    class Base(Canary):
+        thing = dep(Default)
+
+    class Derived(Base):
+        thing = dep(Replacement)
+
+    async with Derived() as unit:
+        assert type(unit.thing) is Replacement
+    assert built == ["Replacement"]
