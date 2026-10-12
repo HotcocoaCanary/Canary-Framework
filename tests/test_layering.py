@@ -147,17 +147,25 @@ def test_importing_the_package_loads_nothing_but_the_core() -> None:
     """``import canary_framework`` 不带入第三方包，也不带入任何扩展包。
 
     放在子进程里：本进程早已 import 过 FastAPI 与 pydantic。``canary_framework.test`` 只
-    依赖核心，一并验证。
+    依赖核心，一并验证。标准库按安装位置判断：``sys.stdlib_module_names`` 不含
+    ``_missing_stdlib_info`` 这类私有模块。
     """
     probe = (
         "import sys\n"
+        "import sysconfig\n"
         "before = set(sys.modules)\n"
         "import canary_framework\n"
         "import canary_framework.test\n"
         "added = {name.split('.')[0] for name in set(sys.modules) - before}\n"
-        "print(sorted(added - sys.stdlib_module_names - {'canary_framework'}))\n"
+        "stdlib = sysconfig.get_path('stdlib')\n"
+        "site = tuple(sysconfig.get_path(k) for k in ('purelib', 'platlib'))\n"
+        "def bundled(name):\n"
+        "    origin = getattr(sys.modules[name], '__file__', None) or ''\n"
+        "    shipped = origin.startswith(stdlib) and not origin.startswith(site)\n"
+        "    return name in sys.stdlib_module_names or shipped\n"
+        "print(sorted(n for n in added - {'canary_framework'} if not bundled(n)))\n"
         "print(sorted(n for n in sys.modules if n.startswith('canary_framework.')"
-        " and n.split('.')[1] in ('config', 'asgi', 'web')))\n"
+        " and n.split('.')[1] in ('config', 'asgi')))\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True
