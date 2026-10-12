@@ -6,11 +6,11 @@ from typing import Any
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from pydantic import BaseModel
 
 from canary_framework import Canary, dep, init, scope_of
-from canary_framework.asgi.fastapi import Router, delete, get, mount, post
+from canary_framework.asgi.fastapi import Router, api_route, delete, get, mount, post, websocket
 from canary_framework.test import unit
 
 pytestmark = pytest.mark.integration
@@ -29,7 +29,7 @@ class ReaderApi(Router, prefix="/readers", tags=["读者"]):
     readers = dep(ReaderService)
     routes = "属性叫什么都不与 FastAPI 冲突"
 
-    @get
+    @get("")
     async def search(self, keyword: str | None = None) -> list[Reader]:
         return [Reader(name=keyword or "all")]
 
@@ -37,7 +37,7 @@ class ReaderApi(Router, prefix="/readers", tags=["读者"]):
     async def get(self, reader_id: int) -> Reader:
         return await self.readers.find(reader_id)
 
-    @post(status_code=201)
+    @post("", status_code=201)
     async def create(self, body: Reader) -> Reader:
         return body
 
@@ -46,7 +46,7 @@ class ReaderApi(Router, prefix="/readers", tags=["读者"]):
 
 
 class LoanApi(Router, prefix="/loans", tags=["借阅"]):
-    @get
+    @get("")
     async def all(self) -> list[str]:
         return []
 
@@ -138,7 +138,7 @@ async def test_a_subclass_inherits_the_class_parameters_it_does_not_override() -
 
 async def test_other_parameters_go_to_the_api_router() -> None:
     class Old(Router, prefix="/old", deprecated=True):
-        @get
+        @get("")
         async def index(self) -> str:
             return "old"
 
@@ -156,7 +156,7 @@ async def test_other_parameters_go_to_the_api_router() -> None:
 
 async def test_only_routers_depended_on_directly_are_mounted() -> None:
     class Hidden(Router, prefix="/hidden"):
-        @get
+        @get("")
         async def index(self) -> str:
             return "hidden"
 
@@ -177,7 +177,7 @@ async def test_only_routers_depended_on_directly_are_mounted() -> None:
 
 async def test_a_router_depended_on_twice_appears_under_both_prefixes() -> None:
     class Shared(Router, prefix="/shared"):
-        @get
+        @get("")
         async def index(self) -> str:
             return "shared"
 
@@ -199,3 +199,42 @@ async def test_a_router_depended_on_twice_appears_under_both_prefixes() -> None:
     async with Host() as root:
         assert sorted(root.app.openapi()["paths"]) == ["/v1/shared", "/v2/shared"]
         assert unit(root, V1).shared is unit(root, V2).shared
+
+
+async def test_every_native_decorator_is_replayed_as_it_was_written() -> None:
+    """``websocket`` 与 ``api_route`` 也是原生的那两个：重放到真正的 ``APIRouter`` 上。"""
+
+    class Live(Router, prefix="/live"):
+        @api_route("/ping", methods=["GET", "POST"], status_code=202)
+        async def ping(self) -> dict[str, bool]:
+            return {"ok": True}
+
+        @websocket("/echo")
+        async def echo(self, ws: WebSocket) -> None:
+            await ws.accept()
+            await ws.send_text(f"hello {type(self).__name__}")
+            await ws.close()
+
+    class Root(Canary):
+        live = dep(Live)
+
+    async with Root() as root:
+        app = FastAPI()
+        mount(root, app)
+        async with _client(app) as client:
+            assert (await client.get("/live/ping")).status_code == 202
+            assert (await client.post("/live/ping")).status_code == 202
+
+        sent: list[Any] = []
+        incoming = iter([{"type": "websocket.connect"}])
+
+        async def receive() -> Any:
+            return next(incoming)
+
+        async def send(message: Any) -> None:
+            sent.append(message)
+
+        scope = {"type": "websocket", "path": "/live/echo", "query_string": b"", "headers": []}
+        await app(scope, receive, send)
+    assert [m["type"] for m in sent] == ["websocket.accept", "websocket.send", "websocket.close"]
+    assert sent[1]["text"] == "hello Live"

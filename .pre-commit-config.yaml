@@ -36,5 +36,6 @@ repos:
         # 扩展包的第三方依赖：没有它们，mypy 看不到 FastAPI 与 pydantic 的类型。
         additional_dependencies:
           - fastapi>=0.121
+          - pydantic>=2.7
           - uvicorn>=0.52
           - pydantic-settings>=2.15

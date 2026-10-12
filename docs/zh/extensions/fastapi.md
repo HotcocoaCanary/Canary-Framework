@@ -23,15 +23,15 @@ from canary_framework.asgi.fastapi import App, Router, get, post
 class ReaderApi(Router, prefix="/readers", tags=["读者"]):
     readers = dep(ReaderService)
 
-    @get
+    @get("")
     async def search(self, keyword: str | None = None) -> list[Reader]:
         return await self.readers.search(keyword)
 
     @get("/{reader_id}")
-    async def get(self, reader_id: int) -> Reader:
+    async def show(self, reader_id: int) -> Reader:
         return await self.readers.get(reader_id)
 
-    @post(status_code=201)
+    @post("", status_code=201)
     async def create(self, body: NewReader) -> Reader:
         return await self.readers.create(body)
 
@@ -62,13 +62,23 @@ asyncio.run(main())
 
 ## 路由标记
 
-`get` / `post` / `put` / `patch` / `delete` 把单元的方法标记为接口。它们只打标记，不改造
-方法——和 `@init` / `@start` / `@stop` 是同一个思路。
+`get` / `post` / `put` / `patch` / `delete` / `head` / `options` / `trace` / `api_route` /
+`websocket` 就是 FastAPI `APIRouter` 的同名装饰器：名字、参数、默认值都一样，IDE 的补全和
+FastAPI 的文档原样适用。区别只有一点——它们只把这次调用记在方法上，不改造方法；应用启动时
+再原样重放到一个真正的 `APIRouter` 上，被装饰的是**绑定方法**。
 
-- 方法签名由 FastAPI 解释：查询参数、路径参数、请求体、返回值的序列化，都是 FastAPI 的规则。
-- 路径省略时即所在路由单元的前缀本身：上例的 `@get` 对应 `GET /api/readers`。
-- 其余关键字参数原样传给 FastAPI（`status_code`、`response_model`、`summary` ……）。
-- 接口方法是绑定方法，直接用 `self` 上的依赖，不需要 `Depends`。
+- 你会的 FastAPI 写法都照旧：`response_model`、`status_code`、`dependencies`、`Depends`、
+  `WebSocket` ……
+- 路径必须写，和 FastAPI 一样。`""` 即所在路由单元的前缀本身：上例的 `@get("")` 对应
+  `GET /api/readers`；应用单元自己的接口没有前缀，根路径写 `"/"`。
+- 接口方法是绑定方法，单元之间的依赖直接用 `self` 上的 `dep()`；请求级的东西仍然可以用
+  `Depends`。
+
+与原生 FastAPI 的差别只有两处，也正是这个包存在的理由：接口是单元的方法，以及路由靠依赖
+聚合而不是 `include_router`。想要一套不同的、更小的 Web 层，见 [`asgi.web`](web.md)。
+
+!!! warning "方法别叫 `get`"
+    在类体里定义一个叫 `get` 的方法，会遮住它后面的 `@get`。给方法起别的名字。
 
 标记按**属性名**解析，与生命周期钩子一致：子类覆盖同名方法即替换；覆盖但不再标记时，它不再
 是接口。
@@ -81,7 +91,7 @@ asyncio.run(main())
 它仍是普通单元：
 
 - 有自己的依赖与钩子；
-- 接口方法是普通方法，测试里可以不经 HTTP 直接 `await api.get(3)`；
+- 接口方法是普通方法，测试里可以不经 HTTP 直接 `await api.show(3)`；
 - 它不是 FastAPI 的 `APIRouter`，方法与属性叫什么都不会与 FastAPI 冲突。
 
 `prefix` 与 `tags` 之外的类参数原样传给 `APIRouter`。子类继承父类的类参数，只覆盖自己写出

@@ -131,6 +131,7 @@ Four optional packages sit beside the core. The core never imports them, so
 | [`canary_framework.config`](https://hotcocoacanary.github.io/Canary-Framework/extensions/config/) | `Settings` — a pydantic-settings model that is a unit | `canary-framework[config]` |
 | [`canary_framework.asgi`](https://hotcocoacanary.github.io/Canary-Framework/extensions/asgi/) | `App` and `Server` — applications are units, and one server listens for those it depends on | `canary-framework[asgi]` |
 | [`canary_framework.asgi.fastapi`](https://hotcocoacanary.github.io/Canary-Framework/extensions/fastapi/) | `Router` and `App` — FastAPI routes on units | `canary-framework[fastapi]` |
+| [`canary_framework.asgi.web`](https://hotcocoacanary.github.io/Canary-Framework/extensions/web/) | A small web framework of its own — no OpenAPI, pydantic only | `canary-framework[web]` |
 
 ```python
 from canary_framework import asgi, dep
@@ -141,7 +142,7 @@ class ReaderApi(Router, prefix="/readers"):
     readers = dep(ReaderService)
 
     @get("/{reader_id}")
-    async def get(self, reader_id: int) -> Reader:
+    async def show(self, reader_id: int) -> Reader:
         return await self.readers.get(reader_id)
 
 

@@ -3,9 +3,9 @@
 这条测试把架构从"文档里的说法"变成"可执行的约束"：任何一次让 meta 反过来 import
 flow 的改动，都会在这里失败。
 
-扩展包（``test`` / ``config`` / ``asgi``）与 ``core`` 平级，``asgi.fastapi`` 是 ``asgi`` 的
-子包。目录就是依赖关系，另有三条约束：只用核心的公开导出；子包可以依赖父包、且只用父包的
-公开导出，父包不 import 子包，兄弟包互不依赖；顶层包不 import 它们——所以
+扩展包（``test`` / ``config`` / ``asgi``）与 ``core`` 平级，``asgi.fastapi`` 与 ``asgi.web``
+是 ``asgi`` 的子包。目录就是依赖关系，另有三条约束：只用核心的公开导出；子包可以依赖父包、
+且只用父包的公开导出，父包不 import 子包，兄弟包互不依赖；顶层包不 import 它们——所以
 ``import canary_framework`` 始终不带入任何第三方包。
 """
 
@@ -39,10 +39,16 @@ LAYERS = {
     "asgi.fastapi.router": 10,
     "asgi.fastapi.app": 11,
     "asgi.fastapi": 12,
+    "asgi.web.http": 9,
+    "asgi.web.routes": 10,
+    "asgi.web.binding": 11,
+    "asgi.web.router": 12,
+    "asgi.web.app": 13,
+    "asgi.web": 14,
 }
 
 #: 扩展包。带点的是子包：它可以依赖自己的各级父包，除此之外扩展包之间互不依赖。
-EXTENSIONS = ("test", "config", "asgi", "asgi.fastapi")
+EXTENSIONS = ("test", "config", "asgi", "asgi.fastapi", "asgi.web")
 
 
 def _layer(module: str) -> int:

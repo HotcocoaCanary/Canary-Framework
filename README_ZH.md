@@ -124,6 +124,7 @@ app = FastAPI(lifespan=lifespan)
 | [`canary_framework.config`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/config/) | `Settings`：同时是单元的 pydantic-settings 模型 | `canary-framework[config]` |
 | [`canary_framework.asgi`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/asgi/) | `App` 与 `Server`：应用是单元，一个服务器监听它依赖的全部应用 | `canary-framework[asgi]` |
 | [`canary_framework.asgi.fastapi`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/fastapi/) | `Router` 与 `App`：FastAPI 路由写在单元上 | `canary-framework[fastapi]` |
+| [`canary_framework.asgi.web`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/web/) | 自研的小型 Web 框架：不做 OpenAPI，只依赖 pydantic | `canary-framework[web]` |
 
 ```python
 from canary_framework import asgi, dep
@@ -134,7 +135,7 @@ class ReaderApi(Router, prefix="/readers"):
     readers = dep(ReaderService)
 
     @get("/{reader_id}")
-    async def get(self, reader_id: int) -> Reader:
+    async def show(self, reader_id: int) -> Reader:
         return await self.readers.get(reader_id)
 
 

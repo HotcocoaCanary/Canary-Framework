@@ -23,7 +23,7 @@ class Router(Canary):
             readers = dep(ReaderService)
 
             @get("/{reader_id}")
-            async def get(self, reader_id: int) -> Reader:
+            async def show(self, reader_id: int) -> Reader:
                 return await self.readers.get(reader_id)
 
     聚合就是依赖：``dep()`` 一个路由单元，它就挂在自己之下，前缀逐层叠加::
@@ -73,12 +73,11 @@ def mount(unit: Canary, into: FastAPI | APIRouter) -> None:
                 mount(root, app)
                 yield
 
-    根路径在应用上写作 ``/``，因此应用自身的 ``@get`` 省略路径时即 ``/``。
+    每个标记都原样重放：``@get("/x", status_code=201)`` 就是对 *into* 调用
+    ``into.get("/x", status_code=201)(绑定方法)``，语义与原生 FastAPI 完全一致。
     """
-    top = isinstance(into, FastAPI)
     for route, endpoint in routes_of(unit):
-        path = route.path or "/" if top else route.path
-        into.add_api_route(path, endpoint, methods=[route.method], **route.options)
+        getattr(into, route.verb)(*route.args, **route.kwargs)(endpoint)
     instances = scope_of(unit).instances
     for cls in deps_of(type(unit)):
         child = instances[cls]
