@@ -68,6 +68,8 @@ plugins:
             Extensions: 扩展
             Testing: 测试
             Configuration: 配置
+            Web Application: Web 应用
+            Web Server: Web 服务器
             Reference: 参考
             API Reference: API 参考
             Architecture: 架构
@@ -111,9 +113,8 @@ nav:
   - Extensions:
       - Testing: extensions/test.md
       - Configuration: extensions/config.md
-      - ASGI: extensions/asgi.md
-      - FastAPI: extensions/fastapi.md
-      - Web: extensions/web.md
+      - Web Application: extensions/app.md
+      - Web Server: extensions/server.md
   - Reference:
       - API Reference: api-reference.md
       - Architecture: architecture.md

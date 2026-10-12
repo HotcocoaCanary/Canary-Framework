@@ -1,32 +1,28 @@
-# ASGI
+# Web server
 
-`canary_framework.asgi` splits "application" and "listening" into two kinds of unit:
-
-- **`App`** is an application unit: one ASGI application that does not listen.
-  The `App` of [`asgi.fastapi`](fastapi.md) is one.
-- **`Server`** is the unit that listens: one per port, serving the application units it
-  depends on directly.
-
-Applications are values and there can be many; what has to be unique is the port. So however
-many services a process holds, there is one listener.
+The `Server` of `canary_framework.web.asgi.server` is a unit that listens on a port: listening
+is its `@start`, closing is its `@stop`. It stands on the server side of the ASGI protocol and
+serves **any** ASGI application — this framework's [application unit](app.md), a FastAPI
+object, a hand-written `async def app(scope, receive, send)`.
 
 ```bash
-pip install "canary-framework[asgi]"
+pip install "canary-framework[server]"
 ```
 
 !!! note "Provisional API"
-    Extensions may change in a minor release until they are declared stable — see
-    [Versioning & Compatibility](../versioning.md#extensions).
+    Extensions may change in a minor release until they are declared stable; see
+    [Versioning](../versioning.md#extensions).
 
-## One port, several applications
+## Depending is serving
 
 ```python
-from canary_framework import asgi, dep
+from canary_framework import dep
+from canary_framework.web.asgi.server import Server
 
 
-class Gateway(asgi.Server):
-    api = dep(LibraryApi)           # a FastAPI application unit, answering /
-    metrics = dep(Metrics)          # another application unit, answering /metrics
+class Gateway(Server):
+    api = dep(LibraryApi)           # an application unit, answering /
+    metrics = dep(Metrics)          # another, answering /metrics
 
     host = "0.0.0.0"
     port = 8010
@@ -36,72 +32,92 @@ async with Gateway():
     ...
 ```
 
-**Depending is serving**: the application units a `Server` depends on directly are all on its
-port, each answering its own `path`. It is the same rule as for routers.
+Among the units a `Server` depends on directly, those that are ASGI applications (callable)
+are served on its port, each under its own `path` attribute; one without a `path` answers `/`.
+Dependencies that are not callable — a database, the settings — are not affected.
 
 | Phase | What `Server` does |
 |---|---|
-| `@start` | Binds the port and starts serving. Everything it depends on has started by now |
+| `@start` | Binds the port and starts serving. Everything it depends on has started |
 | `@stop` | Stops accepting connections and waits for requests in flight |
 
-Applications are the depended-on side, so their `@start` comes before listening and their
-`@stop` after closing — and so does the database's. That is just dependency order; nothing else
-has to be arranged.
+Applications are depended on, so their `@start` runs before listening and their `@stop` after
+closing — and so does the database's. That is dependency order; nothing else arranges it.
 
-A port in use makes `start()` raise `OSError`, and the dependencies that started are reclaimed
-as usual. `port = 0` lets the system pick one; once serving, `server.port` is the actual port.
-Two applications with the same `path` make `start()` raise `LifecycleError`.
+- A port in use makes `start()` raise `OSError`, and what had started is reclaimed as usual.
+- `port = 0` lets the system pick one. While serving, `server.port` is the actual port; after
+  stopping it is 0 again, so a restart asks for a new one.
+- Two applications with the same `path` make `start()` raise `LifecycleError`.
+- One application unit can be depended on by two `Server`s — a public port and an internal
+  one, say — and is still a single instance.
 
-One application unit may be depended on by two `Server`s — a public port and an internal one,
-say; it is still a single instance.
+## A hand-written application unit
 
-## How paths are dispatched
-
-A request goes to the application with the **longest matching prefix**, matched by whole
-segments: `/api` answers `/api` and `/api/...` but not `/apix`; `/` answers everything else.
-With no match, HTTP gets a 404.
-
-Requests are forwarded, not rewritten: the application still sees the full path, so its own
-routes must include the prefix. This is not "mounting" in Starlette's sense.
-
-## An application unit of your own
-
-Any ASGI application can be an application unit; assign it to `self.app` in `@init`:
+Any callable unit is an application unit; there is nothing to inherit:
 
 ```python
-class Metrics(asgi.App):
+class Metrics(Canary):
     registry = dep(Registry)
 
     path = "/metrics"
 
-    @init
-    def build(self) -> None:
-        self.app = make_asgi_app(self.registry)
+    async def __call__(self, scope, receive, send) -> None:
+        await self.registry.asgi_app(scope, receive, send)
 ```
 
-## Assembling by hand
+## An application from another framework
 
-Assign `self.app` in a `Server`'s `@init` and that is what it serves; the application units it
-depends on are no longer added automatically. `dispatch` is the same function the automatic
-assembly uses:
+Assign any ASGI application to `self.app` in an `@init` hook. Once assigned it is what gets
+served, and the application units depended on are no longer added automatically:
 
 ```python
-class Gateway(asgi.Server):
+fastapi_app = FastAPI()
+
+
+class Gateway(Server):
+    port = 8010
+
+    @init
+    def build(self) -> None:
+        self.app = fastapi_app
+```
+
+`Server` sends the application no ASGI lifespan messages: starting and reclaiming belong to
+Canary's lifecycle. If the other framework's application relies on its own lifespan, write
+that part as a unit's `@start` / `@stop` and let the `Server` depend on it.
+
+## How paths are dispatched
+
+A request goes to the application with the **longest matching prefix**, and prefixes match
+whole segments: `/api` answers `/api` and `/api/...`, not `/apix`; `/` answers everything else.
+With no match, HTTP gets a 404.
+
+Requests are forwarded, not rewritten: the application still sees the full path, so its own
+routes include the prefix. This is not "mounting" in Starlette's sense.
+
+The automatic assembly uses `canary_framework.web.asgi.dispatch`; use it directly to assemble
+by hand:
+
+```python
+from canary_framework.web.asgi import dispatch
+
+
+class Gateway(Server):
     api = dep(LibraryApi)
     port = 8010
 
     @init
     def build(self) -> None:
-        self.app = asgi.dispatch({"/legacy": legacy_wsgi_bridge, "/": self.api.app})
+        self.app = dispatch({"/legacy": legacy_app, "/": self.api})
 ```
 
 ## Configuring uvicorn
 
-Class parameters go to `uvicorn.Config` unchanged; a subclass inherits its parent's and
-overrides only the ones it writes:
+`Server` uses uvicorn inside. Class parameters go to `uvicorn.Config` unchanged; a subclass
+inherits its parent's and overrides only the ones it writes:
 
 ```python
-class Gateway(asgi.Server, timeout_graceful_shutdown=10, proxy_headers=True):
+class Gateway(Server, timeout_graceful_shutdown=10, proxy_headers=True):
     api = dep(LibraryApi)
 ```
 
@@ -113,17 +129,18 @@ being killed.
 `host` and `port` stay class attributes; `app`, `lifespan`, `reload` and `workers` belong
 elsewhere here, and passing one raises `TypeError` when the class is defined.
 
+WebSocket needs an implementation installed separately (`websockets` or `wsproto`); uvicorn
+does not bring one.
+
 ## Canary owns the process
 
 The lifecycle is driven by Canary, so:
 
-- ASGI lifespan is off. Whatever startup and cleanup an application needs belongs in its
-  unit's `@start` / `@stop`;
-- the server does not take over signals; the entry point decides when to exit;
-- there is no `uvicorn main:app`, hence no `--reload` or `--workers`. Run several processes
-  with container replicas or a process manager.
+- the server does not take over signals; when to exit is up to the entry point;
+- there is no `--reload` or `--workers`. When you need them, do not use `Server`: hand the
+  [application unit](app.md) to uvicorn directly.
 
-An entry point that reacts to signals:
+An entry point that responds to signals:
 
 ```python
 async def main() -> None:
@@ -138,3 +155,14 @@ async def main() -> None:
 
 A `Server` need not be the root. A daemon that also opens an admin port is one more
 `dep(AdminServer)` on its root.
+
+## Testing
+
+```python
+class TestGateway(Gateway):
+    port = 0
+
+
+async with running(TestGateway) as gateway, httpx.AsyncClient() as client:
+    response = await client.get(f"http://127.0.0.1:{gateway.port}/api/readers/7")
+```

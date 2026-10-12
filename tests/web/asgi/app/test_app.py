@@ -9,14 +9,16 @@ import logging
 import threading
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 import pytest
 from pydantic import BaseModel
 
-from canary_framework import Canary, DeclarationError, asgi, dep, init
-from canary_framework.asgi.web import (
+from canary_framework import Canary, DeclarationError, LifecycleError, dep, init, start, stop
+from canary_framework.test import running, unit
+from canary_framework.web.asgi import Application
+from canary_framework.web.asgi.app import (
     App,
     HTTPError,
     Request,
@@ -28,7 +30,7 @@ from canary_framework.asgi.web import (
     post,
     put,
 )
-from canary_framework.test import running, unit
+from canary_framework.web.asgi.server import Server
 
 pytestmark = pytest.mark.functional
 
@@ -154,13 +156,13 @@ class Library(App):
         return Response.json({"msg": f"no reader {exc.reader_id}", "at": request.path}, status=404)
 
 
-def _client(app: asgi.Application) -> httpx.AsyncClient:
+def _client(app: Application) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
 
 
 @pytest.fixture
 async def http() -> AsyncIterator[httpx.AsyncClient]:
-    async with running(Library) as library, _client(library.app) as client:
+    async with running(Library) as library, _client(library) as client:
         yield client
 
 
@@ -322,7 +324,7 @@ async def test_a_marked_method_answers_its_exception_type(http: httpx.AsyncClien
 async def test_an_unhandled_exception_is_500_and_logged_without_leaking(
     http: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
 ) -> None:
-    with caplog.at_level(logging.ERROR, logger="canary_framework.asgi.web"):
+    with caplog.at_level(logging.ERROR, logger="canary_framework.web.asgi.app"):
         response = await http.get("/api/misc/bug")
     assert (response.status_code, response.json()) == (500, {"detail": "Internal Server Error"})
     assert "GET /api/misc/bug failed" in caplog.text
@@ -341,7 +343,7 @@ async def test_the_closest_handler_wins_and_http_errors_can_be_restyled() -> Non
             return {"caught": type(exc).__name__}
 
     loop = threading.get_ident()
-    async with running(Styled) as app, _client(app.app) as http:
+    async with running(Styled) as app, _client(app) as http:
         assert (await http.get("/nowhere")).json() == {"code": 404, "msg": "Not Found"}
         assert (await http.get("/api/readers/x")).json()["code"] == 422
         assert (await http.get("/api/readers/99")).json()["msg"] == "no reader 99"
@@ -359,9 +361,9 @@ async def test_a_handler_that_fails_falls_back(caplog: pytest.LogCaptureFixture)
         async def worse(self, request: Request, exc: Exception) -> Response:
             raise RuntimeError("处理器自己坏了")
 
-    async with running(Failing) as app, _client(app.app) as http:
+    async with running(Failing) as app, _client(app) as http:
         assert (await http.get("/api/readers/99")).status_code == 410
-        with caplog.at_level(logging.ERROR, logger="canary_framework.asgi.web"):
+        with caplog.at_level(logging.ERROR, logger="canary_framework.web.asgi.app"):
             assert (await http.get("/api/misc/bug")).status_code == 500
         assert "处理器自己坏了" in caplog.text
 
@@ -378,7 +380,7 @@ async def test_an_endpoint_is_an_ordinary_method() -> None:
 
 
 async def test_it_is_served_by_a_server_over_a_real_socket() -> None:
-    class Gateway(asgi.Server):
+    class Gateway(Server):
         library = dep(Library)
         port = 0
 
@@ -403,7 +405,7 @@ async def test_a_subclass_init_can_wrap_the_app_in_middleware() -> None:
 
             self.app = stamped
 
-    async with running(Wrapped) as app, _client(app.app) as http:
+    async with running(Wrapped) as app, _client(app) as http:
         assert (await http.get("/")).headers["x-stamp"] == "1"
 
 
@@ -417,9 +419,144 @@ async def test_other_scope_types_are_refused_or_ignored() -> None:
         raise AssertionError("not read")
 
     async with running(Library) as library:
-        await library.app({"type": "websocket", "path": "/"}, receive, send)
-        await library.app({"type": "lifespan"}, receive, send)
+        await library({"type": "websocket", "path": "/"}, receive, send)
+        await library({"type": "something-else"}, receive, send)
     assert sent == [{"type": "websocket.close", "code": 1008}]
+
+
+# --- 它自己就是一个 ASGI 应用 -------------------------------------------------
+
+
+class Pool(Canary):
+    log: ClassVar[list[str]] = []
+
+    @start
+    def open(self) -> None:
+        self.log.append("pool open")
+
+    @stop
+    def close(self) -> None:
+        self.log.append("pool close")
+
+
+class Pooled(App):
+    pool = dep(Pool)
+
+    @get("/")
+    async def root(self) -> dict[str, list[str]]:
+        return {"log": self.pool.log}
+
+
+@pytest.fixture
+def pool_log() -> list[str]:
+    Pool.log = []
+    return Pool.log
+
+
+async def _lifespan(app: Application, *incoming: str) -> list[dict[str, Any]]:
+    messages = iter({"type": f"lifespan.{name}"} for name in incoming)
+    sent: list[dict[str, Any]] = []
+
+    async def receive() -> Any:
+        return next(messages)
+
+    async def send(message: Any) -> None:
+        sent.append(dict(message))
+
+    await app({"type": "lifespan"}, receive, send)
+    return sent
+
+
+async def test_lifespan_messages_drive_the_graph_when_nothing_else_has(
+    pool_log: list[str],
+) -> None:
+    """交给别的 ASGI 服务器时，图由它的 lifespan 消息驱动：启动时按序就位，停止时逆序回收。"""
+    app = Pooled()
+    inbox: asyncio.Queue[dict[str, str]] = asyncio.Queue()
+    sent: list[str] = []
+    started = asyncio.Event()
+
+    async def send(message: Any) -> None:
+        sent.append(message["type"])
+        started.set()
+
+    serving = asyncio.create_task(app({"type": "lifespan"}, inbox.get, send))
+    inbox.put_nowait({"type": "lifespan.startup"})
+    await started.wait()
+    async with _client(app) as http:
+        assert (await http.get("/")).json() == {"log": ["pool open"]}
+    inbox.put_nowait({"type": "lifespan.shutdown"})
+    await serving
+    assert sent == ["lifespan.startup.complete", "lifespan.shutdown.complete"]
+    assert pool_log == ["pool open", "pool close"]
+
+
+async def test_a_graph_canary_started_is_only_acknowledged(pool_log: list[str]) -> None:
+    """已经由 Canary 启动的单元收到 lifespan 消息时只应答：不重复启动，也不替别人回收。"""
+    async with running(Pooled) as app:
+        assert await _lifespan(app, "startup", "shutdown") == [
+            {"type": "lifespan.startup.complete"},
+            {"type": "lifespan.shutdown.complete"},
+        ]
+        assert pool_log == ["pool open"]
+        async with _client(app) as http:
+            assert (await http.get("/")).status_code == 200
+    assert pool_log == ["pool open", "pool close"]
+
+
+async def test_a_startup_or_shutdown_failure_is_reported_to_the_server(
+    pool_log: list[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    class WontStart(Pooled):
+        @start
+        def refuse(self) -> None:
+            raise RuntimeError("连不上数据库")
+
+    class WontStop(Pooled):
+        @stop
+        def refuse(self) -> None:
+            raise RuntimeError("关不掉")
+
+    with caplog.at_level(logging.ERROR, logger="canary_framework.web.asgi.app"):
+        assert await _lifespan(WontStart(), "startup") == [
+            {"type": "lifespan.startup.failed", "message": "RuntimeError: 连不上数据库"}
+        ]
+        assert pool_log == ["pool open", "pool close"], "已经启动的依赖照常回收"
+        sent = await _lifespan(WontStop(), "startup", "shutdown")
+    assert [m["type"] for m in sent] == ["lifespan.startup.complete", "lifespan.shutdown.failed"]
+    assert "ExceptionGroup" in sent[1]["message"]
+    assert "关不掉" in caplog.text, "完整的异常在日志里"
+    assert "WontStart failed to start" in caplog.text
+    assert "WontStop failed to stop" in caplog.text
+
+
+async def test_a_request_before_the_lifecycle_says_what_is_missing() -> None:
+    with pytest.raises(LifecycleError, match="was asked to serve before its lifecycle began"):
+        async with _client(Pooled()) as http:
+            await http.get("/")
+
+
+async def test_any_asgi_server_can_serve_it(pool_log: list[str]) -> None:
+    """``uvicorn main:app`` 的那条路：一个没有启动过的单元实例，交给原生的 uvicorn。"""
+    import socket
+
+    import uvicorn
+
+    app = Pooled()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+    sock.bind(("127.0.0.1", 0))
+    server = uvicorn.Server(uvicorn.Config(app, lifespan="on", log_config=None))
+    server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
+    serving = asyncio.create_task(server.serve(sockets=[sock]))
+    while not server.started:
+        await asyncio.sleep(0.01)
+    async with httpx.AsyncClient() as http:
+        answer = await http.get(f"http://127.0.0.1:{sock.getsockname()[1]}/")
+    server.should_exit = True
+    await serving
+    sock.close()
+    assert answer.json() == {"log": ["pool open"]}
+    assert pool_log == ["pool open", "pool close"]
 
 
 # --- 声明错误在启动时抛出 ----------------------------------------------------

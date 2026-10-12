@@ -129,13 +129,15 @@ Four optional packages sit beside the core. The core never imports them, so
 |---|---|---|
 | [`canary_framework.test`](https://hotcocoacanary.github.io/Canary-Framework/extensions/test/) | `running()` and `unit()` — start a graph on test doubles | included |
 | [`canary_framework.config`](https://hotcocoacanary.github.io/Canary-Framework/extensions/config/) | `Settings` — a pydantic-settings model that is a unit | `canary-framework[config]` |
-| [`canary_framework.asgi`](https://hotcocoacanary.github.io/Canary-Framework/extensions/asgi/) | `App` and `Server` — applications are units, and one server listens for those it depends on | `canary-framework[asgi]` |
-| [`canary_framework.asgi.fastapi`](https://hotcocoacanary.github.io/Canary-Framework/extensions/fastapi/) | `Router` and `App` — FastAPI routes on units | `canary-framework[fastapi]` |
-| [`canary_framework.asgi.web`](https://hotcocoacanary.github.io/Canary-Framework/extensions/web/) | A small web framework of its own — no OpenAPI, pydantic only | `canary-framework[web]` |
+| [`canary_framework.web.asgi.app`](https://hotcocoacanary.github.io/Canary-Framework/extensions/app/) | Application units — a small web framework whose application is itself an ASGI app, for any ASGI server | `canary-framework[app]` |
+| [`canary_framework.web.asgi.server`](https://hotcocoacanary.github.io/Canary-Framework/extensions/server/) | The server unit — listening is part of the lifecycle, and it serves any ASGI app | `canary-framework[server]` |
+
+`canary-framework[web]` installs the last two together.
 
 ```python
-from canary_framework import asgi, dep
-from canary_framework.asgi.fastapi import App, Router, get
+from canary_framework import dep
+from canary_framework.web.asgi.app import App, Router, get
+from canary_framework.web.asgi.server import Server
 
 
 class ReaderApi(Router, prefix="/readers"):
@@ -146,18 +148,21 @@ class ReaderApi(Router, prefix="/readers"):
         return await self.readers.get(reader_id)
 
 
-class LibraryApi(App, title="Library API"):
+class LibraryApi(App):
     readers = dep(ReaderApi)
 
 
-class Gateway(asgi.Server):
-    api = dep(LibraryApi)  # another App unit here would share the port
+class Gateway(Server):
+    api = dep(LibraryApi)  # another application unit here would share the port
     port = 8010
 
 
 async with Gateway():  # dependencies start, then it listens
     ...
 ```
+
+The application and the server know only the ASGI protocol, so they also work apart:
+`app = LibraryApi()` then `uvicorn main:app`, or a `Server` serving a FastAPI application.
 
 Extensions are provisional: their API may still change in a minor release.
 

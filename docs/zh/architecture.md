@@ -38,30 +38,31 @@ canary            门面：Canary 基类与 dep()
 
 ## 扩展包
 
-`test`、`config`、`asgi` 与 `core` 平级，`asgi/fastapi` 与 `asgi/web` 是 `asgi` 的子包：
+`test`、`config`、`web` 与 `core` 平级：
 
 | 包 | 内容 | 建在谁之上 | 第三方依赖 |
 |---|---|---|---|
 | `test/` | `running` 与 `unit` | `core` | 无 |
 | `config/` | `Settings` | `core` | pydantic-settings |
-| `asgi/` | `App`、`Server` 与 `dispatch`，内部 `server → app` | `core` | uvicorn |
-| `asgi/fastapi/` | `Router`、`App` 与路由标记，内部 `app → router → routes` | `core`、`asgi` | FastAPI |
-| `asgi/web/` | 自研的 Web 框架：`Router`、`App`、请求与响应，内部 `app → router → binding → routes → http` | `core`、`asgi` | pydantic |
+| `web/asgi/` | 协议层：ASGI 应用的类型与 `dispatch` | `core` | 无 |
+| `web/asgi/app/` | 应用单元：`Router`、`App`、请求与响应，内部 `app → router → binding → routes → http` | `core`、`web.asgi` | pydantic |
+| `web/asgi/server/` | 服务器单元：`Server` | `core`、`web.asgi` | uvicorn |
 
-`asgi` 把三个角色分开：贡献者（路由单元）可以有很多；应用（`App`）只是一个
-值，自己不监听；监听器（`Server`）每个端口一个，服务它直接依赖的应用。需要唯一的东西是
-被依赖的单元，不放在继承链上。
+`web/asgi` 按协议的两侧分成两个子包。`app` 是应用一侧：应用单元自己就是一个 ASGI 应用，可以
+交给任何 ASGI 服务器。`server` 是服务器一侧：它服务任何 ASGI 应用。两者互不依赖，只共用父包
+里的协议层，所以"本框架的应用配别人的服务器""别人的应用配本框架的服务器"都成立，中间不需要
+适配层。
 
 三条约束同样由 `tests/test_layering.py` 断言：
 
 - 扩展包只 import 别人的公开导出：`canary_framework.core`，不伸手进 `core.flow` /
   `core.meta`；
-- 目录就是依赖关系：子包可以依赖父包（`asgi.fastapi → asgi`、`asgi.web → asgi`），父包不 import 子包，兄弟包
-  之间互不依赖，同样只到包为止；
+- 目录就是依赖关系：子包可以依赖父包（`web.asgi.app → web.asgi`、
+  `web.asgi.server → web.asgi`），父包不 import 子包，兄弟包之间互不依赖，同样只到包为止；
 - 顶层包不 import 任何扩展包，因此 `import canary_framework` 始终不带入第三方包。
 
-两个扩展包需要同一样东西时，把它提取成它们共同的父包，而不是让一个依赖另一个——`asgi`
-就是这样分出来的：再包一个 ASGI 框架时，它是 `asgi` 下的又一个子包。
+两个扩展包需要同一样东西时，把它提取成它们共同的父包，而不是让一个依赖另一个——`dispatch`
+就是这样放在 `web/asgi` 里的。
 
 ## 标记，而非改造
 

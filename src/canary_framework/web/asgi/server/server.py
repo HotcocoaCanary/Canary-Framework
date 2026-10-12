@@ -14,36 +14,37 @@ from typing import Any, ClassVar
 
 import uvicorn
 
-from canary_framework.asgi.app import App, Application, dispatch
 from canary_framework.core import Canary, LifecycleError, deps_of, scope_of, start, stop
+from canary_framework.web.asgi import Application, dispatch
 
 #: 不能当作类参数传给 uvicorn 的选项：它们在这里另有归属。
 _OWNED = frozenset({"app", "host", "port", "uds", "fd", "lifespan", "reload", "workers"})
 
 
 class Server(Canary):
-    """A unit that listens on one port and serves the applications it depends on.
+    """A unit that listens on one port and serves the ASGI applications it is given.
 
     服务器单元：监听一个端口。``host`` / ``port`` 是普通类属性，服务什么有两种给法。
 
-    **依赖即服务**——它直接依赖的 :class:`~canary_framework.asgi.App` 单元都在这个端口上，
-    各自应答自己的 ``path``::
+    **依赖即服务**——它直接依赖的单元里，凡是 ASGI 应用（可调用）的都在这个端口上，各自应答
+    自己的 ``path`` 属性（没有这个属性的应答 ``/``）::
 
         class Gateway(Server):
             api = dep(LibraryApi)           # /
-            metrics = dep(Metrics)          # /metrics
+            metrics = dep(Metrics)          # Metrics.path = "/metrics"
 
             port = 8010
 
-    **显式赋值**——在 ``@init`` 里给 :attr:`app` 赋一个 ASGI 应用。赋了值就以它为准，依赖
-    的应用单元不再自动加入，需要的话自己用 :func:`~canary_framework.asgi.dispatch` 拼::
+    **显式赋值**——在 ``@init`` 里给 :attr:`app` 赋任何一个 ASGI 应用，比如一个 FastAPI 对象。
+    赋了值就以它为准，依赖的应用单元不再自动加入，需要的话自己用
+    :func:`~canary_framework.web.asgi.dispatch` 拼::
 
-        class Metrics(Server):
-            port = 9100
+        class Gateway(Server):
+            port = 8010
 
             @init
             def build(self) -> None:
-                self.app = make_asgi_app()
+                self.app = fastapi_app
 
     - ``@start`` 绑定端口并开始服务。它依赖的单元此时都已启动。端口被占用时抛
       ``OSError``，已启动的依赖照常回收。
@@ -57,7 +58,7 @@ class Server(Canary):
     ``timeout_graceful_shutdown`` 值得设：不设时 ``@stop`` 会一直等到在途请求全部结束，一个
     不结束的长连接就能让停机卡住，排在它后面的依赖也得不到回收。
 
-    生命周期归 Canary，所以 ASGI 的 lifespan 是关闭的，信号也不由服务器接管：何时退出由
+    生命周期归 Canary，所以它不向应用发 ASGI 的 lifespan 消息，信号也不由它接管：何时退出由
     进程入口决定。它不必是根单元——守护进程顺带开一个管理端口，就是多一条 ``dep()``。
 
     :param options: 原样传给 ``uvicorn.Config(...)`` 的参数（``timeout_graceful_shutdown``、
@@ -68,7 +69,7 @@ class Server(Canary):
 
     #: 监听地址。
     host: str = "127.0.0.1"
-    #: 监听端口。``0`` 由系统分配，开始服务后这里是实际端口。
+    #: 监听端口。``0`` 由系统分配，服务期间这里是实际端口，停止后还原成声明的值。
     port: int = 8000
     #: 显式给出的 ASGI 应用。不赋值时服务直接依赖的应用单元。
     app: Application
@@ -79,6 +80,7 @@ class Server(Canary):
     _uvicorn: _Uvicorn | None = None
     _serving: asyncio.Task[None] | None = None
     _socket: socket.socket | None = None
+    _declared: int | None = None
 
     def __init_subclass__(cls, **options: Any) -> None:
         super().__init_subclass__()
@@ -102,18 +104,19 @@ class Server(Canary):
         instances = scope_of(self).instances
         routes: dict[str, Application] = {}
         for cls in deps_of(type(self)):
-            unit = instances[cls]
-            if not isinstance(unit, App):
-                continue
-            if unit.path in routes:
+            unit: Any = instances[cls]
+            if not callable(unit):
+                continue  # 不是应用：数据库、配置这类普通依赖
+            path = getattr(unit, "path", "/")
+            if path in routes:
                 raise LifecycleError(
-                    f"{type(self).__name__}: two apps answer {unit.path!r}. "
+                    f"{type(self).__name__}: two apps answer {path!r}. "
                     f"Give one of them a different path."
                 )
-            routes[unit.path] = unit.app
+            routes[path] = unit
         if not routes:
             raise LifecycleError(
-                f"{type(self).__name__}: nothing to serve. Depend on an App unit, "
+                f"{type(self).__name__}: nothing to serve. Depend on an application unit, "
                 f"or assign self.app in an @init hook."
             )
         return dispatch(routes)
@@ -123,6 +126,7 @@ class Server(Canary):
         app = self._application()
         # 自己绑定：交给 uvicorn 绑定的话，端口被占用时它直接 sys.exit，绕过失败回收。
         sock = self._socket = _bind(self.host, self.port)
+        self._declared = self.port
         self.port = sock.getsockname()[1]
         options = {"log_config": None, **self.__canary_server__, "lifespan": "off"}
         server = self._uvicorn = _Uvicorn(uvicorn.Config(app, **options))
@@ -141,6 +145,9 @@ class Server(Canary):
     async def _close(self) -> None:
         server, serving, sock = self._uvicorn, self._serving, self._socket
         self._uvicorn = self._serving = self._socket = None
+        if self._declared is not None:
+            # 还原声明的端口：否则 ``port = 0`` 的服务器重启时会去绑上次分到的那个。
+            self.port, self._declared = self._declared, None
         try:
             if server is not None and serving is not None:
                 server.should_exit = True

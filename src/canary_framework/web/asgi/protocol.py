@@ -1,14 +1,12 @@
-"""Application units, and dispatching between them by path.
+"""What both sides of the protocol share: the type of an application, and dispatching by path.
 
-应用单元，以及按路径在它们之间分发。
+协议两侧共用的东西：ASGI 应用的类型，以及按路径在若干应用之间分发。
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping
 from typing import Any
-
-from canary_framework.core import Canary
 
 type _Message = MutableMapping[str, Any]
 
@@ -23,41 +21,12 @@ type Application = Callable[
 ]
 
 
-class App(Canary):
-    """A unit that is one ASGI application, served by whichever server depends on it.
-
-    应用单元：它是一个 ASGI 应用，自己不监听。哪个 :class:`~canary_framework.asgi.Server`
-    直接依赖它，它就在那个端口上被服务::
-
-        class Metrics(App):
-            path = "/metrics"
-
-            @init
-            def build(self) -> None:
-                self.app = make_asgi_app()
-
-        class Gateway(Server):
-            api = dep(LibraryApi)           # 一个 FastAPI 应用单元，应答 /
-            metrics = dep(Metrics)          # 应答 /metrics
-            port = 8010
-
-    应用是值，端口才需要唯一：一个进程里可以有很多应用单元，监听的只有依赖它们的那个服务器。
-    应用需要的启动与回收写成它自己的 ``@start`` / ``@stop``——它是被依赖的一方，所以自然
-    先于监听就绪、晚于监听关闭。
-    """
-
-    #: 本应用应答的路径前缀。请求按最长前缀分发，应用看到的仍是完整路径。
-    path: str = "/"
-    #: ASGI 应用本身，由子类在 ``@init`` 里赋值。
-    app: Application
-
-
 def dispatch(routes: Mapping[str, Application]) -> Application:
     """Return one ASGI application that hands each request to the longest matching prefix.
 
     把若干 ASGI 应用按路径前缀合成一个::
 
-        self.app = dispatch({"/metrics": self.metrics.app, "/": self.api.app})
+        self.app = dispatch({"/metrics": self.metrics, "/": self.api})
 
     前缀按整段匹配：``/api`` 应答 ``/api`` 与 ``/api/...``，不应答 ``/apix``；``/`` 应答其余
     一切。最长的前缀优先。
@@ -66,7 +35,8 @@ def dispatch(routes: Mapping[str, Application]) -> Application:
     路由要包含这个前缀。这不是"挂载"——挂载语义下子应用的根路径会被重定向到带斜杠的形式，
     而有些协议的端点恰好就在这个根上。
 
-    没有前缀匹配时，HTTP 请求得到 404，WebSocket 连接被拒绝。
+    没有前缀匹配时，HTTP 请求得到 404，WebSocket 连接被拒绝。lifespan 消息只作应答、不转发：
+    应用单元的启动与回收归 Canary 的生命周期管。
 
     :raises ValueError: 某个前缀不以 ``/`` 开头，或两个前缀规范化之后相同。
     """
@@ -90,6 +60,9 @@ def dispatch(routes: Mapping[str, Application]) -> Application:
         send: Callable[[_Message], Awaitable[None]],
     ) -> None:
         kind = scope["type"]
+        if kind == "lifespan":
+            await _acknowledge(receive, send)
+            return
         if kind not in ("http", "websocket"):
             return
         path = scope["path"]
@@ -106,3 +79,16 @@ def dispatch(routes: Mapping[str, Application]) -> Application:
         await send({"type": "http.response.body", "body": body})
 
     return dispatcher
+
+
+async def _acknowledge(
+    receive: Callable[[], Awaitable[_Message]], send: Callable[[_Message], Awaitable[None]]
+) -> None:
+    """应答 lifespan 协议而不做任何事——驱动 lifespan 的服务器与测试客户端因此不会一直等。"""
+    # 协议里启动与停止各一条；不写成循环，对方行为异常时也不会空转。
+    message = await receive()
+    if message["type"] == "lifespan.startup":
+        await send({"type": "lifespan.startup.complete"})
+        message = await receive()
+    if message["type"] == "lifespan.shutdown":
+        await send({"type": "lifespan.shutdown.complete"})

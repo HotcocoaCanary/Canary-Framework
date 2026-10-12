@@ -6,12 +6,12 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ### Added
 
-- **Four extension packages beside the core**, each provisional — their API may change in a
-  minor release until declared stable. The core imports none of them, and
-  `import canary_framework` still loads no third-party package.
+- **Extension packages beside the core**, each provisional — their API may change in a minor
+  release until declared stable. The core imports none of them, and `import canary_framework`
+  still loads no third-party package.
 
-  四个与核心平级的扩展包，目前均为暂行 API。核心不 import 它们，`import canary_framework`
-  依旧不带入任何第三方包。
+  与核心平级的扩展包，目前均为暂行 API。核心不 import 它们，`import canary_framework` 依旧不
+  带入任何第三方包。
 
   - `canary_framework.test` — `running(Root, {Clock: ManualClock()})` starts a fresh graph on
     test doubles and reclaims it on exit; `unit(root, cls)` reaches any unit of the graph by
@@ -22,47 +22,59 @@ This project follows Keep a Changelog and Semantic Versioning.
     unit; `dep()` may be declared inside it. Install with `canary-framework[config]`.
 
     `Settings`：同时是单元的 `BaseSettings`，模型内可以声明 `dep()`。
-  - `canary_framework.asgi` — applications and listening as two kinds of unit. `App` is one
-    ASGI application that does not listen; `Server` listens on one port and serves the `App`
-    units it depends on directly, each under its own `path`; `dispatch()` joins ASGI apps by
-    path prefix. A port in use raises `OSError` and what started is reclaimed. Class parameters
-    go to `uvicorn.Config` (`class Gateway(Server, timeout_graceful_shutdown=10)`). Install with
-    `canary-framework[asgi]`.
+  - `canary_framework.web.asgi` — the two sides of the ASGI protocol as two subpackages of
+    units that know only the protocol, so each also works with anything else that speaks it.
 
-    把"应用"与"监听"分成两种单元。`App` 是一个不监听的 ASGI 应用；`Server` 监听一个端口，
-    服务它直接依赖的 `App`，各自应答自己的 `path`；`dispatch()` 按路径前缀合并 ASGI 应用。
-    端口被占用时抛 `OSError`，已启动的依赖照常回收。类参数原样传给 `uvicorn.Config`。
-  - `canary_framework.asgi.fastapi` — a subpackage of `asgi`, building on it. `Router` and
-    `App` are units. The route marks — `get`, `post`, …, `api_route`, `websocket` — are
-    `APIRouter`'s own decorators, recorded on the method and replayed on a real `APIRouter`
-    at startup, with the same parameters. Depending on
-    a router mounts it; `App` is the FastAPI application; `mount()` puts a graph's routers on
-    a FastAPI app of your own. Install with
-    `canary-framework[fastapi]`.
+    ASGI 协议的两侧各是一个子包，都是单元，也都只认协议本身，所以各自也能与别的实现搭配。
 
-    `asgi` 的子包，建在它之上。`Router` 与 `App` 都是单元。路由标记（`get`、`post` ……
-    `api_route`、`websocket`）就是 `APIRouter` 的同名装饰器：调用被记在方法上，启动时原样重放到
-    真正的 `APIRouter` 上，参数完全相同。
-    依赖一个路由单元即挂载它；`App` 是 FastAPI 应用；`mount()` 把一张图上的路由挂到你自己的
-    FastAPI 应用上。
-  - `canary_framework.asgi.web` — a small web framework of its own, a subpackage of `asgi`
-    depending only on pydantic. `Router` and `App` are units; parameters are bound by name
-    and annotation (path, `body`, `Request`, the rest from the query string) and validated by
-    pydantic; `Response`, `HTTPError` and the `@error` mark decide the answer. Routes are
-    flattened into one table at `@init`, and what cannot be served raises `DeclarationError`
-    there. No dependency-injection system and no OpenAPI — use `asgi.fastapi` for those.
-    Install with `canary-framework[web]`.
+    - `web.asgi.app` — a small web framework. `Router` and `App` are units, and an `App` **is
+      an ASGI application**: serve it from the `Server` below, or hand it to any ASGI server
+      (`app = LibraryApi()`, then `uvicorn main:app`), whose lifespan messages then start and
+      reclaim its graph. Parameters are bound by name and annotation (path, `body`, `Request`,
+      the rest from the query string) and validated by pydantic; `Response`, `HTTPError` and
+      the `@error` mark decide the answer; plain `def` endpoints run in a thread pool. Routes
+      are flattened into one table at `@init`, and what cannot be served raises
+      `DeclarationError` there. No dependency-injection system and no OpenAPI. Install with
+      `canary-framework[app]`.
 
-    自研的小型 Web 框架，`asgi` 的子包，只依赖 pydantic。`Router` 与 `App` 都是单元；形参按
-    名字与注解绑定（路径、`body`、`Request`，其余来自查询串），由 pydantic 校验；`Response`、
-    `HTTPError` 与 `@error` 标记决定应答。路由在 `@init` 时拍平成一张表，无法服务的声明当场抛
-    `DeclarationError`。没有依赖注入系统，也不做 OpenAPI，需要时用 `asgi.fastapi`。
+      一个小型 Web 框架。`Router` 与 `App` 都是单元，而 `App` **自己就是一个 ASGI 应用**：
+      交给下面的 `Server`，或任何 ASGI 服务器（`uvicorn main:app`），后者的 lifespan 消息会
+      启动并回收它的图。形参按名字与注解绑定，由 pydantic 校验；路由在 `@init` 时拍平成一张表，
+      无法服务的声明当场抛 `DeclarationError`。没有依赖注入系统，也不做 OpenAPI。
+    - `web.asgi.server` — `Server`, a unit that listens: binding the port is its `@start`,
+      closing is its `@stop`. It serves the application units it depends on directly (any
+      callable unit, each under its own `path`), or any ASGI application assigned to
+      `self.app` — a FastAPI object included. A port in use raises `OSError` and what started
+      is reclaimed; class parameters go to `uvicorn.Config`
+      (`class Gateway(Server, timeout_graceful_shutdown=10)`). Install with
+      `canary-framework[server]`.
+
+      `Server`：监听的单元。服务它直接依赖的应用单元（任何可调用的单元，各自应答自己的
+      `path`），或赋给 `self.app` 的任何 ASGI 应用，包括一个 FastAPI 对象。端口被占用时抛
+      `OSError`，已启动的依赖照常回收；类参数原样传给 `uvicorn.Config`。
+    - `web.asgi.dispatch()` joins ASGI applications by path prefix; `canary-framework[web]`
+      installs both sides.
+
+      `dispatch()` 按路径前缀合并 ASGI 应用；`canary-framework[web]` 同时安装两侧。
 - `tests/test_layering.py` asserts three more constraints: extensions import only public
-  exports, a subpackage builds on its parent and on nothing beside it (today
-  `asgi.fastapi → asgi`), and extensions are never imported by the top-level package.
+  exports, a subpackage builds on its parent and on nothing beside it (`web.asgi.app` and
+  `web.asgi.server` each build on `web.asgi`, not on each other), and extensions are never
+  imported by the top-level package.
 
-  分层测试新增三条约束：扩展包只用公开导出、子包只依赖父包而兄弟包互不依赖（目前只有
-  `asgi.fastapi → asgi`）、顶层包不 import 它们。
+  分层测试新增三条约束：扩展包只用公开导出、子包只依赖父包而兄弟包互不依赖、顶层包不 import
+  它们。
+
+### Fixed
+
+- **A dependency overridden by name in a subclass is replaced, not added to.** Dependencies
+  now resolve by attribute name, as hooks already did: `thing = dep(Replacement)` in a
+  subclass removes the base class's `thing = dep(Default)` from `deps_of()`, so `Default` is
+  no longer constructed and started for nothing. Overriding the name with something that is
+  not a `dep()` drops the dependency.
+
+  子类用同名属性覆盖一条依赖时，现在是替换而不是追加。依赖与钩子一样按属性名解析：基类的
+  `thing = dep(Default)` 被子类的 `thing = dep(Replacement)` 覆盖后不再出现在 `deps_of()` 里，
+  `Default` 不会再被白白构造和启动。
 
 ### Changed
 

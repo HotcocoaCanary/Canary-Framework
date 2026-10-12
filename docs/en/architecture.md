@@ -38,35 +38,35 @@ This is not merely documented — `tests/test_layering.py` parses every module's
 
 ## Extensions
 
-`test`, `config` and `asgi` sit beside `core`; `asgi/fastapi` and `asgi/web` are subpackages
-of `asgi`:
+`test`, `config` and `web` sit beside `core`:
 
 | Package | Contents | Builds on | Third-party dependencies |
 |---|---|---|---|
 | `test/` | `running` and `unit` | `core` | none |
 | `config/` | `Settings` | `core` | pydantic-settings |
-| `asgi/` | `App`, `Server` and `dispatch`; inside, `server → app` | `core` | uvicorn |
-| `asgi/fastapi/` | `Router`, `App` and the route marks; inside, `app → router → routes` | `core`, `asgi` | FastAPI |
-| `asgi/web/` | A web framework of its own: `Router`, `App`, requests and responses; inside, `app → router → binding → routes → http` | `core`, `asgi` | pydantic |
+| `web/asgi/` | The protocol layer: the type of an ASGI application, and `dispatch` | `core` | none |
+| `web/asgi/app/` | Application units: `Router`, `App`, requests and responses; inside, `app → router → binding → routes → http` | `core`, `web.asgi` | pydantic |
+| `web/asgi/server/` | The server unit: `Server` | `core`, `web.asgi` | uvicorn |
 
-`asgi` keeps three roles apart: contributors (routers) can be many; an
-application (`App`) is just a value and does not listen; a listener (`Server`) is one per port
-and serves the applications it depends on directly. What has to be unique is a unit that is
-depended on, not something on the inheritance chain.
+`web/asgi` is split along the two sides of the protocol. `app` is the application side: an
+application unit is itself an ASGI application and can be handed to any ASGI server. `server`
+is the server side: it serves any ASGI application. Neither depends on the other; they share
+only the protocol layer in their parent, so this framework's application under someone else's
+server, and someone else's application under this framework's server, both work with no
+adapter in between.
 
 Three more constraints are asserted by `tests/test_layering.py`:
 
 - an extension imports only what others export publicly: `canary_framework.core`, never
   `core.flow` or `core.meta`;
 - the directory tree is the dependency graph: a subpackage may build on its parent
-  (`asgi.fastapi → asgi`, `asgi.web → asgi`), a parent never imports a child, and siblings do not depend on each
-  other — again only as far as the package;
+  (`web.asgi.app → web.asgi`, `web.asgi.server → web.asgi`), a parent never imports a child,
+  and siblings do not depend on each other — again only as far as the package;
 - the top-level package imports no extension, so `import canary_framework` never loads a
   third-party package.
 
 When two extensions need the same thing, it is extracted into their common parent, rather
-than one depending on the other — that is how `asgi` came about: wrapping another ASGI
-framework means one more subpackage under `asgi`.
+than one depending on the other — that is why `dispatch` lives in `web/asgi`.
 
 ## Markers, not rewriting
 

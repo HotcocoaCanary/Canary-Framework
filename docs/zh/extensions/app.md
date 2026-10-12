@@ -1,14 +1,37 @@
-# Web
+# Web 应用
 
-`canary_framework.asgi.web` 是一个小的 Web 框架，路由与应用都是单元，由
-[`canary_framework.asgi`](asgi.md) 的服务器监听。它是 `asgi` 的子包，只依赖 pydantic。
+`canary_framework.web.asgi.app` 是一个小的 Web 框架：路由是单元，应用也是单元，而且应用单元
+**自己就是一个 ASGI 应用**。它站在 ASGI 协议的应用一侧，只依赖 pydantic。
 
 ```bash
-pip install "canary-framework[web]"
+pip install "canary-framework[app]"        # 只要应用
+pip install "canary-framework[web]"        # 应用 + 本框架的服务器单元
 ```
 
-它不提供依赖注入系统——依赖走 `dep()`——也不生成 OpenAPI。需要 OpenAPI 或 FastAPI 的生态时用
-[`asgi.fastapi`](fastapi.md)；两个包并列，写法相近但不相同。
+它不提供依赖注入系统——依赖走 `dep()`——也不生成 OpenAPI。
+
+## 谁来服务它
+
+ASGI 的两侧只认协议，所以可以任意组合：
+
+| 应用 | 服务器 | 怎么写 |
+|---|---|---|
+| 本包的 `App` | 本框架的 [`Server`](server.md) | `class Gateway(Server): api = dep(LibraryApi)` |
+| 本包的 `App` | uvicorn、hypercorn …… | `app = LibraryApi()`，然后 `uvicorn main:app` |
+| FastAPI 等别的框架 | 本框架的 [`Server`](server.md) | 在 `Server` 的 `@init` 里 `self.app = fastapi_app` |
+
+第一种，图由 Canary 驱动，监听是生命周期的一部分。第二种，图由服务器的 lifespan 消息驱动：
+启动时应用单元连同它的依赖按序 `init`、`start`，停止时逆序回收——于是 `--reload` 与
+`--workers` 照常可用：
+
+```python
+# main.py
+app = LibraryApi()
+```
+
+```bash
+uvicorn main:app --reload
+```
 
 !!! note "暂行 API"
     扩展包在稳定之前可能在次版本中调整，见[版本与兼容性](../versioning.md#extensions)。
@@ -18,8 +41,9 @@ pip install "canary-framework[web]"
 ```python
 import asyncio
 
-from canary_framework import asgi, dep
-from canary_framework.asgi.web import App, Request, Response, Router, error, get, post
+from canary_framework import dep
+from canary_framework.web.asgi.app import App, Request, Response, Router, error, get, post
+from canary_framework.web.asgi.server import Server
 
 
 class ReaderApi(Router, prefix="/readers"):
@@ -51,7 +75,7 @@ class LibraryApi(App):
         return Response.json({"msg": exc.message}, status=exc.code)
 
 
-class Gateway(asgi.Server):
+class Gateway(Server):
     library = dep(LibraryApi)
     port = 8010
 
@@ -158,7 +182,7 @@ class LibraryApi(App):
         return Response.json({"code": exc.status, "msg": exc.detail}, status=exc.status)
 ```
 
-没有处理器的异常应答 500 并记到 `canary_framework.asgi.web` 这个日志器，响应里不带内部细节。
+没有处理器的异常应答 500 并记到 `canary_framework.web.asgi.app` 这个日志器，响应里不带内部细节。
 
 ## 中间件
 
@@ -195,9 +219,9 @@ OpenAPI、WebSocket、表单与文件上传、静态文件、后台任务。
 
 ```python
 async with running(LibraryApi) as api:
-    transport = httpx.ASGITransport(app=api.app)
+    transport = httpx.ASGITransport(app=api)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/readers/7")
 ```
 
-走真实的套接字：给 `Gateway` 的子类写 `port = 0`，见 [ASGI](asgi.md)。
+走真实的套接字：给 `Gateway` 的子类写 `port = 0`，见 [Web 服务器](server.md)。

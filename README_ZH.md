@@ -122,13 +122,15 @@ app = FastAPI(lifespan=lifespan)
 |---|---|---|
 | [`canary_framework.test`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/test/) | `running()` 与 `unit()`：带替身启动一张图 | 已包含 |
 | [`canary_framework.config`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/config/) | `Settings`：同时是单元的 pydantic-settings 模型 | `canary-framework[config]` |
-| [`canary_framework.asgi`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/asgi/) | `App` 与 `Server`：应用是单元，一个服务器监听它依赖的全部应用 | `canary-framework[asgi]` |
-| [`canary_framework.asgi.fastapi`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/fastapi/) | `Router` 与 `App`：FastAPI 路由写在单元上 | `canary-framework[fastapi]` |
-| [`canary_framework.asgi.web`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/web/) | 自研的小型 Web 框架：不做 OpenAPI，只依赖 pydantic | `canary-framework[web]` |
+| [`canary_framework.web.asgi.app`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/app/) | 应用单元：一个小型 Web 框架，应用自己就是 ASGI 应用，可交给任何 ASGI 服务器 | `canary-framework[app]` |
+| [`canary_framework.web.asgi.server`](https://hotcocoacanary.github.io/Canary-Framework/zh/extensions/server/) | 服务器单元：监听是生命周期的一部分，服务任何 ASGI 应用 | `canary-framework[server]` |
+
+`canary-framework[web]` 同时安装后两者。
 
 ```python
-from canary_framework import asgi, dep
-from canary_framework.asgi.fastapi import App, Router, get
+from canary_framework import dep
+from canary_framework.web.asgi.app import App, Router, get
+from canary_framework.web.asgi.server import Server
 
 
 class ReaderApi(Router, prefix="/readers"):
@@ -139,11 +141,11 @@ class ReaderApi(Router, prefix="/readers"):
         return await self.readers.get(reader_id)
 
 
-class LibraryApi(App, title="图书馆 API"):
+class LibraryApi(App):
     readers = dep(ReaderApi)
 
 
-class Gateway(asgi.Server):
+class Gateway(Server):
     api = dep(LibraryApi)  # 再依赖一个应用单元，它就共用这个端口
     port = 8010
 
@@ -151,6 +153,9 @@ class Gateway(asgi.Server):
 async with Gateway():  # 依赖先启动，然后开始监听
     ...
 ```
+
+应用与服务器只认 ASGI 协议，所以也可以拆开用：`app = LibraryApi()` 之后 `uvicorn main:app`，
+或者让 `Server` 服务一个 FastAPI 应用。
 
 扩展包目前是暂行的：API 仍可能在次版本中调整。
 
