@@ -78,7 +78,11 @@ def dispatch(routes: Mapping[str, Application]) -> Application:
         if key in table:
             raise ValueError(f"dispatch: {key!r} is given twice")
         table[key] = app
-    ordered = sorted(table.items(), key=lambda item: len(item[0]), reverse=True)
+    # 最长的在前；``prefix + "/"`` 提前算好，不在每个请求上拼接。
+    ordered = [
+        (prefix, prefix + "/", app)
+        for prefix, app in sorted(table.items(), key=lambda item: len(item[0]), reverse=True)
+    ]
 
     async def dispatcher(
         scope: MutableMapping[str, Any],
@@ -89,8 +93,8 @@ def dispatch(routes: Mapping[str, Application]) -> Application:
         if kind not in ("http", "websocket"):
             return
         path = scope["path"]
-        for prefix, app in ordered:
-            if prefix == "/" or path == prefix or path.startswith(prefix + "/"):
+        for prefix, below, app in ordered:
+            if prefix == "/" or path == prefix or path.startswith(below):
                 await app(scope, receive, send)
                 return
         if kind == "websocket":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
@@ -69,6 +70,47 @@ async def test_it_serves_any_asgi_app_over_a_real_socket() -> None:
     async with running(Hello) as server, httpx.AsyncClient() as client:
         assert server.port != 0
         assert (await client.get(_url(server, "/there"))).text == "hello /there"
+
+
+async def test_connections_have_nagle_off() -> None:
+    """响应的头与体分两次写出；Nagle 开着时第二次要等对端的延迟确认，每个请求多约 40 毫秒。
+
+    asyncio 只给协议号为 TCP 的连接关 Nagle，而协议号继承自监听套接字——所以这里看的是
+    服务端那一侧已接受的连接。
+    """
+    async with running(Hello) as server, httpx.AsyncClient() as client:
+        await client.get(_url(server))
+        assert server._uvicorn is not None
+        (connection,) = server._uvicorn.server_state.connections
+        accepted = connection.transport.get_extra_info("socket")
+        assert accepted.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY)
+
+
+async def test_a_cancelled_stop_still_closes_the_socket() -> None:
+    """``stop()`` 等在途请求结束；等待被取消时，监听套接字也要关掉。"""
+
+    class Stuck(Server):
+        port = 0
+
+        @init
+        def build(self) -> None:
+            async def never(scope: Any, receive: Any, send: Any) -> None:
+                await asyncio.Event().wait()
+
+            self.app = never
+
+    server = Stuck()
+    await server.init()
+    await server.start()
+    listening = server._socket
+    assert listening is not None
+    async with httpx.AsyncClient() as client:
+        request = asyncio.create_task(client.get(_url(server)))
+        await asyncio.sleep(0.05)
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(server.stop(), 0.3)
+        request.cancel()
+    assert listening.fileno() == -1
 
 
 async def test_dependencies_start_before_it_listens_and_stop_after_it_closes() -> None:

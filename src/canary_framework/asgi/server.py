@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import socket
 from collections.abc import Iterator
 
@@ -108,11 +109,14 @@ class Server(Canary):
     async def _close(self) -> None:
         server, serving, sock = self._uvicorn, self._serving, self._socket
         self._uvicorn = self._serving = self._socket = None
-        if server is not None and serving is not None:
-            server.should_exit = True
-            await serving
-        if sock is not None:
-            sock.close()
+        try:
+            if server is not None and serving is not None:
+                server.should_exit = True
+                await serving
+        finally:
+            # 等待在途请求时被取消，套接字也要关掉。
+            if sock is not None:
+                sock.close()
 
 
 class _Uvicorn(uvicorn.Server):
@@ -132,5 +136,19 @@ class _Uvicorn(uvicorn.Server):
 
 
 def _bind(host: str, port: int) -> socket.socket:
+    """绑定一个监听套接字，协议显式写作 TCP。
+
+    asyncio 只给协议号为 ``IPPROTO_TCP`` 的连接关闭 Nagle 算法，而连接的协议号继承自监听
+    套接字。``socket.create_server`` 建出的套接字协议号是 0，于是每个连接都开着 Nagle：响应的
+    头与体分两次写出，第二次要等对端的延迟确认，每个请求多出约 40 毫秒。
+    """
     family = socket.AF_INET6 if ":" in host else socket.AF_INET
-    return socket.create_server((host, port), family=family)
+    sock = socket.socket(family, socket.SOCK_STREAM, socket.IPPROTO_TCP)
+    try:
+        if os.name == "posix":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+    except BaseException:
+        sock.close()
+        raise
+    return sock
