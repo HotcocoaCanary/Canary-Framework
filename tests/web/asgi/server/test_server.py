@@ -12,8 +12,8 @@ import pytest
 import uvicorn
 
 from canary_framework import Canary, LifecycleError, dep, init, start, stop
-from canary_framework.asgi import Server
 from canary_framework.test import running
+from canary_framework.web.asgi.server import Server
 
 pytestmark = pytest.mark.functional
 
@@ -184,6 +184,20 @@ async def test_it_can_be_restarted() -> None:
             assert (await client.get(_url(server))).text == "hello /"
 
 
+async def test_a_port_given_by_the_system_is_asked_for_again_on_restart() -> None:
+    """``port = 0`` 的服务器停止后还原成 0：重启不会去绑上次分到、可能已被占用的端口。"""
+    server = Hello()
+    async with server:
+        first = server.port
+        assert first != 0
+    assert server.port == 0
+    with socket.create_server(("127.0.0.1", first)):  # 上次的端口被别人占了
+        async with server, httpx.AsyncClient() as client:
+            assert server.port not in (0, first)
+            assert (await client.get(_url(server))).text == "hello /"
+    assert server.port == 0
+
+
 async def test_it_need_not_be_the_root() -> None:
     class Daemon(Canary):
         admin = dep(Hello)
@@ -211,7 +225,7 @@ async def test_with_nothing_to_serve_the_start_fails_and_says_what_to_do() -> No
         database = dep(Database)
         port = 0
 
-    with pytest.raises(LifecycleError, match=r"Depend on an App unit, or assign self\.app"):
+    with pytest.raises(LifecycleError, match=r"Depend on an application unit, or assign self\.app"):
         async with Empty():
             raise AssertionError("unreachable")
     assert events == ["db start", "db stop"]

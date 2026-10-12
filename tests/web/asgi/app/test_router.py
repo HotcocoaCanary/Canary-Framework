@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 from canary_framework import DeclarationError, dep
-from canary_framework.asgi.web import App, Router, get, post
-from canary_framework.asgi.web.router import Table, collect, parse
-from canary_framework.asgi.web.routes import ROUTES, Route, marked
 from canary_framework.test import running
+from canary_framework.web.asgi.app import App, Router, get, post
+from canary_framework.web.asgi.app.router import Table, collect, parse
+from canary_framework.web.asgi.app.routes import ROUTES, Route, marked
 
 pytestmark = pytest.mark.unit
 

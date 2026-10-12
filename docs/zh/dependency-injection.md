@@ -25,6 +25,18 @@ class AlertDispatcher(Canary):
 **类型是推断出来的。** `dep()` 的返回值标注为被依赖的类型，所以 `database` 的类型就是
 `Database`，不必另写注解，类型检查器与 IDE 都能识别。
 
+**子类可以换掉一条依赖。** 依赖和钩子一样按属性名解析：子类用同名属性再写一条 `dep()`，
+基类那条就被替换，原先的那个类型不会被构造，也不会启动。
+
+```python
+class Importer(Canary):
+    queue = dep(Queue)
+
+
+class BulkImporter(Importer):
+    queue = dep(BulkQueue)          # 只依赖 BulkQueue，不再依赖 Queue
+```
+
 **声明不需要求值。** 描述符持有的是类对象本身而非名字，因此不受
 `from __future__ import annotations`、`if TYPE_CHECKING` 或函数作用域的影响。
 

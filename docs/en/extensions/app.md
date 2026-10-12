@@ -1,16 +1,39 @@
-# Web
+# Web application
 
-`canary_framework.asgi.web` is a small web framework whose routers and application are units,
-listened for by a [`canary_framework.asgi`](asgi.md) server. It is a subpackage of `asgi` and
-depends only on pydantic.
+`canary_framework.web.asgi.app` is a small web framework: routers are units, the application
+is a unit, and the application unit **is itself an ASGI application**. It stands on the
+application side of the ASGI protocol and depends only on pydantic.
 
 ```bash
-pip install "canary-framework[web]"
+pip install "canary-framework[app]"        # the application only
+pip install "canary-framework[web]"        # the application + this framework's server unit
 ```
 
 It has no dependency-injection system — dependencies are `dep()` — and generates no OpenAPI.
-For OpenAPI or the FastAPI ecosystem use [`asgi.fastapi`](fastapi.md); the two packages sit
-side by side, and are written alike but not the same.
+
+## Who serves it
+
+The two sides of ASGI know only the protocol, so they combine freely:
+
+| Application | Server | How |
+|---|---|---|
+| this package's `App` | this framework's [`Server`](server.md) | `class Gateway(Server): api = dep(LibraryApi)` |
+| this package's `App` | uvicorn, hypercorn, … | `app = LibraryApi()`, then `uvicorn main:app` |
+| FastAPI or another framework | this framework's [`Server`](server.md) | `self.app = fastapi_app` in the `Server`'s `@init` |
+
+In the first, Canary drives the graph and listening is part of the lifecycle. In the second,
+the server's lifespan messages drive it: on startup the application unit and its dependencies
+`init` and `start` in order, on shutdown they are reclaimed in reverse — so `--reload` and
+`--workers` work as usual:
+
+```python
+# main.py
+app = LibraryApi()
+```
+
+```bash
+uvicorn main:app --reload
+```
 
 !!! note "Provisional API"
     Extensions may change in a minor release until they are declared stable; see
@@ -21,8 +44,9 @@ side by side, and are written alike but not the same.
 ```python
 import asyncio
 
-from canary_framework import asgi, dep
-from canary_framework.asgi.web import App, Request, Response, Router, error, get, post
+from canary_framework import dep
+from canary_framework.web.asgi.app import App, Request, Response, Router, error, get, post
+from canary_framework.web.asgi.server import Server
 
 
 class ReaderApi(Router, prefix="/readers"):
@@ -54,7 +78,7 @@ class LibraryApi(App):
         return Response.json({"msg": exc.message}, status=exc.code)
 
 
-class Gateway(asgi.Server):
+class Gateway(Server):
     library = dep(LibraryApi)
     port = 8010
 
@@ -174,7 +198,7 @@ class LibraryApi(App):
 ```
 
 An exception with no handler is answered with 500 and logged to the
-`canary_framework.asgi.web` logger; the response carries no internal detail.
+`canary_framework.web.asgi.app` logger; the response carries no internal detail.
 
 ## Middleware
 
@@ -213,9 +237,9 @@ Use [`running`](test.md) as for any unit. Without a network:
 
 ```python
 async with running(LibraryApi) as api:
-    transport = httpx.ASGITransport(app=api.app)
+    transport = httpx.ASGITransport(app=api)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.get("/api/readers/7")
 ```
 
-Over a real socket: write `port = 0` on a subclass of `Gateway`; see [ASGI](asgi.md).
+Over a real socket: write `port = 0` on a subclass of `Gateway`; see [Web server](server.md).

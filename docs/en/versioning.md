@@ -33,8 +33,8 @@ It does **not** cover:
 
 ## Extensions {#extensions}
 
-`canary_framework.test`, `canary_framework.config`, `canary_framework.asgi` and
-`canary_framework.asgi.fastapi`, `canary_framework.asgi.web` ship with the core
+`canary_framework.test`, `canary_framework.config` and `canary_framework.web` (with
+`web.asgi`, `web.asgi.app` and `web.asgi.server` under it) ship with the core
 and share its version number, but are **provisional** for now: until each is declared stable,
 its API may change in a minor release, with every change recorded in the changelog. The
 stability promise above covers the core only.

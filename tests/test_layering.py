@@ -3,8 +3,8 @@
 这条测试把架构从"文档里的说法"变成"可执行的约束"：任何一次让 meta 反过来 import
 flow 的改动，都会在这里失败。
 
-扩展包（``test`` / ``config`` / ``asgi``）与 ``core`` 平级，``asgi.fastapi`` 与 ``asgi.web``
-是 ``asgi`` 的子包。目录就是依赖关系，另有三条约束：只用核心的公开导出；子包可以依赖父包、
+扩展包（``test`` / ``config`` / ``web``）与 ``core`` 平级；``web.asgi`` 是协议层，它的两个
+子包 ``app`` 与 ``server`` 各站协议的一侧。目录就是依赖关系，另有三条约束：只用核心的公开导出；子包可以依赖父包、
 且只用父包的公开导出，父包不 import 子包，兄弟包互不依赖；顶层包不 import 它们——所以
 ``import canary_framework`` 始终不带入任何第三方包。
 """
@@ -32,23 +32,20 @@ LAYERS = {
     "": 5,
     "test": 6,
     "config": 6,
-    "asgi.app": 6,
-    "asgi.server": 7,
-    "asgi": 8,
-    "asgi.fastapi.routes": 9,
-    "asgi.fastapi.router": 10,
-    "asgi.fastapi.app": 11,
-    "asgi.fastapi": 12,
-    "asgi.web.http": 9,
-    "asgi.web.routes": 10,
-    "asgi.web.binding": 11,
-    "asgi.web.router": 12,
-    "asgi.web.app": 13,
-    "asgi.web": 14,
+    "web": 6,
+    "web.asgi.protocol": 7,
+    "web.asgi": 8,
+    "web.asgi.server": 9,
+    "web.asgi.app.http": 9,
+    "web.asgi.app.routes": 10,
+    "web.asgi.app.binding": 11,
+    "web.asgi.app.router": 12,
+    "web.asgi.app.app": 13,
+    "web.asgi.app": 14,
 }
 
 #: 扩展包。带点的是子包：它可以依赖自己的各级父包，除此之外扩展包之间互不依赖。
-EXTENSIONS = ("test", "config", "asgi", "asgi.fastapi", "asgi.web")
+EXTENSIONS = ("test", "config", "web", "web.asgi", "web.asgi.app", "web.asgi.server")
 
 
 def _layer(module: str) -> int:
@@ -98,13 +95,13 @@ def _modules() -> list[tuple[str, pathlib.Path]]:
 
 
 def _extension(module: str) -> str | None:
-    """模块所属的扩展包：最长前缀匹配，所以 ``asgi.fastapi.app`` 属于 ``asgi.fastapi``。"""
+    """模块所属的扩展包：最长前缀匹配，所以 ``web.asgi.app.router`` 属于 ``web.asgi.app``。"""
     owners = [e for e in EXTENSIONS if module == e or module.startswith(e + ".")]
     return max(owners, key=len, default=None)
 
 
 def _parents(extension: str) -> set[str]:
-    """各级父包：``asgi.fastapi`` 的父包是 ``asgi``。"""
+    """各级父包：``web.asgi.app`` 的父包是 ``web`` 与 ``web.asgi``。"""
     parts = extension.split(".")
     return {".".join(parts[:i]) for i in range(1, len(parts))}
 
@@ -121,10 +118,10 @@ def test_no_module_imports_a_layer_above_itself() -> None:
 
 def test_every_extension_is_on_disk() -> None:
     assert sorted(p.name for p in ROOT.iterdir() if p.is_dir() and p.name != "__pycache__") == [
-        "asgi",
         "config",
         "core",
         "test",
+        "web",
     ]
     assert all((ROOT / extension.replace(".", "/")).is_dir() for extension in EXTENSIONS)
 
@@ -132,7 +129,7 @@ def test_every_extension_is_on_disk() -> None:
 def test_extensions_use_only_public_exports_and_build_only_on_their_parents() -> None:
     """扩展包可以 import：自己包内的模块、``canary_framework.core``、自己的父包本身。
 
-    后两者都只到包为止——``canary_framework.core.flow`` 或 ``canary_framework.asgi.server``
+    后两者都只到包为止——``canary_framework.core.flow`` 或 ``canary_framework.web.asgi.protocol``
     是别人的内部。``from canary_framework import asgi`` 解析成 import 顶层包里的名字。
     """
     offenders = []
@@ -171,7 +168,7 @@ def test_importing_the_package_loads_nothing_but_the_core() -> None:
         "    return name in sys.stdlib_module_names or shipped\n"
         "print(sorted(n for n in added - {'canary_framework'} if not bundled(n)))\n"
         "print(sorted(n for n in sys.modules if n.startswith('canary_framework.')"
-        " and n.split('.')[1] in ('config', 'asgi')))\n"
+        " and n.split('.')[1] in ('config', 'web')))\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", probe], capture_output=True, text=True, check=True

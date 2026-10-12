@@ -8,9 +8,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from typing import Any, ClassVar
 
-from canary_framework.asgi.web.binding import Endpoint
-from canary_framework.asgi.web.routes import ROUTES, Route, marked
 from canary_framework.core import Canary, DeclarationError, deps_of, scope_of
+from canary_framework.web.asgi.app.binding import Endpoint
+from canary_framework.web.asgi.app.routes import ROUTES, Route, marked
 
 #: 一个路径下的接口：HTTP 方法 -> （接口，按位置排列的路径参数名）。
 type _Methods = dict[str, tuple[Endpoint, tuple[str, ...]]]
@@ -35,7 +35,7 @@ class Router(Canary):
             loans = dep(LoanApi)            # /api/loans/...
 
     它仍是普通单元：有自己的依赖与钩子，接口方法是普通方法，测试里可以不经 HTTP 直接调用。
-    只有被 :class:`~canary_framework.asgi.web.App` 或另一个路由单元**直接**依赖时才会被
+    只有被 :class:`~canary_framework.web.asgi.app.App` 或另一个路由单元**直接**依赖时才会被
     挂载；被两处依赖则出现在两处前缀之下。
 
     :param prefix: 路径前缀，以 ``/`` 开头、不以 ``/`` 结尾。子类不写时继承父类的。

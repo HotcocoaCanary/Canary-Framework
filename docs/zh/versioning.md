@@ -31,8 +31,8 @@ Canary Framework 从 1.0.0 起遵循[语义化版本](https://semver.org/lang/zh
 
 ## 扩展包 {#extensions}
 
-`canary_framework.test`、`canary_framework.config`、`canary_framework.asgi` 与
-`canary_framework.asgi.fastapi`、`canary_framework.asgi.web` 和核心一起发布、
+`canary_framework.test`、`canary_framework.config` 与 `canary_framework.web`（含它之下的
+`web.asgi`、`web.asgi.app`、`web.asgi.server`）和核心一起发布、
 共用一个版本号，但目前是**暂行**的：在各自被宣布稳定之前，它们的 API 可能在次版本中调整，
 每一项都记录在变更日志中。上面的稳定性承诺只覆盖核心。
 

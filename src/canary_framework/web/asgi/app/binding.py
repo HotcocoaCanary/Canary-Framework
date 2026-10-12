@@ -16,9 +16,9 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import to_json
 
-from canary_framework.asgi.web.http import HTTPError, Request, Response
-from canary_framework.asgi.web.routes import Route
 from canary_framework.core import DeclarationError
+from canary_framework.web.asgi.app.http import HTTPError, Request, Response
+from canary_framework.web.asgi.app.routes import Route
 
 _MISSING: Any = inspect.Parameter.empty
 _MANY = (list, set, frozenset, tuple)

@@ -27,6 +27,19 @@ class AlertDispatcher(Canary):
 **The type is inferred.** `dep()` is typed to return an instance of what it is given, so
 `database` has type `Database` with no extra annotation. Type checkers and IDEs see it.
 
+**A subclass can replace a dependency.** Dependencies resolve by attribute name, as hooks do:
+write another `dep()` under the same name in a subclass and the base class's is replaced — the
+type it named is neither constructed nor started.
+
+```python
+class Importer(Canary):
+    queue = dep(Queue)
+
+
+class BulkImporter(Importer):
+    queue = dep(BulkQueue)          # depends on BulkQueue only, no longer on Queue
+```
+
 **The declaration never needs evaluating.** The descriptor holds the class object itself, not
 a name, so it is unaffected by `from __future__ import annotations`, `if TYPE_CHECKING`, or
 class definitions inside a function.
