@@ -546,7 +546,6 @@ async def test_any_asgi_server_can_serve_it(pool_log: list[str]) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
     sock.bind(("127.0.0.1", 0))
     server = uvicorn.Server(uvicorn.Config(app, lifespan="on", log_config=None))
-    server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
     serving = asyncio.create_task(server.serve(sockets=[sock]))
     while not server.started:
         await asyncio.sleep(0.01)
