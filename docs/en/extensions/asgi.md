@@ -95,6 +95,24 @@ class Gateway(asgi.Server):
         self.app = asgi.dispatch({"/legacy": legacy_wsgi_bridge, "/": self.api.app})
 ```
 
+## Configuring uvicorn
+
+Class parameters go to `uvicorn.Config` unchanged; a subclass inherits its parent's and
+overrides only the ones it writes:
+
+```python
+class Gateway(asgi.Server, timeout_graceful_shutdown=10, proxy_headers=True):
+    api = dep(LibraryApi)
+```
+
+`timeout_graceful_shutdown` is worth setting. Without it `@stop` waits until every request in
+flight has finished: one long-lived connection that never ends holds the shutdown, the
+database and the other dependencies behind it are not reclaimed, and the process ends up
+being killed.
+
+`host` and `port` stay class attributes; `app`, `lifespan`, `reload` and `workers` belong
+elsewhere here, and passing one raises `TypeError` when the class is defined.
+
 ## Canary owns the process
 
 The lifecycle is driven by Canary, so:
