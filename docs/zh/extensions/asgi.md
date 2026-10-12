@@ -87,6 +87,21 @@ class Gateway(asgi.Server):
         self.app = asgi.dispatch({"/legacy": legacy_wsgi_bridge, "/": self.api.app})
 ```
 
+## uvicorn 的配置
+
+类参数原样传给 `uvicorn.Config`，子类继承父类的类参数，只覆盖自己写出的那些：
+
+```python
+class Gateway(asgi.Server, timeout_graceful_shutdown=10, proxy_headers=True):
+    api = dep(LibraryApi)
+```
+
+`timeout_graceful_shutdown` 值得设。不设时 `@stop` 会一直等到在途请求全部结束：一个不结束
+的长连接就能让停机卡住，排在它后面的数据库等依赖也得不到回收，进程最后被强行杀掉。
+
+`host` / `port` 仍是类属性；`app`、`lifespan`、`reload`、`workers` 在这里另有归属，传了会在
+定义类时抛出 `TypeError`。
+
 ## 进程归 Canary
 
 生命周期由 Canary 驱动，因此：

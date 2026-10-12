@@ -9,12 +9,16 @@ import asyncio
 import contextlib
 import os
 import socket
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from typing import Any, ClassVar
 
 import uvicorn
 
 from canary_framework.asgi.app import App, Application, dispatch
 from canary_framework.core import Canary, LifecycleError, deps_of, scope_of, start, stop
+
+#: 不能当作类参数传给 uvicorn 的选项：它们在这里另有归属。
+_OWNED = frozenset({"app", "host", "port", "uds", "fd", "lifespan", "reload", "workers"})
 
 
 class Server(Canary):
@@ -45,8 +49,21 @@ class Server(Canary):
       ``OSError``，已启动的依赖照常回收。
     - ``@stop`` 停止接收新连接，等在途请求结束。
 
+    类参数原样传给 ``uvicorn.Config``，子类继承父类的全部类参数，只覆盖自己写出的那些::
+
+        class Gateway(Server, timeout_graceful_shutdown=10, proxy_headers=True):
+            api = dep(LibraryApi)
+
+    ``timeout_graceful_shutdown`` 值得设：不设时 ``@stop`` 会一直等到在途请求全部结束，一个
+    不结束的长连接就能让停机卡住，排在它后面的依赖也得不到回收。
+
     生命周期归 Canary，所以 ASGI 的 lifespan 是关闭的，信号也不由服务器接管：何时退出由
     进程入口决定。它不必是根单元——守护进程顺带开一个管理端口，就是多一条 ``dep()``。
+
+    :param options: 原样传给 ``uvicorn.Config(...)`` 的参数（``timeout_graceful_shutdown``、
+        ``timeout_keep_alive``、``proxy_headers``、``ssl_certfile`` ……）。
+    :raises TypeError: 传了在这里另有归属的选项：地址是 ``host`` / ``port`` 属性，应用是它
+        依赖的单元，lifespan、重载与多进程不归 uvicorn 管。
     """
 
     #: 监听地址。
@@ -56,9 +73,23 @@ class Server(Canary):
     #: 显式给出的 ASGI 应用。不赋值时服务直接依赖的应用单元。
     app: Application
 
+    #: 本类的类参数，原样传给 ``uvicorn.Config``。
+    __canary_server__: ClassVar[Mapping[str, Any]] = {}
+
     _uvicorn: _Uvicorn | None = None
     _serving: asyncio.Task[None] | None = None
     _socket: socket.socket | None = None
+
+    def __init_subclass__(cls, **options: Any) -> None:
+        super().__init_subclass__()
+        owned = sorted(_OWNED & options.keys())
+        if owned:
+            raise TypeError(
+                f"{cls.__name__}: {', '.join(owned)} cannot be passed to uvicorn here. "
+                f"The address is the host / port attributes, the application is what the "
+                f"server depends on, and the lifecycle belongs to Canary."
+            )
+        cls.__canary_server__ = {**cls.__canary_server__, **options}
 
     def _application(self) -> Application:
         """What to serve: the app assigned explicitly, or the app units depended on directly.
@@ -93,7 +124,8 @@ class Server(Canary):
         # 自己绑定：交给 uvicorn 绑定的话，端口被占用时它直接 sys.exit，绕过失败回收。
         sock = self._socket = _bind(self.host, self.port)
         self.port = sock.getsockname()[1]
-        server = self._uvicorn = _Uvicorn(uvicorn.Config(app, lifespan="off", log_config=None))
+        options = {"log_config": None, **self.__canary_server__, "lifespan": "off"}
+        server = self._uvicorn = _Uvicorn(uvicorn.Config(app, **options))
         serving = self._serving = asyncio.create_task(server.serve(sockets=[sock]))
         ready = asyncio.create_task(server.ready.wait())
         try:

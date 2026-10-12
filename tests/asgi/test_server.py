@@ -113,6 +113,48 @@ async def test_a_cancelled_stop_still_closes_the_socket() -> None:
     assert listening.fileno() == -1
 
 
+async def test_class_parameters_go_to_uvicorn_and_bound_the_wait_for_requests() -> None:
+    """不设 ``timeout_graceful_shutdown`` 时 ``stop()`` 一直等在途请求；设了就有上限。"""
+
+    class Stuck(Server, timeout_graceful_shutdown=1):
+        port = 0
+
+        @init
+        def build(self) -> None:
+            async def never(scope: Any, receive: Any, send: Any) -> None:
+                await asyncio.Event().wait()
+
+            self.app = never
+
+    server = Stuck()
+    await server.init()
+    await server.start()
+    assert server._uvicorn is not None
+    assert server._uvicorn.config.timeout_graceful_shutdown == 1
+    async with httpx.AsyncClient() as client:
+        request = asyncio.create_task(client.get(_url(server)))
+        await asyncio.sleep(0.05)
+        await asyncio.wait_for(server.stop(), 5)
+        # uvicorn 取消了那个请求的任务，对端得到 500 而不是一直挂着。
+        assert (await request).status_code == 500
+
+
+def test_a_subclass_inherits_class_parameters_and_overrides_its_own() -> None:
+    class Base(Server, timeout_keep_alive=1, backlog=16): ...
+
+    class Tuned(Base, backlog=32): ...
+
+    assert Server.__canary_server__ == {}
+    assert Base.__canary_server__ == {"timeout_keep_alive": 1, "backlog": 16}
+    assert Tuned.__canary_server__ == {"timeout_keep_alive": 1, "backlog": 32}
+
+
+@pytest.mark.parametrize("option", ["app", "host", "port", "lifespan", "workers", "reload"])
+def test_options_that_belong_elsewhere_are_refused(option: str) -> None:
+    with pytest.raises(TypeError, match=f"{option} cannot be passed to uvicorn here"):
+        type("Wrong", (Server,), {}, **{option: 1})
+
+
 async def test_dependencies_start_before_it_listens_and_stop_after_it_closes() -> None:
     async with running(Hello) as server:
         url = _url(server)

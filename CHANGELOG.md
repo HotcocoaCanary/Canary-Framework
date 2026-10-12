@@ -25,12 +25,13 @@ This project follows Keep a Changelog and Semantic Versioning.
   - `canary_framework.asgi` — applications and listening as two kinds of unit. `App` is one
     ASGI application that does not listen; `Server` listens on one port and serves the `App`
     units it depends on directly, each under its own `path`; `dispatch()` joins ASGI apps by
-    path prefix. A port in use raises `OSError` and what started is reclaimed. Install with
+    path prefix. A port in use raises `OSError` and what started is reclaimed. Class parameters
+    go to `uvicorn.Config` (`class Gateway(Server, timeout_graceful_shutdown=10)`). Install with
     `canary-framework[asgi]`.
 
     把"应用"与"监听"分成两种单元。`App` 是一个不监听的 ASGI 应用；`Server` 监听一个端口，
     服务它直接依赖的 `App`，各自应答自己的 `path`；`dispatch()` 按路径前缀合并 ASGI 应用。
-    端口被占用时抛 `OSError`，已启动的依赖照常回收。
+    端口被占用时抛 `OSError`，已启动的依赖照常回收。类参数原样传给 `uvicorn.Config`。
   - `canary_framework.asgi.fastapi` — a subpackage of `asgi`, building on it. `Router` and
     `App` are units, and `get` / `post` / `put` / `patch` / `delete` mark a unit's methods as
     FastAPI endpoints. Depending on
