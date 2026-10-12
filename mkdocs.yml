@@ -113,6 +113,7 @@ nav:
       - Configuration: extensions/config.md
       - ASGI: extensions/asgi.md
       - FastAPI: extensions/fastapi.md
+      - Web: extensions/web.md
   - Reference:
       - API Reference: api-reference.md
       - Architecture: architecture.md
