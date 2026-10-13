@@ -30,7 +30,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 from canary_framework.core import (
     Canary,
