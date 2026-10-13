@@ -46,10 +46,10 @@ uv run mkdocs build --strict                # 改了文档时 / when docs change
 
 ## 分支与合并 / Branches and merging
 
-- `main` 受保护：只能通过 PR 合并，CI（测试矩阵、文档构建、PR 标题检查）须全部通过，
+- `main` 受保护：只能通过 PR 合并，CI（测试矩阵、无扩展依赖环境下的核心测试、文档构建、PR 标题检查）须全部通过，
   并经维护者审查。
-  `main` is protected: changes land through pull requests only, after CI (test matrix, docs
-  build, PR title check) passes and the maintainer reviews.
+  `main` is protected: changes land through pull requests only, after CI (test matrix, the core tests in an
+  environment without the extensions' dependencies, docs build, PR title check) passes and the maintainer reviews.
 - 只使用 squash 合并，**PR 标题即 main 上的提交信息**。
   Squash merge only — **the PR title becomes the commit message on `main`**.
 - `N.x`（如 `1.x`）是维护分支，仅在需要给旧 major 打补丁时创建。
@@ -73,8 +73,9 @@ type(optional-scope)!: summary
 | `docs` | 文档 / Documentation | `documentation` |
 | `refactor` / `test` / `build` / `ci` / `chore` / `revert` | 其他 / Other | `maintenance` |
 
-`!` 表示破坏性变更，会额外打上 `breaking`。1.x 内不接受破坏性变更。
-`!` marks a breaking change and adds `breaking`. Breaking changes are not accepted within 1.x.
+`!` 表示破坏性变更，会额外打上 `breaking`。1.x 内核心不接受破坏性变更；暂行的扩展包除外。
+`!` marks a breaking change and adds `breaking`. The core accepts no breaking changes within
+1.x; the provisional extensions may.
 
 ## 代码风格 / Code style
 

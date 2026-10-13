@@ -13,7 +13,7 @@ class UserService(Canary):
     cache = dep(Cache)
 ```
 
-It is a descriptor that resolves to the shared instance from the owner's scope. Three
+It is a descriptor that resolves to the shared instance from the owner's scope. Four
 properties:
 
 **You choose the attribute name.** The injected name does not come from the dependency's class
@@ -40,6 +40,9 @@ class BulkImporter(Importer):
     queue = dep(BulkQueue)          # depends on BulkQueue only, no longer on Queue
 ```
 
+Override the name with something that is not a `dep()` — `queue = None` — and the dependency
+is dropped.
+
 **The declaration never needs evaluating.** The descriptor holds the class object itself, not
 a name, so it is unaffected by `from __future__ import annotations`, `if TYPE_CHECKING`, or
 class definitions inside a function.
@@ -55,7 +58,7 @@ class Broken(Canary):
 ```
 
 ```
-DeclarationError: dep(<class 'Plain'>): not a Canary subclass
+DeclarationError: dep(<class '__main__.Plain'>): not a Canary subclass
 ```
 
 The check happens while the class body is evaluated, so the error points at the `dep(...)`
@@ -123,7 +126,7 @@ from canary_framework import scope_of
 
 scope = scope_of(root)
 scope.instances          # type -> instance
-scope.entered(start)   # type -> unit that entered start, in entry order
+scope.entered(start)   # type -> unit that entered start, dependencies first
 ```
 
 ## Cycles

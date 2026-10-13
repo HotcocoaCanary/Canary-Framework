@@ -72,8 +72,11 @@ matching `@stop`.
 Calling `start()` without `init()` raises:
 
 ```
-LifecycleError: Service: @init has not run, call it before @start
+LifecycleError: Config: @init has not run, call it before @start
 ```
+
+It names the first unit along the dependencies whose `@init` has not run, which need not be
+the one you called.
 
 ## Stopping
 
@@ -111,11 +114,18 @@ async with service:     # start, stop
     ...
 ```
 
+So whatever must be given back on stop and acquired again on restart — connections, ports,
+background tasks — belongs in `@start` and `@stop`; `@init` is for what needs doing once per
+scope.
+
 A phase declared with `after=start` is undone along with `start`, and has to be entered
-again after the restart.
+again after the restart. Only the record is undone: `stop()` does not run that phase's own
+leave hooks. To run them, `leave()` the phase before `stop()`; see
+[Patterns › Shutting down in two steps](patterns.md#two-step-shutdown).
 
 A failed `start()` has already released what it acquired (see below), so retrying is simply
-calling it again. Units that completed the phase are not run twice:
+calling it again. The units that attempt started have all been stopped, so the retry starts
+them again; a unit something else still uses was not reclaimed and is not run twice:
 
 ```python
 try:

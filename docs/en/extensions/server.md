@@ -11,7 +11,7 @@ pip install "canary-framework[server]"
 
 !!! note "Provisional API"
     Extensions may change in a minor release until they are declared stable; see
-    [Versioning](../versioning.md#extensions).
+    [Versioning & Compatibility](../versioning.md#extensions).
 
 ## Depending is serving
 
@@ -97,6 +97,9 @@ out:
   an application that fails to start fails the `Server`'s start, and what had started is
   reclaimed as usual. This framework's application units have already been started by Canary
   by then, so they only acknowledge and are not driven twice.
+  It reaches only the application assigned to `self.app`: [`dispatch`](#dispatch) answers
+  lifespan messages and does not forward them, so an application joined in through it never
+  sees them.
 - or move that part into a unit's `@start` / `@stop` and let the `Server` depend on it — where
   a migration usually ends up.
 
@@ -137,7 +140,7 @@ Two things:
   but all it does is return a unit of a graph by its type, and using it in production code is
   fine.
 
-## How paths are dispatched
+## How paths are dispatched { #dispatch }
 
 A request goes to the application with the **longest matching prefix**, and prefixes match
 whole segments: `/api` answers `/api` and `/api/...`, not `/apix`; `/` answers everything else.
@@ -177,8 +180,9 @@ flight has finished: one long-lived connection that never ends holds the shutdow
 database and the other dependencies behind it are not reclaimed, and the process ends up
 being killed.
 
-`host` and `port` stay class attributes; `app`, `reload` and `workers` belong elsewhere here,
-and passing one raises `TypeError` when the class is defined. `lifespan` defaults to `"off"`;
+The address is the `host` and `port` class attributes. `app`, `host`, `port`, `uds`, `fd`,
+`reload` and `workers` belong elsewhere here and are not class parameters: passing one raises
+`TypeError` when the class is defined. `lifespan` defaults to `"off"`;
 see above.
 
 WebSocket needs an implementation installed separately (`websockets` or `wsproto`); uvicorn

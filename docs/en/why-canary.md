@@ -39,7 +39,8 @@ Measured on 2026-09-23 with Python 3.13; library versions are pinned in the scri
 - **Synchronous programs.** `init()`, `start()` and `stop()` are coroutines. Hooks may be
   synchronous, but something has to run an event loop.
 - **Maturity.** Canary is young and has one maintainer. The others have larger communities and
-  ready-made integrations for web frameworks.
+  ready-made integrations for many web frameworks; Canary's own web extensions are still
+  provisional.
 
 ## Comparison
 
@@ -106,5 +107,7 @@ async def get_book(book_id: int, repo: Annotated[BookRepository, Depends(books)]
     ...
 ```
 
-[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example) has the
-complete version, with tests: the `library` project is a FastAPI service built this way.
+The other way round, Canary does the listening: hand the FastAPI application to the
+[`Server` unit](extensions/server.md) and no lifespan needs writing. The `library` project in
+[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example)
+(`--stack fastapi`) is a complete version of that, with tests.

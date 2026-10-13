@@ -103,12 +103,12 @@ line: `Phase("migrate", after=init)`.
   dependency across the whole graph, and the double runs its own lifecycle.
 - **Concurrent by default.** Independent units start together and stop together, scheduled by
   the dependency graph.
-- **Zero dependencies.** A test asserts that a full lifecycle imports nothing from
-  site-packages.
+- **Zero dependencies.** A test asserts that `import canary_framework` loads no third-party
+  package, and none of the extensions.
 
 ## Hosting
 
-The framework knows nothing about shells — HTTP, CLI, schedulers and consumers are all yours:
+The core knows nothing about shells — HTTP, CLI, schedulers and consumers are all yours:
 
 ```python
 @asynccontextmanager
@@ -178,10 +178,11 @@ breaking changes before 2.0, and removals are deprecated for at least one minor 
   where it does not, and a measured comparison with dishka, dependency-injector, injector and
   FastAPI `Depends`
 - [Documentation](https://hotcocoacanary.github.io/Canary-Framework/) —
-  [What's new in 1.1](https://hotcocoacanary.github.io/Canary-Framework/whats-new/),
+  [What's new in 1.2](https://hotcocoacanary.github.io/Canary-Framework/whats-new/),
   [patterns](https://hotcocoacanary.github.io/Canary-Framework/patterns/),
   [upgrading from 0.9.x](https://hotcocoacanary.github.io/Canary-Framework/upgrading-from-0.9/)
-- Complete examples — a FastAPI service and a long-running daemon:
+- Complete examples — five projects of deliberately different shapes, from an HTTP API to a
+  long-running daemon:
   [Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example)
   (checked out at [`examples/`](examples) as a submodule)
 

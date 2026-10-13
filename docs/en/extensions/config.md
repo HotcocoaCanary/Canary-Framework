@@ -39,8 +39,8 @@ Reading the environment and `.env`, and validating types, is all pydantic-settin
 exactly as its own docs describe. `Settings` adds one thing: it is a unit, so whoever needs it
 writes `dep(AppConfig)` and the whole graph shares one instance.
 
-Invalid configuration raises its validation error while starting, and whatever already started
-is reclaimed as usual.
+Invalid configuration raises its validation error in the `init` phase, when this
+configuration unit is constructed — before any unit has run a `@start`.
 
 ## No-argument construction
 

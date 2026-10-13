@@ -31,10 +31,11 @@ uv run benchmarks/comparison.py
   则通过普通类的 `__init__` 注入。
 - **数量在运行时才确定的多个实例，或构造参数。** 单元一律无参构造、每个类型一个；所需的值在
   `@init` 或 `@start` 中从依赖读取。数量固定的多个实例可以用子类表达——每个子类是独立的
-  单元，见[常见用法](patterns.md)——但"按配置起 N 个"做不到。
+  单元，见[常见用法](patterns.md#several-instances-of-one-kind)——但"按配置起 N 个"做不到。
 - **同步程序。** `init()`、`start()` 与 `stop()` 是协程。钩子可以是同步的，但总要有人运行事件
   循环。
-- **成熟度。** Canary 还年轻，只有一位维护者。其他库的社区更大，也有现成的 Web 框架集成。
+- **成熟度。** Canary 还年轻，只有一位维护者。其他库的社区更大，也有现成的各种 Web 框架集成；
+  Canary 自带的 Web 扩展包还是暂行的。
 
 ## 对比
 
@@ -97,5 +98,6 @@ async def get_book(book_id: int, repo: Annotated[BookRepository, Depends(books)]
     ...
 ```
 
-完整版本（含测试）见 [Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example)
-的 `library` 项目，它正是以这种方式构建的 FastAPI 服务。
+另一条路是让 Canary 来监听：FastAPI 应用交给 [`Server` 单元](extensions/server.md)服务，就不必
+手写 lifespan。[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example)
+的 `library` 项目（`--stack fastapi`）是这种写法的完整版本，含测试。

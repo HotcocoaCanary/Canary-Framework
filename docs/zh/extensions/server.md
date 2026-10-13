@@ -89,6 +89,8 @@ class Gateway(Server):
 - 用类参数打开：`class Gateway(Server, lifespan="on")`。应用的启动发生在 `Server` 的 `@start`
   里、监听之前，回收发生在 `@stop` 里；应用启动失败就是 `Server` 启动失败，已启动的依赖
   照常回收。本框架的应用单元此时已由 Canary 启动，只会应答，不会被重复驱动。
+  它只对赋给 `self.app` 的那个应用生效：[`dispatch`](#dispatch) 对 lifespan 只应答、不转发，
+  经它拼进去的应用收不到这些消息。
 - 或者把那部分搬成一个单元的 `@start` / `@stop`，让 `Server` 依赖它——迁移的终点通常是这个。
 
 ### 在别的框架的接口里用单元
@@ -125,7 +127,7 @@ async def show(reader_id: int, readers: ReaderService = use(ReaderService)) -> R
 - **按类型取单元用 `canary_framework.test.unit`。** 它虽然放在 `test` 包里，做的就是"从一张
   图上按类型取回单元"这一件事，生产代码里用它没有问题。
 
-## 路径怎么分发
+## 路径怎么分发 { #dispatch }
 
 请求按**最长前缀**交给应用，前缀按整段匹配：`/api` 应答 `/api` 与 `/api/...`，不应答
 `/apix`；`/` 应答其余一切。没有匹配时 HTTP 得到 404。
@@ -161,8 +163,8 @@ class Gateway(Server, timeout_graceful_shutdown=10, proxy_headers=True):
 `timeout_graceful_shutdown` 值得设。不设时 `@stop` 会一直等到在途请求全部结束：一个不结束
 的长连接就能让停机卡住，排在它后面的数据库等依赖也得不到回收，进程最后被强行杀掉。
 
-`host` / `port` 仍是类属性；`app`、`reload`、`workers` 在这里另有归属，传了会在定义类时抛出
-`TypeError`。`lifespan` 默认是 `"off"`，见上文。
+地址用 `host` / `port` 类属性。`app`、`host`、`port`、`uds`、`fd`、`reload`、`workers` 在这里
+另有归属，不能作为类参数，传了会在定义类时抛出 `TypeError`。`lifespan` 默认是 `"off"`，见上文。
 
 WebSocket 需要另装一个实现（`websockets` 或 `wsproto`），uvicorn 本身不带。
 

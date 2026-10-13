@@ -1,6 +1,8 @@
 # API 参考
 
-全部公开名字都从 `canary_framework` 导出。
+核心的全部公开名字都从 `canary_framework` 导出，本页列的就是它们。扩展包的 API 在各自的页面：
+[测试](extensions/test.md)、[配置](extensions/config.md)、[Web 应用](extensions/app.md)、
+[Web 服务器](extensions/server.md)。
 
 ```python
 from canary_framework import (
@@ -133,7 +135,7 @@ await leave(unit, migrate)      # 运行 @rollback
 | 异常 | 何时抛出 |
 |---|---|
 | `CanaryError` | 基类，本身不抛出。 |
-| `DeclarationError` | `dep()` 的参数不是 `Canary` 子类。 |
+| `DeclarationError` | 声明本身有误：`dep()` 的参数不是 `Canary` 子类。扩展包对自己的声明也抛它，如 Web 应用里无法服务的路由。 |
 | `ConstructionError` | 单元需要构造参数。携带 `unit`。 |
 | `CircularDependencyError` | 依赖成环；在任何钩子运行之前抛出。携带 `cycle`，即走到环上的路径。 |
 | `LifecycleError` | 在生命周期之外使用单元：`__init__` 中读取依赖，或前驱阶段未完成。 |

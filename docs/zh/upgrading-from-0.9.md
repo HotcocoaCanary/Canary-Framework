@@ -1,7 +1,8 @@
 # 从 0.9.x 升级
 
 0.10.0 重写了核心，1.0 沿用这一核心。从 0.9.x 升级时，公开 API 完全不兼容，且没有兼容层；
-本页列出变化与迁移方式。之后再看 [1.0 新特性](whats-new-1.0.md) 与 [1.1 新特性](whats-new.md) 了解此后的变化。
+本页列出变化与迁移方式。之后再看 [1.0 新特性](whats-new-1.0.md)、[1.1 新特性](whats-new-1.1.md) 与
+[1.2 新特性](whats-new.md) 了解此后的变化。
 
 ## 单元是一个基类
 
@@ -81,7 +82,8 @@ class Traced(Canary):
   `canary[Type]`、`canary.lifespan`、`start_concurrency=`、装配摘要、事件循环延迟探针。
 - `LifecycleState` 与八态状态机。
 - 按类名 snake_case 注入、类级注解注入、`Config` 与日志注入。
-- `canary_framework.web` 在 0.9.3 开发期已删除，本版本未恢复。
+- `canary_framework.web` 在 0.9.3 开发期已删除，1.0 未恢复。1.2 起这个名字下是一套全新的暂行
+  扩展包，与 0.9 的那套无关，见 [Web 应用](extensions/app.md)。
 
 ## 迁移
 

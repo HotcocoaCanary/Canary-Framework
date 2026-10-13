@@ -150,6 +150,54 @@ except TimeoutError:
 Hooks running when the deadline hits are cancelled and not retried. Units not reached yet keep
 what they acquired, so calling `stop()` again carries on from there.
 
+## Shutting down in two steps {#two-step-shutdown}
+
+A daemon rarely stops in one step: it first stops taking new work and finishes what is in
+flight, and only then gives its resources back. `@stop` expresses the second half. The first
+is a pair of phases of your own, left unit-first — the root closes the gate, then the units
+below it drain:
+
+```python
+from canary_framework import Canary, Phase, dep, enter, leave, start, stop
+
+drain = Phase("drain")
+serving = Phase("serving", after=start, leave=drain)
+
+
+class Worker(Canary):
+    queue = dep(Queue)
+
+    @drain
+    async def finish(self) -> None:
+        await self.queue.join()             # finish what is in flight
+
+    @stop
+    async def cancel(self) -> None:
+        self.task.cancel()
+
+
+class Daemon(Canary):
+    worker = dep(Worker)
+
+    async def start(self) -> None:
+        await super().start()
+        await enter(self, serving)
+
+    async def stop(self) -> None:
+        await leave(self, serving)          # @drain, this unit first
+        await super().stop()                # @stop
+
+    @drain
+    def refuse(self) -> None:
+        self.accepting = False              # take nothing new
+```
+
+`async with Daemon()` and plain `start()` / `stop()` both go through the two overridden
+methods. Shutdown runs `Daemon.refuse` → `Worker.finish` → `Worker.cancel` → the queue's
+`@stop`. `leave(self, serving)` does not touch `start`, so the whole graph is still up while
+it drains; calling `stop()` again does nothing, and after a restart `serving` is entered
+again.
+
 ## Hosting
 
 The framework knows nothing about shells. Hosts that take an async context manager:

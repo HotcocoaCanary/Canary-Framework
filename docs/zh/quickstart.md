@@ -91,11 +91,17 @@ await service.stop()     # 逆序全部 @stop
 
 ## 完整示例
 
-[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example) 收录了两个
-形态刻意不同的真实项目，并以子模块的形式挂在本仓库的 `examples/`。
+[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example) 收录了五个
+形态刻意不同的项目，并以子模块的形式挂在本仓库的 `examples/`。
 
-- **library**：智能图书馆管理系统 + RAG，基于 FastAPI 的请求驱动 HTTP API。
+- **library**：智能图书馆管理系统 + RAG，请求驱动的 HTTP API。
 - **telemetry**：设备遥测采集与告警，只用核心的常驻守护进程。
+- **relay**：门店边缘中继，一个进程两个端口、多个应用。
+- **pipeline**：对账单导入流水线，HTTP 与队列消费者同进程，两步停机。
+- **shop**：把一个已有的 FastAPI 应用分两步迁到 Canary 上。
+
+有 Web 服务的项目把 HTTP 层写了两版——[应用单元](extensions/app.md)一版、原生 FastAPI 一版——
+业务代码只有一份。
 
 ```bash
 git clone https://github.com/HotcocoaCanary/Canary-Framework-Example.git
