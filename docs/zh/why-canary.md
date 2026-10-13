@@ -8,10 +8,11 @@ Canary 只做一件事：把与应用同寿命的对象连接起来，并运行�
 用每个库搭建同一张小图并打印结果。可以自己运行：
 
 ```bash
-uv run benchmarks/comparison.py
+uv run --python 3.13 benchmarks/comparison.py
 ```
 
-测量于 2026-09-23，Python 3.13；各库版本固定在脚本头部。
+测量于 2026-10-13，Python 3.13；各库版本固定在脚本头部。在 Python 3.12 上，dependency-injector
+会多装一个第三方包（`typing-extensions`），其余结果相同。
 
 ## 适合的场景
 
@@ -42,7 +43,7 @@ uv run benchmarks/comparison.py
 场景：`Config`，两个互不依赖、各需 0.1 秒获取的资源 `Database` 与 `Cache`，以及同时需要二者的
 `Service`。
 
-| | Canary 1.1.0 | dishka 1.10.1 | dependency-injector 4.49.1 | injector 0.24.0 | FastAPI `Depends` 0.141.1 |
+| | Canary 1.2.0 | dishka 1.10.1 | dependency-injector 4.49.1 | injector 0.24.0 | FastAPI `Depends` 0.141.1 |
 |---|---|---|---|---|---|
 | 装配方式 | 类上的 `dep()` 属性 | `Provider` 类 | 由 provider 组成的容器 | module 与 binder | handler 签名中的 `Depends(...)` |
 | 你的类 | 继承 `Canary` | 普通类 | 普通类 | 普通类，`__init__` 上加 `@inject` | 普通函数 |

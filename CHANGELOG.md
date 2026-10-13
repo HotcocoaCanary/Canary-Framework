@@ -4,6 +4,15 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Documentation
+
+- Why Canary: the comparison is re-measured with 1.2.0; the Canary column is unchanged. The
+  page now says which Python the numbers are for — on 3.12 dependency-injector installs
+  `typing-extensions`, on 3.13 it installs nothing.
+
+  「为什么选 Canary」用 1.2.0 重新实测，Canary 一列结果不变。页面注明了测量所用的 Python
+  版本：dependency-injector 在 3.12 上会多装 `typing-extensions`，在 3.13 上不装任何第三方包。
+
 ## [1.2.0] — 2026-10-13
 
 Four extension packages arrive beside the core — testing helpers, configuration, and the two

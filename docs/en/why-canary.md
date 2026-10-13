@@ -9,10 +9,12 @@ Every row in the comparison below is measured, not recalled:
 builds the same small graph with each library and prints the results. Run it yourself:
 
 ```bash
-uv run benchmarks/comparison.py
+uv run --python 3.13 benchmarks/comparison.py
 ```
 
-Measured on 2026-09-23 with Python 3.13; library versions are pinned in the script's header.
+Measured on 2026-10-13 with Python 3.13; library versions are pinned in the script's header.
+On Python 3.12 dependency-injector installs one third-party package more (`typing-extensions`);
+nothing else differs.
 
 ## Where Canary fits
 
@@ -47,7 +49,7 @@ Measured on 2026-09-23 with Python 3.13; library versions are pinned in the scri
 The scenario: `Config`, two independent resources `Database` and `Cache` that each take 0.1 s to
 acquire, and a `Service` that needs both.
 
-| | Canary 1.1.0 | dishka 1.10.1 | dependency-injector 4.49.1 | injector 0.24.0 | FastAPI `Depends` 0.141.1 |
+| | Canary 1.2.0 | dishka 1.10.1 | dependency-injector 4.49.1 | injector 0.24.0 | FastAPI `Depends` 0.141.1 |
 |---|---|---|---|---|---|
 | Wiring | `dep()` attributes on the class | `Provider` classes | a container of providers | modules and binders | `Depends(...)` in handler signatures |
 | Your classes | subclass `Canary` | plain classes | plain classes | plain classes, `@inject` on `__init__` | plain functions |
