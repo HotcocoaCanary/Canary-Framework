@@ -8,7 +8,8 @@ pip install "canary-framework[app]"        # 只要应用
 pip install "canary-framework[web]"        # 应用 + 本框架的服务器单元
 ```
 
-它不提供依赖注入系统——依赖走 `dep()`——也不生成 OpenAPI。
+它不提供依赖注入系统——依赖走 `dep()`。它不生成 OpenAPI，但公开了[接口表](#endpoints)，照着它写一份
+只要几十行。
 
 ## 谁来服务它
 
@@ -199,6 +200,94 @@ class LibraryApi(App):
         self.app = CORSMiddleware(self.app, allow_origins=["*"])
 ```
 
+## 接口表 { #endpoints }
+
+`@init` 之后，`App.endpoints` 是拍平之后的全部接口，只读。每个 `Endpoint` 说明一个接口：
+
+| 属性 | 含义 |
+| --- | --- |
+| `method`、`path` | HTTP 方法与完整的路径模板（已带上逐层叠加的前缀） |
+| `status` | 成功时的状态码；方法返回 `None` 而这里是 200 时，实际应答 204 |
+| `call` | 绑定方法本身，可以取它的文档字符串 |
+| `params` | 形参，每个 `Param` 有 `name`、`source`（`"path"` / `"query"` / `"body"` / `"request"`）、`annotation`、`default`、`required` |
+| `returns` | 返回注解；没有写时是 `Any`，`-> None` 是 `type(None)` |
+
+顺序是应用单元自己的接口在前，然后是它依赖的路由单元的，按声明顺序。由 GET 应答的 HEAD
+不单列。
+
+本包不生成 OpenAPI，但这张表给出了生成它所需的一切，类型到 JSON Schema 的翻译交给 pydantic。
+下面这个函数生成一份 OpenAPI 3.1 文档：
+
+```python
+import inspect
+from typing import Any
+
+from pydantic import TypeAdapter
+
+from canary_framework.web.asgi.app import Endpoint, Response
+
+
+def openapi(endpoints: tuple[Endpoint, ...], title: str, version: str = "0.1.0") -> dict[str, Any]:
+    schemas: dict[str, Any] = {}
+
+    def schema(annotation: Any, mode: Any = "validation") -> dict[str, Any]:
+        found = TypeAdapter(annotation).json_schema(
+            ref_template="#/components/schemas/{model}", mode=mode
+        )
+        schemas.update(found.pop("$defs", {}))
+        return found
+
+    paths: dict[str, Any] = {}
+    for endpoint in endpoints:
+        operation: dict[str, Any] = {"operationId": endpoint.name}
+        if endpoint.call.__doc__:
+            operation["summary"] = inspect.cleandoc(endpoint.call.__doc__).splitlines()[0]
+        operation["parameters"] = [
+            {"name": p.name, "in": p.source, "required": p.required, "schema": schema(p.annotation)}
+            for p in endpoint.params
+            if p.source in ("path", "query")
+        ]
+        for p in endpoint.params:
+            if p.source == "body" and p.annotation is not bytes:
+                content = {"application/json": {"schema": schema(p.annotation)}}
+                operation["requestBody"] = {"required": p.required, "content": content}
+        if endpoint.returns is type(None):
+            status = 204 if endpoint.status == 200 else endpoint.status
+            operation["responses"] = {str(status): {"description": "No Content"}}
+        elif endpoint.returns in (Any, Response):
+            operation["responses"] = {str(endpoint.status): {"description": "OK"}}
+        else:
+            content = {"application/json": {"schema": schema(endpoint.returns, "serialization")}}
+            operation["responses"] = {
+                str(endpoint.status): {"description": "OK", "content": content}
+            }
+        paths.setdefault(endpoint.path, {})[endpoint.method.lower()] = operation
+    return {
+        "openapi": "3.1.0",
+        "info": {"title": title, "version": version},
+        "paths": paths,
+        "components": {"schemas": schemas},
+    }
+```
+
+应用单元自己的方法也可以是接口，所以把文档挂出来只要几行。子类的 `@init` 在表建好之后运行：
+
+```python
+class LibraryApi(App):
+    api = dep(Api)
+
+    @init
+    def describe(self) -> None:
+        self.document = openapi(self.endpoints, "Library")
+
+    @get("/openapi.json")
+    async def spec(self) -> dict[str, Any]:
+        return self.document
+```
+
+要 Swagger UI 之类的页面，把任意一个静态的文档页指向 `/openapi.json` 即可。两个不同模块里
+同名的模型会在 `components.schemas` 里互相覆盖，遇到时给其中一个改名。
+
 ## 启动时就报错的事
 
 以下问题在 `@init` 或定义类时抛出 `DeclarationError`，不会留到请求到来时：
@@ -211,7 +300,8 @@ class LibraryApi(App):
 
 ## 不做的事
 
-OpenAPI、WebSocket、表单与文件上传、静态文件、后台任务。
+OpenAPI 的生成与文档页面（[接口表](#endpoints)够你自己写）、WebSocket、表单与文件上传、静态文件、
+后台任务。
 
 ## 测试
 

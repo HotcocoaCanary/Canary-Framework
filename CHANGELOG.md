@@ -34,13 +34,20 @@ This project follows Keep a Changelog and Semantic Versioning.
       the rest from the query string) and validated by pydantic; `Response`, `HTTPError` and
       the `@error` mark decide the answer; plain `def` endpoints run in a thread pool. Routes
       are flattened into one table at `@init`, and what cannot be served raises
-      `DeclarationError` there. No dependency-injection system and no OpenAPI. Install with
+      `DeclarationError` there. That table is readable as `App.endpoints` — each `Endpoint`
+      gives the method, the full path, the status, the bound method, the return annotation
+      and its `Param`s (name, source, annotation, default) — which is everything needed to
+      write an OpenAPI document; the documentation shows one in about forty lines. No
+      dependency-injection system, and no OpenAPI generator of its own. Install with
       `canary-framework[app]`.
 
       一个小型 Web 框架。`Router` 与 `App` 都是单元，而 `App` **自己就是一个 ASGI 应用**：
       交给下面的 `Server`，或任何 ASGI 服务器（`uvicorn main:app`），后者的 lifespan 消息会
       启动并回收它的图。形参按名字与注解绑定，由 pydantic 校验；路由在 `@init` 时拍平成一张表，
-      无法服务的声明当场抛 `DeclarationError`。没有依赖注入系统，也不做 OpenAPI。
+      无法服务的声明当场抛 `DeclarationError`。这张表可以从 `App.endpoints` 读出来：每个
+      `Endpoint` 给出方法、完整路径、状态码、绑定方法、返回注解与各个 `Param`（名字、来源、
+      注解、默认值），足够写出一份 OpenAPI 文档，文档页给了一个四十行左右的写法。没有依赖
+      注入系统，也不自带 OpenAPI 生成器。
     - `web.asgi.server` — `Server`, a unit that listens: binding the port is its `@start`,
       closing is its `@stop`. It serves the application units it depends on directly (a unit
       that is callable and declares a `path`), or any ASGI application assigned to `self.app`
@@ -65,6 +72,10 @@ This project follows Keep a Changelog and Semantic Versioning.
 
   分层测试新增三条约束：扩展包只用公开导出、子包只依赖父包而兄弟包互不依赖、顶层包不 import
   它们。
+- `benchmarks/web.py` load-tests the application unit against FastAPI, endpoint for endpoint,
+  each in its own process: `uv run python benchmarks/web.py`.
+
+  `benchmarks/web.py`：同一组接口分别写成应用单元与 FastAPI，各起一个进程逐个场景压测。
 
 ### Fixed
 
