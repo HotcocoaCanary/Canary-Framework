@@ -1,8 +1,8 @@
 # What's New in 1.0
 
 1.0 is the first stable release. The API introduced in 0.10 is now covered by
-[Semantic Versioning](versioning.md): no breaking changes until 2.0, and anything removed is
-deprecated for at least one minor release first.
+[Semantic Versioning](versioning.md): anything removed is deprecated for at least one minor
+release first.
 
 Coming from 0.9.x? Start with [Upgrading from 0.9.x](upgrading-from-0.9.md). For what came
 after, see [What's New in 1.1](whats-new-1.1.md) and [What's New in 1.2](whats-new.md).
