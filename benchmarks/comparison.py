@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "canary-framework==1.1.0",
+#     "canary-framework==1.2.0",
 #     "dishka==1.10.1",
 #     "dependency-injector==4.49.1",
 #     "injector==0.24.0",
@@ -15,7 +15,7 @@
 
 对比页里的每一条都由本脚本实测得出::
 
-    uv run benchmarks/comparison.py
+    uv run --python 3.13 benchmarks/comparison.py
 
 同一个场景在每个库里各写一遍：``Config`` 之上有两个互不依赖的资源 ``Database`` 与
 ``Cache``（各需 0.1 秒获取），``Service`` 依赖二者。逐项测量：互不依赖的资源是否并发
