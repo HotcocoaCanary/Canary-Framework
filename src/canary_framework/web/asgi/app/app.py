@@ -11,7 +11,7 @@ from typing import Any
 
 from canary_framework.core import Canary, LifecycleError, init, scope_of, start
 from canary_framework.web.asgi import Application
-from canary_framework.web.asgi.app.binding import invoke, respond
+from canary_framework.web.asgi.app.binding import Endpoint, invoke, respond
 from canary_framework.web.asgi.app.http import HTTPError, Request, Response
 from canary_framework.web.asgi.app.router import Table, collect
 from canary_framework.web.asgi.app.routes import ERRORS, marked
@@ -61,12 +61,17 @@ class App(Canary):
         @init
         def wrap(self) -> None:
             self.app = CORSMiddleware(self.app, allow_origins=["*"])
+
+    那张表可以从 :attr:`endpoints` 读出来：每个接口的方法、完整路径、形参各自从哪里取值、
+    返回注解。生成 OpenAPI 文档、导出客户端之类的事读它就够了。
     """
 
     #: 被服务器单元服务时应答的路径前缀。请求按最长前缀分发，应用看到的仍是完整路径。
     path: str = "/"
     #: 处理请求的 ASGI 应用，``@init`` 之后可用。可以在子类的 ``@init`` 里包上中间件。
     app: Application
+    #: 全部接口，只读，``@init`` 之后可用。自己的在前，然后是依赖的路由单元的，按声明顺序。
+    endpoints: tuple[Endpoint, ...]
 
     async def __call__(
         self, scope: MutableMapping[str, Any], receive: _Receive, send: _Send
@@ -126,6 +131,7 @@ class App(Canary):
         handlers: _Handlers = {}
         for call, types in marked(self, ERRORS):
             handlers.update(dict.fromkeys(types, call))
+        self.endpoints = tuple(table.endpoints)
         self.app = _Web(table, handlers)
 
 

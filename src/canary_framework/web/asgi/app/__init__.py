@@ -27,19 +27,25 @@
 - :class:`Response` 与 :class:`HTTPError` 用来自己决定应答；``error`` 标记应用单元上处理某类
   异常的方法。
 
-没有依赖注入系统（依赖走 ``dep()``），没有 OpenAPI。
+- ``App.endpoints`` 是拍平之后的全部接口，每个是一个 :class:`Endpoint`，形参是 :class:`Param`。
+
+没有依赖注入系统（依赖走 ``dep()``）；不生成 OpenAPI，但 ``App.endpoints`` 给出了生成它所需的
+一切。
 
 依赖方向严格单向：``app -> router -> binding -> routes -> http``。
 """
 
 from canary_framework.web.asgi.app.app import App
+from canary_framework.web.asgi.app.binding import Endpoint, Param
 from canary_framework.web.asgi.app.http import HTTPError, Request, Response
 from canary_framework.web.asgi.app.router import Router
 from canary_framework.web.asgi.app.routes import delete, error, get, patch, post, put
 
 __all__ = [
     "App",
+    "Endpoint",
     "HTTPError",
+    "Param",
     "Request",
     "Response",
     "Router",

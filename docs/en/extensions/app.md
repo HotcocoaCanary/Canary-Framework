@@ -9,7 +9,9 @@ pip install "canary-framework[app]"        # the application only
 pip install "canary-framework[web]"        # the application + this framework's server unit
 ```
 
-It has no dependency-injection system — dependencies are `dep()` — and generates no OpenAPI.
+It has no dependency-injection system — dependencies are `dep()`. It generates no OpenAPI,
+but it exposes [the endpoint table](#the-endpoint-table), from which writing one takes a few
+dozen lines.
 
 ## Who serves it
 
@@ -215,6 +217,98 @@ class LibraryApi(App):
         self.app = CORSMiddleware(self.app, allow_origins=["*"])
 ```
 
+## The endpoint table
+
+After `@init`, `App.endpoints` is every endpoint of the application, flattened and read-only.
+Each `Endpoint` describes one:
+
+| Attribute | Meaning |
+| --- | --- |
+| `method`, `path` | the HTTP method and the full path template, prefixes included |
+| `status` | the status of a successful answer; a method returning `None` is answered with 204 when this is 200 |
+| `call` | the bound method itself — its docstring is there |
+| `params` | the parameters; each `Param` has `name`, `source` (`"path"` / `"query"` / `"body"` / `"request"`), `annotation`, `default` and `required` |
+| `returns` | the return annotation; `Any` when there is none, `type(None)` for `-> None` |
+
+The application's own endpoints come first, then those of the routers it depends on, in
+declaration order. The HEAD that a GET answers is not listed separately.
+
+This package generates no OpenAPI, but the table holds everything needed to write it, and
+pydantic translates the types into JSON Schema. This function produces an OpenAPI 3.1
+document:
+
+```python
+import inspect
+from typing import Any
+
+from pydantic import TypeAdapter
+
+from canary_framework.web.asgi.app import Endpoint, Response
+
+
+def openapi(endpoints: tuple[Endpoint, ...], title: str, version: str = "0.1.0") -> dict[str, Any]:
+    schemas: dict[str, Any] = {}
+
+    def schema(annotation: Any, mode: Any = "validation") -> dict[str, Any]:
+        found = TypeAdapter(annotation).json_schema(
+            ref_template="#/components/schemas/{model}", mode=mode
+        )
+        schemas.update(found.pop("$defs", {}))
+        return found
+
+    paths: dict[str, Any] = {}
+    for endpoint in endpoints:
+        operation: dict[str, Any] = {"operationId": endpoint.name}
+        if endpoint.call.__doc__:
+            operation["summary"] = inspect.cleandoc(endpoint.call.__doc__).splitlines()[0]
+        operation["parameters"] = [
+            {"name": p.name, "in": p.source, "required": p.required, "schema": schema(p.annotation)}
+            for p in endpoint.params
+            if p.source in ("path", "query")
+        ]
+        for p in endpoint.params:
+            if p.source == "body" and p.annotation is not bytes:
+                content = {"application/json": {"schema": schema(p.annotation)}}
+                operation["requestBody"] = {"required": p.required, "content": content}
+        if endpoint.returns is type(None):
+            status = 204 if endpoint.status == 200 else endpoint.status
+            operation["responses"] = {str(status): {"description": "No Content"}}
+        elif endpoint.returns in (Any, Response):
+            operation["responses"] = {str(endpoint.status): {"description": "OK"}}
+        else:
+            content = {"application/json": {"schema": schema(endpoint.returns, "serialization")}}
+            operation["responses"] = {
+                str(endpoint.status): {"description": "OK", "content": content}
+            }
+        paths.setdefault(endpoint.path, {})[endpoint.method.lower()] = operation
+    return {
+        "openapi": "3.1.0",
+        "info": {"title": title, "version": version},
+        "paths": paths,
+        "components": {"schemas": schemas},
+    }
+```
+
+An application's own methods can be endpoints too, so publishing the document takes a few
+lines. A subclass's `@init` runs after the table is built:
+
+```python
+class LibraryApi(App):
+    api = dep(Api)
+
+    @init
+    def describe(self) -> None:
+        self.document = openapi(self.endpoints, "Library")
+
+    @get("/openapi.json")
+    async def spec(self) -> dict[str, Any]:
+        return self.document
+```
+
+For a Swagger UI page, point any static documentation page at `/openapi.json`. Two models
+with the same name from different modules overwrite each other in `components.schemas`;
+rename one when that happens.
+
 ## What fails at startup
 
 These raise `DeclarationError` at `@init` or when the class is defined, rather than when a
@@ -229,7 +323,8 @@ request arrives:
 
 ## What it does not do
 
-OpenAPI, WebSocket, forms and file uploads, static files, background tasks.
+Generating OpenAPI and serving documentation pages ([the endpoint table](#the-endpoint-table)
+is enough to write your own), WebSocket, forms and file uploads, static files, background tasks.
 
 ## Testing
 

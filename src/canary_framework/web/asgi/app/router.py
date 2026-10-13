@@ -113,11 +113,14 @@ class Table:
     组织的前缀树上，查找只与路径的段数有关，与接口的总数无关。每一段先试静态段、再试参数段，
     所以静态段靠左的模板优先——``/books/new`` 先于 ``/books/{book_id}``，``/a/b/{y}`` 先于
     ``/a/{x}/c``。尾斜杠严格区分。
+
+    :ivar endpoints: 全部接口，按加入的顺序。
     """
 
-    __slots__ = ("_dynamic", "_static")
+    __slots__ = ("_dynamic", "_static", "endpoints")
 
     def __init__(self) -> None:
+        self.endpoints: list[Endpoint] = []
         self._static: dict[str, _Methods] = {}
         self._dynamic = _Node()
 
@@ -127,7 +130,7 @@ class Table:
         :raises DeclarationError: 同一个方法与路径已经有接口，或方法的签名无法绑定。
         """
         segments, names = parse(path)
-        endpoint = Endpoint(call, route, names)
+        endpoint = Endpoint(call, route, path, names)
         if names:
             node = self._dynamic
             for segment in segments:
@@ -146,6 +149,7 @@ class Table:
                 f"{route.method} {path} is answered twice: by {taken} and by {endpoint.name}"
             )
         methods[route.method] = (endpoint, names)
+        self.endpoints.append(endpoint)
 
     def find(self, path: str) -> tuple[_Methods, tuple[str, ...]] | None:
         """Return the endpoints at *path* and the values of its path parameters.
