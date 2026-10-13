@@ -162,8 +162,8 @@ async with Gateway():  # 依赖先启动，然后开始监听
 ## 稳定性
 
 1.0 是第一个稳定版本。公开 API 遵循
-[语义化版本](https://hotcocoacanary.github.io/Canary-Framework/zh/versioning/)：2.0 之前不做
-破坏性变更，任何移除都至少提前一个次版本弃用。
+[语义化版本](https://hotcocoacanary.github.io/Canary-Framework/zh/versioning/)：任何移除都至少
+提前一个次版本弃用。
 
 ## 文档
 
