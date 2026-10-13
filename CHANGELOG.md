@@ -89,6 +89,13 @@ This project follows Keep a Changelog and Semantic Versioning.
   `thing = dep(Default)` 被子类的 `thing = dep(Replacement)` 覆盖后不再出现在 `deps_of()` 里，
   `Default` 不会再被白白构造和启动。
 
+- `Scope.entered(phase)` lists units dependencies first, as documented, whatever happened
+  before. Calling `stop()` on a graph that had been initialised but never started used to
+  leave it root first after the next `start()`.
+
+  `Scope.entered(phase)` 始终按"依赖在前"返回，与文档一致。此前对只 `init` 过、从未启动的图
+  调用 `stop()` 之后再 `start()`，返回的顺序会变成根在前。
+
 ### Changed
 
 - The `dev` extra now pulls in the extension dependencies; a new `test` extra holds only what
