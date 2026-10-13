@@ -4,6 +4,16 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-10-13
+
+Four extension packages arrive beside the core — testing helpers, configuration, and the two
+sides of ASGI as units — all provisional for now. The core has two fixes; one changes what a
+subclass overriding a dependency by name does. See
+[What's New in 1.2](https://hotcocoacanary.github.io/Canary-Framework/whats-new/).
+
+核心旁边新增四个扩展包：测试辅助、配置，以及各站 ASGI 协议一侧的应用单元与服务器单元，目前
+均为暂行 API。核心有两处修正，其中一处改变了子类同名覆盖一条依赖时的行为。
+
 ### Added
 
 - **Extension packages beside the core**, each provisional — their API may change in a minor
@@ -138,7 +148,7 @@ This project follows Keep a Changelog and Semantic Versioning.
 The engine now runs on an explicit dependency graph, and `stop()` is a unit action. Two changes
 break code that used the engine directly — `advance()` / `unwind()` are renamed, and `stop()` on
 a unit still in use now does nothing — see
-[What's New in 1.1](https://hotcocoacanary.github.io/Canary-Framework/whats-new/). `init()`,
+[What's New in 1.1](https://hotcocoacanary.github.io/Canary-Framework/whats-new-1.1/). `init()`,
 `start()`, `stop()` and `async with` keep working as before.
 
 引擎改为基于显式依赖图，`stop()` 成为单元的动作。两处破坏性变更只影响直接使用引擎的代码：
