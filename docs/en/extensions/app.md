@@ -10,7 +10,7 @@ pip install "canary-framework[web]"        # the application + this framework's 
 ```
 
 It has no dependency-injection system — dependencies are `dep()`. It generates no OpenAPI,
-but it exposes [the endpoint table](#the-endpoint-table), from which writing one takes a few
+but it exposes [the endpoint table](#endpoints), from which writing one takes a few
 dozen lines.
 
 ## Who serves it
@@ -39,7 +39,7 @@ uvicorn main:app --reload
 
 !!! note "Provisional API"
     Extensions may change in a minor release until they are declared stable; see
-    [Versioning](../versioning.md#extensions).
+    [Versioning & Compatibility](../versioning.md#extensions).
 
 ## A complete example
 
@@ -136,7 +136,7 @@ A parameter is classified in this order:
   so an endpoint has at most one.
 - A query parameter with a default is optional; annotated `list[...]` or the like, it takes
   every value given under that name (`?tag=1&tag=2`).
-- A parameter without an annotation is a `str`.
+- A parameter without an annotation is a `str`; a `body` without one is any JSON.
 - Validation and conversion are pydantic's, so any type it validates can be used. The body
   goes through its JSON mode, which validates the raw bytes — so a `strict=True` model still
   accepts the strings JSON has for dates, UUIDs and the like.
@@ -196,8 +196,16 @@ return value:
 class LibraryApi(App):
     @error(HTTPError)
     def envelope(self, request: Request, exc: HTTPError) -> Response:
-        return Response.json({"code": exc.status, "msg": exc.detail}, status=exc.status)
+        body = {"code": exc.status, "msg": exc.detail}
+        return Response.json(body, status=exc.status, headers=exc.headers)
 ```
+
+An `HTTPError` may carry headers — the `Allow` of a 405 is in `exc.headers` — so a handler
+of your own has to pass them on.
+
+Handlers belong to the application. A router mounted under two applications has its
+exceptions handled by each application's own handlers, and an application without one answers
+in the default way.
 
 An exception with no handler is answered with 500 and logged to the
 `canary_framework.web.asgi.app` logger; the response carries no internal detail.
@@ -217,7 +225,7 @@ class LibraryApi(App):
         self.app = CORSMiddleware(self.app, allow_origins=["*"])
 ```
 
-## The endpoint table
+## The endpoint table { #endpoints }
 
 After `@init`, `App.endpoints` is every endpoint of the application, flattened and read-only.
 Each `Endpoint` describes one:
@@ -226,7 +234,7 @@ Each `Endpoint` describes one:
 | --- | --- |
 | `method`, `path` | the HTTP method and the full path template, prefixes included |
 | `status` | the status of a successful answer; a method returning `None` is answered with 204 when this is 200 |
-| `call` | the bound method itself — its docstring is there |
+| `call`, `name` | the bound method itself — its docstring is there — and its qualified name, such as `ReaderApi.show` |
 | `params` | the parameters; each `Param` has `name`, `source` (`"path"` / `"query"` / `"body"` / `"request"`), `annotation`, `default` and `required` |
 | `returns` | the return annotation; `Any` when there is none, `type(None)` for `-> None` |
 
@@ -323,7 +331,7 @@ request arrives:
 
 ## What it does not do
 
-Generating OpenAPI and serving documentation pages ([the endpoint table](#the-endpoint-table)
+Generating OpenAPI and serving documentation pages ([the endpoint table](#endpoints)
 is enough to write your own), WebSocket, forms and file uploads, static files, background tasks.
 
 ## Testing

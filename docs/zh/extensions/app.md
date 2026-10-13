@@ -126,7 +126,7 @@ asyncio.run(main())
 
 - 请求体**按名字**认：只有叫 `body` 的形参是请求体，所以一个接口最多一个。
 - 查询参数有默认值即可选；注解是 `list[...]` 之类时取全部同名值（`?tag=1&tag=2`）。
-- 没有注解的形参按 `str`。
+- 没有注解的形参按 `str`；没有注解的 `body` 是任意 JSON。
 - 校验与转换交给 pydantic，任何它能校验的类型都可以用。请求体用的是它的 JSON 模式：直接
   校验原始字节，所以 `strict=True` 的模型也接受 JSON 里的日期、UUID 这类字符串。
 - 请求头与 Cookie 不做注解魔法，写一个 `request: Request` 自己读。
@@ -180,8 +180,14 @@ raise HTTPError(404, "no such reader")
 class LibraryApi(App):
     @error(HTTPError)
     def envelope(self, request: Request, exc: HTTPError) -> Response:
-        return Response.json({"code": exc.status, "msg": exc.detail}, status=exc.status)
+        body = {"code": exc.status, "msg": exc.detail}
+        return Response.json(body, status=exc.status, headers=exc.headers)
 ```
+
+`HTTPError` 可能带着头——405 的 `Allow` 就在 `exc.headers` 里——自己处理它时要一并带上。
+
+处理器属于应用单元。同一个路由单元挂在两个应用之下时，它抛出的异常由各个应用自己的处理器
+处理，没有处理器的那个应用按默认方式应答。
 
 没有处理器的异常应答 500 并记到 `canary_framework.web.asgi.app` 这个日志器，响应里不带内部细节。
 
@@ -208,7 +214,7 @@ class LibraryApi(App):
 | --- | --- |
 | `method`、`path` | HTTP 方法与完整的路径模板（已带上逐层叠加的前缀） |
 | `status` | 成功时的状态码；方法返回 `None` 而这里是 200 时，实际应答 204 |
-| `call` | 绑定方法本身，可以取它的文档字符串 |
+| `call`、`name` | 绑定方法本身（可以取它的文档字符串），与它的限定名，如 `ReaderApi.show` |
 | `params` | 形参，每个 `Param` 有 `name`、`source`（`"path"` / `"query"` / `"body"` / `"request"`）、`annotation`、`default`、`required` |
 | `returns` | 返回注解；没有写时是 `Any`，`-> None` 是 `type(None)` |
 

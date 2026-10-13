@@ -88,6 +88,7 @@ class Endpoint:
     :ivar path: 完整的路径模板，已带上逐层叠加的前缀，如 ``/api/readers/{reader_id}``。
     :ivar status: 成功时的状态码。返回 ``None`` 而这里是 200 时，实际应答 204。
     :ivar call: 绑定方法本身。
+    :ivar name: 绑定方法的限定名，如 ``ReaderApi.show``。
     :ivar params: 形参，按签名的顺序，见 :class:`Param`。
     :ivar returns: 返回注解；没有写时是 ``Any``，``-> None`` 是 ``type(None)``。
     :raises DeclarationError: 签名无法绑定——``*args`` / ``**kwargs``、路径参数没有对应形参、

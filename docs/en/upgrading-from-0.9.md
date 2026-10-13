@@ -2,7 +2,8 @@
 
 0.10.0 rewrote the core, and 1.0 keeps that core. Coming from 0.9.x, the public API is not
 compatible and there is no compatibility layer; this page lists what changed and how to migrate.
-Then read [What's New in 1.0](whats-new-1.0.md) and [What's New in 1.1](whats-new.md) for what came after.
+Then read [What's New in 1.0](whats-new-1.0.md), [What's New in 1.1](whats-new-1.1.md) and
+[What's New in 1.2](whats-new.md) for what came after.
 
 ## A unit is a base class
 
@@ -90,7 +91,9 @@ Python's recursion limit (previously about 493). See [Architecture](architecture
 - `LifecycleState` and its eight-state machine.
 - snake_case-by-class-name injection, class-level annotation injection, `Config` and logger
   injection.
-- `canary_framework.web` was removed during 0.9.3 development and is not restored here.
+- `canary_framework.web` was removed during 0.9.3 development and was not restored in 1.0.
+  From 1.2 that name holds a new, provisional extension unrelated to the 0.9 one; see
+  [Web Application](extensions/app.md).
 
 ## Migration
 

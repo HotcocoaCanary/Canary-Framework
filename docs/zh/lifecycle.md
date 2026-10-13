@@ -26,7 +26,7 @@ class Database(Canary):
 钩子可以是同步的，也可以是 `async def`——框架按返回值判断是否需要等待，因此返回协程的
 同步函数同样成立。
 
-## 进入：依赖在前 {#advancing}
+## 进入：依赖在前 {#entering}
 
 `await unit.init()` 在依赖图上进入一次 `init`：先进入依赖，再运行自身的钩子。
 
@@ -68,8 +68,10 @@ Config.start -> Database.start -> Service.start
 未调用 `init()` 就 `start()` 会抛出：
 
 ```
-LifecycleError: Service: @init has not run, call it before @start
+LifecycleError: Config: @init has not run, call it before @start
 ```
+
+报出的是依赖链上第一个尚未 `init` 的单元，不一定是你调用的那个。
 
 ## 停止
 
@@ -105,10 +107,15 @@ async with service:     # start、stop
     ...
 ```
 
-以 `after=start` 声明的阶段随 `start` 一起撤销，重启之后需要重新进入。
+所以要随停止一起归还、重启时重新获取的东西——连接、端口、后台任务——放在 `@start` 与 `@stop`
+里；`@init` 里只放整个作用域内做一次就够的事。
 
-失败的 `start()` 已经释放了它获取的东西（见下文），因此重试就是再调用一次。已经完成该阶段
-的单元不会重复运行：
+以 `after=start` 声明的阶段随 `start` 一起撤销，重启之后需要重新进入。撤销的只是进入记录：
+`stop()` 不运行那个阶段自己的离开钩子，要运行就在 `stop()` 之前先 `leave()` 它，见
+[常见用法 › 分两步停机](patterns.md#two-step-shutdown)。
+
+失败的 `start()` 已经释放了它获取的东西（见下文），因此重试就是再调用一次。失败那次启动的
+单元都已停止，重试会重新启动它们；仍被别的单元使用、没有被回收的单元不会重复运行：
 
 ```python
 try:

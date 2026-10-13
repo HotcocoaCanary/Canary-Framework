@@ -44,7 +44,7 @@ This is not merely documented — `tests/test_layering.py` parses every module's
 |---|---|---|---|
 | `test/` | `running` and `unit` | `core` | none |
 | `config/` | `Settings` | `core` | pydantic-settings |
-| `web/asgi/` | The protocol layer: the type of an ASGI application, and `dispatch` | `core` | none |
+| `web/asgi/` | The protocol layer: the type of an ASGI application, and `dispatch` | nothing but the standard library | none |
 | `web/asgi/app/` | Application units: `Router`, `App`, requests and responses; inside, `app → router → binding → routes → http` | `core`, `web.asgi` | pydantic |
 | `web/asgi/server/` | The server unit: `Server` | `core`, `web.asgi` | uvicorn |
 
@@ -81,16 +81,19 @@ of a plain class: subclassing, mixins, nesting.
 Dependencies are not expressed with a marker at all: a `Dep` is a class attribute, so it holds
 the class object itself rather than a name.
 
-## Hook resolution
+## Resolving dependencies and hooks
 
 One MRO walk collects dependencies and marked attribute names together, and the result is
 cached per class — declarations do not change after class creation.
 
-Hooks resolve by **attribute name**, so the semantics match ordinary methods:
+Dependencies and hooks both resolve by **attribute name**, so the semantics match ordinary
+attributes and methods:
 
 - A subclass overriding a hook of the same name replaces it; use `super()` to compose.
 - A subclass overriding it without re-marking it removes the hook.
 - Mixin hooks under different names all apply, base class first.
+- A subclass writing another `dep()` under the same name replaces that dependency; overriding
+  the name with something that is not a `dep()` drops it.
 
 ## The dependency graph
 

@@ -94,7 +94,7 @@ class Service(Traced):
 
 ## 替身 {#substitutes}
 
-单元的标记随继承传递，因此测试替身继承被替换的类型即可：
+测试替身继承被替换的类型即可。覆盖一个钩子时要重新写上标记——不带标记的同名方法不再是钩子：
 
 ```python
 class FakeDatabase(Database):

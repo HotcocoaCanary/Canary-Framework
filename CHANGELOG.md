@@ -118,6 +118,21 @@ This project follows Keep a Changelog and Semantic Versioning.
 
   「为什么选 Canary」用 1.1.0 重新实测，Canary 一列结果不变。
 
+- Every page was checked against the code before 1.2, statement by statement, and every example
+  was run. Corrected: which unit a missing `init()` is reported for, what a retried `start()`
+  runs again, the `DeclarationError` text, the `Scope` attributes outside the stability
+  promise, the class parameters `Server` rejects, when invalid configuration is reported, and
+  an `@error(HTTPError)` example that dropped the `Allow` header. New: What's New in 1.2,
+  Patterns › Shutting down in two steps, and notes on where restartable resources belong,
+  on `dispatch` not forwarding lifespan messages, and on error handlers belonging to the
+  application.
+
+  发 1.2 之前把每一页对照代码逐条核对，示例全部实际运行。更正了：未 `init()` 时报出的是哪个
+  单元、重试 `start()` 会重新运行什么、`DeclarationError` 的文字、不在稳定性承诺内的 `Scope`
+  属性、`Server` 拒绝的类参数、配置无效在何时报出，以及一个丢掉 `Allow` 头的
+  `@error(HTTPError)` 示例。新增：1.2 新特性、常见用法 › 分两步停机，以及几处说明——可重启的
+  资源放在哪、`dispatch` 不转发 lifespan 消息、异常处理器属于应用单元。
+
 ## [1.1.0] — 2026-09-23
 
 The engine now runs on an explicit dependency graph, and `stop()` is a unit action. Two changes

@@ -11,6 +11,9 @@ Canary Framework 从 1.0.0 起遵循[语义化版本](https://semver.org/lang/zh
 | 次版本 `1.x.0` | 新功能与弃用。已有代码继续可用。 |
 | 主版本 `x.0.0` | 破坏性变更，每一项都在变更日志中列出并给出迁移方式。 |
 
+有一次例外：1.1 改动了直接驱动引擎的代码所用的两处 API（`advance` / `unwind` 改名，对仍被
+使用的单元调用 `stop()` 不再回收整张图），见 [1.1 新特性](whats-new-1.1.md)。
+
 ## 公开 API {#public-api}
 
 稳定性承诺覆盖：
@@ -25,7 +28,7 @@ Canary Framework 从 1.0.0 起遵循[语义化版本](https://semver.org/lang/zh
 - `canary_framework.core.*` 下未从 `canary_framework` 重新导出的内容；
 - 以下划线开头的名字；
 - 异常消息与 note 的文字；
-- `Scope` 记录类属性（`phases`、`entered`、`known`、`graph`、`dependents`）的结构。它们用于
+- `Scope` 记录类属性（`graph`、`dependents`、`tracks`、`known`、`keys`）的结构。它们用于
   观察与调试，可能在次版本中变化。`Scope.instances`、`Scope.instance()`、`Scope.provide()`、
   `Scope.resolve()` 与 `Scope.key_of()` 在承诺范围内。
 

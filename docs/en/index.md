@@ -63,7 +63,7 @@ caught. `init` / `start` / `stop` are three names for these two rules.
 | Name | What it is |
 |---|---|
 | `Canary` | The unit base class. Subclass it and you get four lifecycle actions. |
-| `dep(Cls)` | A dependency declaration. You choose the attribute name. |
+| `dep(Cls)` | A dependency declaration. You choose the attribute name; it need not follow the class name. |
 | `@init` / `@start` / `@stop` | Phase markers: which phase a method belongs to. |
 | `Phase` | A phase itself. `Phase("migrate")` is a fourth one, no registration needed. |
 | `Scope` | The state one run shares. One scope is one graph. |

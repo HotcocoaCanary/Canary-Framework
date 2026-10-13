@@ -23,7 +23,7 @@ async def test_alerts_fire_after_the_window() -> None:
 它构造一个新的根单元，把替身登记进作用域，启动整张图，退出时回收。每次调用都是一张新的图，
 测试之间不共享任何实例。
 
-替身经 [`Scope.provide`](../patterns.md) 登记，所以：
+替身经 [`Scope.provide`](../patterns.md#test-doubles) 登记，所以：
 
 - 被替换的单元**不会被构造**，它的依赖也不会因此启动；
 - 替身按自身的类型参与生命周期：运行自己的钩子，进入自己声明的依赖；

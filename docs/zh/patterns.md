@@ -2,7 +2,7 @@
 
 常见任务的写法，只用 `Canary`、`dep()` 与阶段。
 
-## 测试替身
+## 测试替身 {#test-doubles}
 
 继承要替换的单元，在生命周期开始之前把实例登记进作用域。之后图中所有 `dep(Database)` 都
 取回这个替身：
@@ -78,7 +78,7 @@ class Database(Canary):
 各个实现应在钩子里构造，而不是各自用 `dep()` 声明：依赖是静态的，声明过的单元无论是否
 用到都会被启动。
 
-## 同一种东西的多个实例
+## 同一种东西的多个实例 {#several-instances-of-one-kind}
 
 一张图里每个**类型**一个实例，而子类是另一个类型。需要固定的几个同类实例时，各写一个子类：
 
@@ -143,6 +143,51 @@ except TimeoutError:
 
 到期时正在执行的钩子被取消，不会重试。还没轮到的单元仍持有它获取的东西，再调用一次 `stop()`
 会从那里继续回收。
+
+## 分两步停机 {#two-step-shutdown}
+
+守护进程的停机常常不是一步：先停止接收新的工作，把在途的做完，然后才回收资源。`@stop` 只能
+表达后一半。前一半用一对自定义阶段，离开它时本单元在前——根先关闸，再轮到下面的单元排空：
+
+```python
+from canary_framework import Canary, Phase, dep, enter, leave, start, stop
+
+drain = Phase("drain")
+serving = Phase("serving", after=start, leave=drain)
+
+
+class Worker(Canary):
+    queue = dep(Queue)
+
+    @drain
+    async def finish(self) -> None:
+        await self.queue.join()             # 把在途的做完
+
+    @stop
+    async def cancel(self) -> None:
+        self.task.cancel()
+
+
+class Daemon(Canary):
+    worker = dep(Worker)
+
+    async def start(self) -> None:
+        await super().start()
+        await enter(self, serving)
+
+    async def stop(self) -> None:
+        await leave(self, serving)          # @drain，本单元在前
+        await super().stop()                # @stop
+
+    @drain
+    def refuse(self) -> None:
+        self.accepting = False              # 不再接新的
+```
+
+`async with Daemon()` 与直接调用 `start()` / `stop()` 都会经过这两个覆盖的方法。停机的顺序是
+`Daemon.refuse` → `Worker.finish` → `Worker.cancel` → 队列的 `@stop`。`leave(self, serving)`
+不动 `start`，所以排空期间整张图仍然是启动着的；重复调用 `stop()` 是空操作，重启之后
+`serving` 会重新进入。
 
 ## 接入宿主
 

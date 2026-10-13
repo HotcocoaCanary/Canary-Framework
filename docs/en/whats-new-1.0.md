@@ -4,8 +4,8 @@
 [Semantic Versioning](versioning.md): no breaking changes until 2.0, and anything removed is
 deprecated for at least one minor release first.
 
-Coming from 0.9.x? Start with [Upgrading from 0.9.x](upgrading-from-0.9.md). For the current
-release, see [What's New in 1.1](whats-new.md).
+Coming from 0.9.x? Start with [Upgrading from 0.9.x](upgrading-from-0.9.md). For what came
+after, see [What's New in 1.1](whats-new-1.1.md) and [What's New in 1.2](whats-new.md).
 
 ## Replacing a dependency across the graph
 

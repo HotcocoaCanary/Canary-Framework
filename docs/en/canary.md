@@ -27,8 +27,8 @@ Beyond that it stays a plain Python class: it can be subclassed, mixed in and ne
 | Action | What it does |
 |---|---|
 | `Unit()` | Construct with no arguments. No hooks run; dependencies are not available yet. |
-| `await unit.init()` | Advance the `init` phase along dependencies. |
-| `await unit.start()` | Advance the `start` phase along dependencies. |
+| `await unit.init()` | Enter the `init` phase, dependencies first. |
+| `await unit.start()` | Enter the `start` phase, dependencies first. |
 | `await unit.stop()` | Stop this unit, then the dependencies nothing else still needs. |
 
 `async with unit` is the convenience form: entering calls `init()` then `start()`, leaving
@@ -98,7 +98,8 @@ Phase hooks may be named anything, as long as the name does not collide with `in
 
 ## Substitutes
 
-Unit-ness is inherited, so a test double just subclasses what it replaces:
+A test double just subclasses what it replaces. When it overrides a hook it marks the method
+again — a method of the same name without the mark is no longer a hook:
 
 ```python
 class FakeDatabase(Database):

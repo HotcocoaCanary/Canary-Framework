@@ -97,11 +97,11 @@ postgresql://localhost/dev
 - **不靠 mock 的测试替身。** `scope_of(service).provide(Database, FakeDatabase())` 在整张图上
   替换一个依赖，替身走自己的生命周期。
 - **默认并发。** 互不依赖的单元同时启动、同时停止，由依赖图调度。
-- **零依赖。** 有一条测试断言：跑完一整轮生命周期，不会从 site-packages 导入任何东西。
+- **零依赖。** 有一条测试断言：`import canary_framework` 不会带入任何第三方包，也不会带入扩展包。
 
 ## 接入宿主
 
-框架不认识任何外壳 —— HTTP、CLI、定时任务、消息消费者都由你决定：
+核心不认识任何外壳 —— HTTP、CLI、定时任务、消息消费者都由你决定：
 
 ```python
 @asynccontextmanager
@@ -170,10 +170,10 @@ async with Gateway():  # 依赖先启动，然后开始监听
 - [为什么选 Canary](https://hotcocoacanary.github.io/Canary-Framework/zh/why-canary/)——适合与不适合的
   场景，以及与 dishka、dependency-injector、injector、FastAPI `Depends` 的实测对比
 - [文档站](https://hotcocoacanary.github.io/Canary-Framework/zh/)——
-  [1.1 新特性](https://hotcocoacanary.github.io/Canary-Framework/zh/whats-new/)、
+  [1.2 新特性](https://hotcocoacanary.github.io/Canary-Framework/zh/whats-new/)、
   [常见用法](https://hotcocoacanary.github.io/Canary-Framework/zh/patterns/)、
   [从 0.9.x 升级](https://hotcocoacanary.github.io/Canary-Framework/zh/upgrading-from-0.9/)
-- 完整示例——FastAPI 服务与常驻守护进程：
+- 完整示例——五个形态刻意不同的项目，从 HTTP API 到常驻守护进程：
   [Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example)
   （以子模块挂在 [`examples/`](examples)）
 

@@ -96,12 +96,20 @@ phase.
 
 ## Complete examples
 
-[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example) holds two
-real projects, deliberately different in shape. It is also checked out at `examples/` as a
+[Canary-Framework-Example](https://github.com/HotcocoaCanary/Canary-Framework-Example) holds five
+projects, deliberately different in shape. It is also checked out at `examples/` as a
 submodule of this repository.
 
-- **library** — a library management system with RAG: a request-driven HTTP API on FastAPI.
+- **library** — a library management system with RAG: a request-driven HTTP API.
 - **telemetry** — device telemetry and alerting: a long-running daemon on the core alone.
+- **relay** — a store's edge relay: one process, two ports, several applications.
+- **pipeline** — a statement import pipeline: HTTP and queue consumers in one process, with a
+  two-step shutdown.
+- **shop** — moving an existing FastAPI application onto Canary in two steps.
+
+The projects with a web service write their HTTP layer twice — once as
+[application units](extensions/app.md), once in plain FastAPI — over a single copy of the
+business code.
 
 ```bash
 git clone https://github.com/HotcocoaCanary/Canary-Framework-Example.git

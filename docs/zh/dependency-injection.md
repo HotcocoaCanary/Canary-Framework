@@ -13,7 +13,7 @@ class UserService(Canary):
     cache = dep(Cache)
 ```
 
-它是一个描述符，读取时从所在作用域取回共享实例。三条性质：
+它是一个描述符，读取时从所在作用域取回共享实例。四条性质：
 
 **属性名由你决定。** 注入名不来自被依赖的类名，因此可以为实现类起一个抽象的名字：
 
@@ -37,6 +37,8 @@ class BulkImporter(Importer):
     queue = dep(BulkQueue)          # 只依赖 BulkQueue，不再依赖 Queue
 ```
 
+用同名的非 `dep()` 值覆盖（如 `queue = None`），这条依赖就被去掉。
+
 **声明不需要求值。** 描述符持有的是类对象本身而非名字，因此不受
 `from __future__ import annotations`、`if TYPE_CHECKING` 或函数作用域的影响。
 
@@ -51,7 +53,7 @@ class Broken(Canary):
 ```
 
 ```
-DeclarationError: dep(<class 'Plain'>): not a Canary subclass
+DeclarationError: dep(<class '__main__.Plain'>): not a Canary subclass
 ```
 
 检查发生在类体求值的那一刻，错误指向写下 `dep(...)` 的那一行。类型检查器也会拒绝它，
@@ -117,7 +119,7 @@ from canary_framework import scope_of
 
 scope = scope_of(root)
 scope.instances          # 类型 -> 实例
-scope.entered(start)   # 类型 -> 进入 start 阶段的单元，按进入顺序
+scope.entered(start)   # 类型 -> 进入 start 阶段的单元，依赖在前
 ```
 
 ## 依赖成环

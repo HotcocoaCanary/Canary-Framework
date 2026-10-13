@@ -11,6 +11,10 @@ before 1.0 were exploratory and made breaking changes freely.
 | Minor — `1.x.0` | New features and deprecations. Existing code keeps working. |
 | Major — `x.0.0` | Breaking changes, each listed in the changelog with a migration path. |
 
+There has been one exception: 1.1 changed two things used by code that drove the engine
+directly (`advance` / `unwind` were renamed, and `stop()` on a unit still in use no longer
+reclaims the whole graph); see [What's New in 1.1](whats-new-1.1.md).
+
 ## The public API {#public-api}
 
 The stability promise covers:
@@ -26,8 +30,8 @@ It does **not** cover:
 - anything under `canary_framework.core.*` that is not re-exported from `canary_framework`;
 - names that start with an underscore;
 - the text of exception messages and notes;
-- the shape of `Scope`'s record attributes — `phases`, `entered`, `known`, `graph` and
-  `dependents`. They are there for inspection and debugging, and may change in a minor release.
+- the shape of `Scope`'s record attributes — `graph`, `dependents`, `tracks`, `known` and
+  `keys`. They are there for inspection and debugging, and may change in a minor release.
   `Scope.instances`, `Scope.instance()`, `Scope.provide()`, `Scope.resolve()` and
   `Scope.key_of()` are covered.
 

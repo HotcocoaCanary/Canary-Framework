@@ -57,6 +57,7 @@ plugins:
           nav_translations:
             Home: 首页
             Why Canary: 为什么选 Canary
+            What's New in 1.2: 1.2 新特性
             What's New in 1.1: 1.1 新特性
             What's New in 1.0: 1.0 新特性
             Quick Start: 快速开始
@@ -103,7 +104,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Why Canary: why-canary.md
-  - What's New in 1.1: whats-new.md
+  - What's New in 1.2: whats-new.md
   - Quick Start: quickstart.md
   - Guide:
       - Units: canary.md
@@ -119,6 +120,7 @@ nav:
       - API Reference: api-reference.md
       - Architecture: architecture.md
       - Versioning & Compatibility: versioning.md
+      - What's New in 1.1: whats-new-1.1.md
       - What's New in 1.0: whats-new-1.0.md
       - Upgrading from 0.9.x: upgrading-from-0.9.md
   - Project:

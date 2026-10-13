@@ -1,6 +1,9 @@
 # API Reference
 
-Every public name is exported from `canary_framework`.
+Every public name of the core is exported from `canary_framework`, and this page lists them.
+The extensions document their own API: [Testing](extensions/test.md),
+[Configuration](extensions/config.md), [Web Application](extensions/app.md) and
+[Web Server](extensions/server.md).
 
 ```python
 from canary_framework import (
@@ -20,8 +23,8 @@ The unit base class. Subclass it and you have a unit.
 
 | Member | Description |
 |---|---|
-| `async init()` | Advance the `init` phase along dependencies. |
-| `async start()` | Advance the `start` phase. On failure, releases what it brought up before raising. Raises `LifecycleError` if `init()` has not run. |
+| `async init()` | Enter the `init` phase, dependencies first. |
+| `async start()` | Enter the `start` phase. On failure, releases what it brought up before raising. Raises `LifecycleError` if `init()` has not run. |
 | `async stop()` | Stop this unit unless a dependent is starting, running or stopping, then try its dependencies the same way. On the root, the whole graph. Idempotent. |
 | `async __aenter__()` | Calls `init()` then `start()`, reclaiming and re-raising on failure. Returns self. |
 | `async __aexit__(...)` | Calls `stop()`; never suppresses the exception. |
@@ -139,7 +142,7 @@ All inherit `CanaryError`, so one `except CanaryError` catches everything.
 | Exception | Raised when |
 |---|---|
 | `CanaryError` | Base class; never raised directly. |
-| `DeclarationError` | `dep()` was given something that is not a `Canary` subclass. |
+| `DeclarationError` | A declaration is wrong: `dep()` was given something that is not a `Canary` subclass. Extensions raise it for their own declarations too, such as a route the web application cannot serve. |
 | `ConstructionError` | A unit requires constructor arguments. Carries `unit`. |
 | `CircularDependencyError` | The dependency graph has a cycle; raised before any hook runs. Carries `cycle`, the path that reaches it. |
 | `LifecycleError` | A unit used outside its lifecycle: a dependency read in `__init__`, or a phase entered before its predecessor. |

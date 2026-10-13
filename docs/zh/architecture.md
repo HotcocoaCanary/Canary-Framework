@@ -44,7 +44,7 @@ canary            门面：Canary 基类与 dep()
 |---|---|---|---|
 | `test/` | `running` 与 `unit` | `core` | 无 |
 | `config/` | `Settings` | `core` | pydantic-settings |
-| `web/asgi/` | 协议层：ASGI 应用的类型与 `dispatch` | `core` | 无 |
+| `web/asgi/` | 协议层：ASGI 应用的类型与 `dispatch` | 无，只用标准库 | 无 |
 | `web/asgi/app/` | 应用单元：`Router`、`App`、请求与响应，内部 `app → router → binding → routes → http` | `core`、`web.asgi` | pydantic |
 | `web/asgi/server/` | 服务器单元：`Server` | `core`、`web.asgi` | uvicorn |
 
@@ -76,15 +76,16 @@ canary            门面：Canary 基类与 dep()
 
 依赖不用标记表达，它就是一个类属性（`Dep` 描述符），因此持有的是类对象本身而不是名字。
 
-## 钩子解析
+## 依赖与钩子的解析
 
 一次 MRO 遍历同时收集依赖与带标记的属性名，结果按类缓存——声明在类创建之后不再变化。
 
-钩子按**属性名**解析，因此语义与普通方法完全一致：
+依赖与钩子都按**属性名**解析，因此语义与普通属性、普通方法完全一致：
 
 - 子类覆盖同名钩子即替换，需要叠加时使用 `super()`。
 - 子类覆盖但不再标记时，该钩子不再运行。
 - 不同名的混入钩子各自成立，基类在前。
+- 子类用同名属性再写一条 `dep()` 即替换那条依赖；覆盖成不是 `dep()` 的值，这条依赖就没有了。
 
 ## 依赖图
 
