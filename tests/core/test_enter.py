@@ -173,6 +173,13 @@ async def test_the_ledger_is_always_a_valid_topological_order() -> None:
     assert order.index(Database) < order.index(Root)
     assert order.index(Cache) < order.index(Root)
 
+    # 顺序来自依赖图，与哪个方向先碰到这些单元无关：先 stop 再 start 也是依赖在前。
+    again = Root()
+    await enter(again, init)
+    await again.stop()
+    await enter(again, start)
+    assert list(scope_of(again).entered(start)) == list(scope_of(root).entered(start))
+
 
 async def test_two_simultaneous_failures_are_reported_together() -> None:
     gate = asyncio.Barrier(2)

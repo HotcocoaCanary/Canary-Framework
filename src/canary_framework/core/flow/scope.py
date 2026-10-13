@@ -100,11 +100,12 @@ class Scope:
 
         返回持有 *phase* 所获取东西的单元：进入钩子开始后、离开之前。依赖在前。
         """
-        return {
-            cls: track.unit
-            for (cls, name), track in self.tracks.items()
-            if name == phase.name and track.unit is not None
-        }
+        found: dict[type, object] = {}
+        for cls in self.graph:
+            track = self.tracks.get((cls, phase.name))
+            if track is not None and track.unit is not None:
+                found[cls] = track.unit
+        return found
 
     def instance(self, cls: type) -> object:
         """Return the single instance of *cls* in this scope, constructing it on first use.
