@@ -124,8 +124,8 @@ class Table:
         self._static: dict[str, _Methods] = {}
         self._dynamic = _Node()
 
-    def add(self, path: str, route: Route, call: Callable[..., Any]) -> None:
-        """Add one endpoint.
+    def add(self, path: str, route: Route, call: Callable[..., Any]) -> Endpoint:
+        """Add one endpoint, and return it.
 
         :raises DeclarationError: 同一个方法与路径已经有接口，或方法的签名无法绑定。
         """
@@ -150,6 +150,7 @@ class Table:
             )
         methods[route.method] = (endpoint, names)
         self.endpoints.append(endpoint)
+        return endpoint
 
     def find(self, path: str) -> tuple[_Methods, tuple[str, ...]] | None:
         """Return the endpoints at *path* and the values of its path parameters.

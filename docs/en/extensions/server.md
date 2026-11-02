@@ -185,8 +185,12 @@ The address is the `host` and `port` class attributes. `app`, `host`, `port`, `u
 `TypeError` when the class is defined. `lifespan` defaults to `"off"`;
 see above.
 
-WebSocket needs an implementation installed separately (`websockets` or `wsproto`); uvicorn
-does not bring one.
+uvicorn brings no WebSocket implementation of its own; `canary-framework[server]` installs
+`wsproto`, and the server unit uses it by default (`ws="wsproto"`). Not websockets-sansio,
+which uvicorn picks when `websockets` is installed: when an application refuses a handshake
+with an HTTP response (see [Web application › WebSocket](app.md#websocket)), it logs a spurious
+"ASGI callable returned without completing handshake." error. Pass `ws=...` as a class
+parameter to choose another.
 
 ## Canary owns the process
 

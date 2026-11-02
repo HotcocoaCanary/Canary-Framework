@@ -225,6 +225,78 @@ class LibraryApi(App):
         self.app = CORSMiddleware(self.app, allow_origins=["*"])
 ```
 
+## WebSocket
+
+`@websocket` marks a method as a WebSocket endpoint, written in the same router as HTTP
+endpoints:
+
+```python
+from canary_framework.web.asgi.app import Router, WebSocket, websocket
+
+
+class RoomApi(Router, prefix="/rooms"):
+    rooms = dep(RoomService)
+
+    @websocket("/{room}")
+    async def chat(self, socket: WebSocket, room: str, name: str = "guest") -> None:
+        async for message in socket:
+            await socket.send(f"{name}@{room}: {message}")
+```
+
+- Paths and parameters work as for HTTP endpoints: path and query parameters are bound and
+  validated; a parameter annotated `WebSocket` is the connection itself. There is no request
+  body and no `Request` parameter — read headers from `socket.headers`.
+- It must be `async def`; its return value is ignored.
+- One path may have both an HTTP endpoint and a WebSocket endpoint; each answers its own kind.
+
+The connection:
+
+| | |
+| --- | --- |
+| `await socket.receive()` | the next message: `str` for a text frame, `bytes` for a binary one |
+| `async for message in socket` | every message, ending normally when the client leaves |
+| `await socket.send(data)` | a `str` as a text frame, `bytes` as a binary one |
+| `await socket.send_json(data)` | JSON in a text frame; pydantic models and dataclasses work |
+| `await socket.accept(subprotocol, headers=...)` | accept the handshake |
+| `await socket.close(code, reason)` | close; before accepting, this refuses the handshake |
+| `headers`, `query`, `path_params`, `closed` | the first three as on `Request`; `closed` once it is closed |
+
+The handshake is accepted on the first receive or send; call `accept` yourself only to pick a
+subprotocol or add response headers. Parse JSON messages yourself, e.g.
+`Note.model_validate_json(await socket.receive())`.
+
+Once the client has left, receiving and sending raise `WebSocketClosedError`. An endpoint need
+not catch it — the framework treats it as a normal end; use `try` / `finally` for cleanup.
+
+### Handshake and errors
+
+An exception raised before the handshake is accepted — no matching path (404), a failed
+validation (422), an `HTTPError` of your own — is answered with the same error response as an
+HTTP endpoint when the server supports it (uvicorn does), and otherwise refuses the handshake
+(the client sees 403). So authentication is a check before the first receive or send:
+
+```python
+@websocket("/admin")
+async def admin(self, socket: WebSocket, token: str) -> None:
+    if not self.auth.check(token):
+        raise HTTPError(403, "bad token")
+    ...
+```
+
+After accepting, an `HTTPError` closes with 1008, and any other exception closes with 1011 and
+is logged. If the endpoint returns with the connection still open, it is closed with 1000.
+`@error` handlers apply to HTTP endpoints only.
+
+When the server unit stops, uvicorn closes connected clients with 1012, which ends endpoints
+that are receiving or sending. An endpoint waiting a long time on something else keeps
+`@stop` waiting, so set `timeout_graceful_shutdown` on the server; see
+[Web server](server.md).
+
+The server needs a WebSocket implementation: `canary-framework[server]` brings `wsproto`. When
+handing the application to a uvicorn you installed yourself, install `wsproto` and pass
+`--ws wsproto` — uvicorn's default websockets-sansio logs a spurious error when a handshake is
+refused; see [Web server](server.md).
+
 ## The endpoint table { #endpoints }
 
 After `@init`, `App.endpoints` is every endpoint of the application, flattened and read-only.
@@ -232,10 +304,10 @@ Each `Endpoint` describes one:
 
 | Attribute | Meaning |
 | --- | --- |
-| `method`, `path` | the HTTP method and the full path template, prefixes included |
+| `method`, `path` | the HTTP method (`"WEBSOCKET"` for a WebSocket endpoint) and the full path template, prefixes included |
 | `status` | the status of a successful answer; a method returning `None` is answered with 204 when this is 200 |
 | `call`, `name` | the bound method itself — its docstring is there — and its qualified name, such as `ReaderApi.show` |
-| `params` | the parameters; each `Param` has `name`, `source` (`"path"` / `"query"` / `"body"` / `"request"`), `annotation`, `default` and `required` |
+| `params` | the parameters; each `Param` has `name`, `source` (`"path"` / `"query"` / `"body"` / `"request"` / `"websocket"`), `annotation`, `default` and `required` |
 | `returns` | the return annotation; `Any` when there is none, `type(None)` for `-> None` |
 
 The application's own endpoints come first, then those of the routers it depends on, in
@@ -266,6 +338,8 @@ def openapi(endpoints: tuple[Endpoint, ...], title: str, version: str = "0.1.0")
 
     paths: dict[str, Any] = {}
     for endpoint in endpoints:
+        if endpoint.method == "WEBSOCKET":
+            continue  # OpenAPI does not describe WebSocket
         operation: dict[str, Any] = {"operationId": endpoint.name}
         if endpoint.call.__doc__:
             operation["summary"] = inspect.cleandoc(endpoint.call.__doc__).splitlines()[0]
@@ -327,12 +401,14 @@ request arrives:
 - a parameter that looks like a request body (a pydantic model, a dataclass, a `dict`) and
   is not called `body`;
 - `*args` / `**kwargs`, or an annotation that cannot be resolved or validated;
-- a prefix that does not start with `/`, or ends with one.
+- a prefix that does not start with `/`, or ends with one;
+- a WebSocket endpoint that is not `async def`, or has a `body` or `Request` parameter; an HTTP
+  endpoint with a `WebSocket` parameter.
 
 ## What it does not do
 
 Generating OpenAPI and serving documentation pages ([the endpoint table](#endpoints)
-is enough to write your own), WebSocket, forms and file uploads, static files, background tasks.
+is enough to write your own), forms and file uploads, static files, background tasks.
 
 ## Testing
 
@@ -346,3 +422,13 @@ async with running(LibraryApi) as api:
 ```
 
 Over a real socket: write `port = 0` on a subclass of `Gateway`; see [Web server](server.md).
+
+httpx does not speak WebSocket, so test WebSocket endpoints over a real socket, with
+`websockets` as the client:
+
+```python
+async with running(Gateway) as gateway:     # a subclass of Gateway with port = 0
+    async with websockets.connect(f"ws://127.0.0.1:{gateway.port}/rooms/a") as client:
+        await client.send("hi")
+        assert await client.recv() == "guest@a: hi"
+```

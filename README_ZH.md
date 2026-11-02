@@ -170,7 +170,7 @@ async with Gateway():  # 依赖先启动，然后开始监听
 - [为什么选 Canary](https://hotcocoacanary.github.io/Canary-Framework/zh/why-canary/)——适合与不适合的
   场景，以及与 dishka、dependency-injector、injector、FastAPI `Depends` 的实测对比
 - [文档站](https://hotcocoacanary.github.io/Canary-Framework/zh/)——
-  [1.2 新特性](https://hotcocoacanary.github.io/Canary-Framework/zh/whats-new/)、
+  [1.3 新特性](https://hotcocoacanary.github.io/Canary-Framework/zh/whats-new/)、
   [常见用法](https://hotcocoacanary.github.io/Canary-Framework/zh/patterns/)、
   [从 0.9.x 升级](https://hotcocoacanary.github.io/Canary-Framework/zh/upgrading-from-0.9/)
 - 完整示例——五个形态刻意不同的项目，从 HTTP API 到常驻守护进程：
