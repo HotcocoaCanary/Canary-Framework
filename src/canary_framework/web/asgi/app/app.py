@@ -14,7 +14,8 @@ from canary_framework.web.asgi import Application
 from canary_framework.web.asgi.app.binding import Endpoint, invoke, respond
 from canary_framework.web.asgi.app.http import HTTPError, Request, Response
 from canary_framework.web.asgi.app.router import Table, collect
-from canary_framework.web.asgi.app.routes import ERRORS, marked
+from canary_framework.web.asgi.app.routes import ERRORS, WEBSOCKET, marked
+from canary_framework.web.asgi.app.websocket import WebSocket, WebSocketClosedError
 
 _log = logging.getLogger("canary_framework.web.asgi.app")
 
@@ -71,6 +72,7 @@ class App(Canary):
     #: 处理请求的 ASGI 应用，``@init`` 之后可用。可以在子类的 ``@init`` 里包上中间件。
     app: Application
     #: 全部接口，只读，``@init`` 之后可用。自己的在前，然后是依赖的路由单元的，按声明顺序。
+    #: WebSocket 接口也在其中，``method`` 是 ``"WEBSOCKET"``。
     endpoints: tuple[Endpoint, ...]
 
     async def __call__(
@@ -125,23 +127,27 @@ class App(Canary):
 
     @init
     def _assemble(self) -> None:
-        table = Table()
+        # HTTP 与 WebSocket 各一张表：同一路径可以两者都有，互不影响。
+        http, sockets = Table(), Table()
+        endpoints = []
         for path, route, call in collect(self):
-            table.add(path, route, call)
+            table = sockets if route.method == WEBSOCKET else http
+            endpoints.append(table.add(path, route, call))
         handlers: _Handlers = {}
         for call, types in marked(self, ERRORS):
             handlers.update(dict.fromkeys(types, call))
-        self.endpoints = tuple(table.endpoints)
-        self.app = _Web(table, handlers)
+        self.endpoints = tuple(endpoints)
+        self.app = _Web(http, sockets, handlers)
 
 
 class _Web:
     """ASGI 应用本身：查表、调用接口、把异常变成响应。"""
 
-    __slots__ = ("_handlers", "_table")
+    __slots__ = ("_handlers", "_sockets", "_table")
 
-    def __init__(self, table: Table, handlers: _Handlers) -> None:
+    def __init__(self, table: Table, sockets: Table, handlers: _Handlers) -> None:
         self._table = table
+        self._sockets = sockets
         self._handlers = handlers
 
     async def __call__(
@@ -152,7 +158,7 @@ class _Web:
     ) -> None:
         kind = scope["type"]
         if kind == "websocket":
-            await send({"type": "websocket.close", "code": 1008})
+            await self._connect(scope, receive, send)
             return
         if kind != "http":
             return
@@ -179,6 +185,35 @@ class _Web:
             request.path_params = dict(zip(names, values, strict=True))
         return await endpoint(request)
 
+    async def _connect(self, scope: _Message, receive: _Receive, send: _Send) -> None:
+        """WebSocket：查表、调用接口；接口结束时连接若还开着，按结束的方式关闭它。
+
+        握手应答之前出错，服务器支持 ``websocket.http.response`` 扩展时应答一个与 HTTP 接口
+        相同的错误响应（404、422、``HTTPError`` 的状态码、500），否则拒绝握手。之后出错，
+        ``HTTPError`` 以 1008 关闭，其余以 1011 关闭并记日志。``@error`` 处理器不参与。
+        """
+        socket = WebSocket(scope, receive, send)
+        try:
+            found = self._sockets.find(scope["path"])
+            if found is None:
+                raise HTTPError(404)
+            methods, values = found
+            endpoint, names = methods[WEBSOCKET]
+            if names:
+                socket.path_params = dict(zip(names, values, strict=True))
+            await endpoint.serve(socket)
+        except WebSocketClosedError:
+            return
+        except Exception as exc:
+            if not isinstance(exc, HTTPError):
+                _log.error("WEBSOCKET %s failed", socket.path, exc_info=exc)
+            if socket._connecting and "websocket.http.response" in scope.get("extensions", {}):
+                await _refuse(exc).send(_prefixed(send))
+            else:
+                await socket.close(1008 if isinstance(exc, HTTPError) else 1011)
+            return
+        await socket.close()
+
     async def _recover(self, request: Request, exc: Exception) -> Response:
         """交给类型最贴近的处理器；没有处理器时，``HTTPError`` 按自身应答，其余应答 500。"""
         for klass in type(exc).__mro__:
@@ -194,3 +229,19 @@ class _Web:
             return Response.json({"detail": exc.detail}, status=exc.status, headers=exc.headers)
         _log.error("%s %s failed", request.method, request.path, exc_info=exc)
         return Response.json({"detail": "Internal Server Error"}, status=500)
+
+
+def _refuse(exc: Exception) -> Response:
+    """握手阶段的错误响应，样子与 HTTP 接口没有处理器时相同。"""
+    if isinstance(exc, HTTPError):
+        return Response.json({"detail": exc.detail}, status=exc.status, headers=exc.headers)
+    return Response.json({"detail": "Internal Server Error"}, status=500)
+
+
+def _prefixed(send: _Send) -> _Send:
+    """把 ``http.response.*`` 消息改写成 ``websocket.http.response.*``。"""
+
+    async def forward(message: _Message) -> None:
+        await send({**message, "type": "websocket." + message["type"]})
+
+    return forward

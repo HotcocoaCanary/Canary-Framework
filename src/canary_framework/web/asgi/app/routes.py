@@ -20,9 +20,9 @@ ERRORS = "__canary_web_errors__"
 
 @dataclass(frozen=True, slots=True)
 class Route:
-    """One mark: an HTTP method, a path, and the status of a successful answer.
+    """One mark: an HTTP method (or ``WEBSOCKET``), a path, and the status of a successful answer.
 
-    一条标记。
+    一条标记。WebSocket 接口的方法记作 :data:`WEBSOCKET`，状态码不用。
     """
 
     method: str
@@ -88,6 +88,37 @@ post = Verb("POST")
 put = Verb("PUT")
 patch = Verb("PATCH")
 delete = Verb("DELETE")
+
+#: WebSocket 接口在 :class:`Route` 与 ``Endpoint.method`` 里记作这个"方法"。
+WEBSOCKET = "WEBSOCKET"
+
+
+@overload
+def websocket[F: Callable[..., object]](path: F, /) -> F: ...
+@overload
+def websocket[F: Callable[..., object]](path: str = "", /) -> Callable[[F], F]: ...
+def websocket(path: Any = "", /) -> Any:
+    """Mark a method as a WebSocket endpoint.
+
+    把单元的方法标记为 WebSocket 接口::
+
+        @websocket("/{room}")
+        async def chat(self, socket: WebSocket, room: str) -> None:
+            async for message in socket:
+                await socket.send(message)
+
+    路径的写法与 HTTP 接口相同；形参也一样绑定（路径参数、查询参数），注解为 ``WebSocket``
+    的形参是连接本身。方法必须是 ``async def``，没有请求体，返回值被忽略。
+
+    :param path: 相对所在单元前缀的路径，``""`` 或以 ``/`` 开头。
+    :raises DeclarationError: 路径不为空又不以 ``/`` 开头。
+    """
+    if callable(path):
+        return _mark(path, ROUTES, Route(WEBSOCKET, ""))
+    if path and not path.startswith("/"):
+        raise DeclarationError(f"@websocket({path!r}): a path is empty or starts with '/'")
+    route = Route(WEBSOCKET, path)
+    return lambda fn: _mark(fn, ROUTES, route)
 
 
 def error[F: Callable[..., object]](*types: type[Exception]) -> Callable[[F], F]:

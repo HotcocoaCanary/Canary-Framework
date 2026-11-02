@@ -16,9 +16,11 @@ from canary_framework.web.asgi.app import (
     Request,
     Response,
     Router,
+    WebSocket,
     delete,
     get,
     post,
+    websocket,
 )
 
 pytestmark = pytest.mark.functional
@@ -54,6 +56,10 @@ class ReaderApi(Router, prefix="/readers"):
     async def remove(self, reader_id: int) -> None:
         return None
 
+    @websocket("/{reader_id}/live")
+    async def live(self, socket: WebSocket, reader_id: int) -> None:
+        """OpenAPI 不描述 WebSocket：生成文档时跳过它。"""
+
 
 class Api(Router, prefix="/api"):
     readers = dep(ReaderApi)
@@ -76,6 +82,8 @@ def openapi(endpoints: tuple[Endpoint, ...], title: str, version: str = "0.1.0")
 
     paths: dict[str, Any] = {}
     for endpoint in endpoints:
+        if endpoint.method == "WEBSOCKET":
+            continue  # OpenAPI 不描述 WebSocket
         operation: dict[str, Any] = {"operationId": endpoint.name}
         if endpoint.call.__doc__:
             operation["summary"] = inspect.cleandoc(endpoint.call.__doc__).splitlines()[0]
@@ -131,6 +139,7 @@ async def test_endpoints_are_the_flattened_table_own_first_then_by_declaration()
             ("GET", "/api/readers/{reader_id}"),
             ("POST", "/api/readers"),
             ("DELETE", "/api/readers/{reader_id}"),
+            ("WEBSOCKET", "/api/readers/{reader_id}/live"),
         ]
         assert isinstance(app.endpoints, tuple)
 

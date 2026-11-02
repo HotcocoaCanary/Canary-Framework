@@ -26,20 +26,23 @@
   路径参数、``body``、:class:`Request`，其余是查询参数；校验用 pydantic。
 - :class:`Response` 与 :class:`HTTPError` 用来自己决定应答；``error`` 标记应用单元上处理某类
   异常的方法。
+- ``websocket`` 标记 WebSocket 接口，连接是一个 :class:`WebSocket`；对端离开时收发抛出
+  :class:`WebSocketClosedError`，接口里不必捕获。
 
 - ``App.endpoints`` 是拍平之后的全部接口，每个是一个 :class:`Endpoint`，形参是 :class:`Param`。
 
 没有依赖注入系统（依赖走 ``dep()``）；不生成 OpenAPI，但 ``App.endpoints`` 给出了生成它所需的
 一切。
 
-依赖方向严格单向：``app -> router -> binding -> routes -> http``。
+依赖方向严格单向：``app -> router -> binding -> routes / websocket -> http``。
 """
 
 from canary_framework.web.asgi.app.app import App
 from canary_framework.web.asgi.app.binding import Endpoint, Param
 from canary_framework.web.asgi.app.http import HTTPError, Request, Response
 from canary_framework.web.asgi.app.router import Router
-from canary_framework.web.asgi.app.routes import delete, error, get, patch, post, put
+from canary_framework.web.asgi.app.routes import delete, error, get, patch, post, put, websocket
+from canary_framework.web.asgi.app.websocket import WebSocket, WebSocketClosedError
 
 __all__ = [
     "App",
@@ -49,10 +52,13 @@ __all__ = [
     "Request",
     "Response",
     "Router",
+    "WebSocket",
+    "WebSocketClosedError",
     "delete",
     "error",
     "get",
     "patch",
     "post",
     "put",
+    "websocket",
 ]

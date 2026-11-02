@@ -45,34 +45,21 @@ class HTTPError(Exception):
         super().__init__(f"{status}: {self.detail}")
 
 
-class Request:
-    """One HTTP request.
+class Connection:
+    """What a request and a WebSocket connection share: the scope, headers, query and path.
 
-    一次 HTTP 请求。接口方法里写一个注解为 ``Request`` 的形参就能拿到它::
-
-        @get("/whoami")
-        async def whoami(self, request: Request) -> dict[str, str]:
-            return {"agent": request.headers.get("user-agent", "")}
-
-    路径参数、查询参数与请求体通常直接写成形参；请求头、Cookie 与原始字节从这里读。
+    HTTP 请求与 WebSocket 连接共有的部分：scope、请求头、查询参数、路径参数。
     """
 
-    __slots__ = ("_body", "_headers", "_query", "_receive", "path_params", "scope")
+    __slots__ = ("_headers", "_query", "path_params", "scope")
 
-    def __init__(self, scope: MutableMapping[str, Any], receive: _Receive) -> None:
+    def __init__(self, scope: MutableMapping[str, Any]) -> None:
         #: ASGI 的 scope，原样。
         self.scope = scope
         #: 路径参数，校验之前的字符串。
         self.path_params: dict[str, str] = {}
-        self._receive = receive
-        self._body: bytes | None = None
         self._headers: dict[str, str] | None = None
         self._query: dict[str, list[str]] | None = None
-
-    @property
-    def method(self) -> str:
-        """HTTP 方法，大写。"""
-        return str(self.scope["method"])
 
     @property
     def path(self) -> str:
@@ -97,6 +84,31 @@ class Request:
             raw = self.scope["query_string"].decode("latin-1")
             self._query = parse_qs(raw, keep_blank_values=True)
         return self._query
+
+
+class Request(Connection):
+    """One HTTP request.
+
+    一次 HTTP 请求。接口方法里写一个注解为 ``Request`` 的形参就能拿到它::
+
+        @get("/whoami")
+        async def whoami(self, request: Request) -> dict[str, str]:
+            return {"agent": request.headers.get("user-agent", "")}
+
+    路径参数、查询参数与请求体通常直接写成形参；请求头、Cookie 与原始字节从这里读。
+    """
+
+    __slots__ = ("_body", "_receive")
+
+    def __init__(self, scope: MutableMapping[str, Any], receive: _Receive) -> None:
+        super().__init__(scope)
+        self._receive = receive
+        self._body: bytes | None = None
+
+    @property
+    def method(self) -> str:
+        """HTTP 方法，大写。"""
+        return str(self.scope["method"])
 
     async def body(self) -> bytes:
         """请求体的全部字节。读过一次之后是缓存。"""

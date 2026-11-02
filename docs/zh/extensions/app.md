@@ -206,16 +206,81 @@ class LibraryApi(App):
         self.app = CORSMiddleware(self.app, allow_origins=["*"])
 ```
 
+## WebSocket
+
+`@websocket` 把方法标记为 WebSocket 接口，和 HTTP 接口写在同一个路由单元里：
+
+```python
+from canary_framework.web.asgi.app import Router, WebSocket, websocket
+
+
+class RoomApi(Router, prefix="/rooms"):
+    rooms = dep(RoomService)
+
+    @websocket("/{room}")
+    async def chat(self, socket: WebSocket, room: str, name: str = "guest") -> None:
+        async for message in socket:
+            await socket.send(f"{name}@{room}: {message}")
+```
+
+- 路径和形参的写法与 HTTP 接口相同：路径参数、查询参数照常绑定和校验；注解为 `WebSocket`
+  的形参是连接本身。没有请求体，也不能有 `Request` 形参——请求头从 `socket.headers` 读。
+- 必须是 `async def`，返回值被忽略。
+- 同一路径可以同时有 HTTP 接口和 WebSocket 接口，各走各的。
+
+连接上能做的事：
+
+| | |
+| --- | --- |
+| `await socket.receive()` | 下一条消息：文本帧是 `str`，二进制帧是 `bytes` |
+| `async for message in socket` | 逐条收消息，对端离开时正常结束 |
+| `await socket.send(data)` | `str` 发文本帧，`bytes` 发二进制帧 |
+| `await socket.send_json(data)` | 序列化成 JSON 发文本帧，pydantic 模型、dataclass 都行 |
+| `await socket.accept(subprotocol, headers=...)` | 接受握手 |
+| `await socket.close(code, reason)` | 关闭；还没接受时就是拒绝握手 |
+| `headers`、`query`、`path_params`、`closed` | 前三个与 `Request` 相同；`closed` 表示已经关闭 |
+
+第一次收发时自动接受握手，只有要选子协议或附加响应头时才需要自己调用 `accept`。JSON 消息
+自己解析，比如 `Note.model_validate_json(await socket.receive())`。
+
+对端离开后，收发会抛出 `WebSocketClosedError`。接口里不必捕获它，框架把它当作正常结束；
+离开时要清理什么，用 `try` / `finally`。
+
+### 握手与出错
+
+接受握手之前抛出的异常——路径不匹配（404）、形参校验失败（422）、你自己抛的 `HTTPError`——
+在服务器支持时（uvicorn 支持）应答和 HTTP 接口一样的错误响应，否则拒绝握手（客户端看到
+403）。所以鉴权就是在第一次收发之前检查、不通过就抛：
+
+```python
+@websocket("/admin")
+async def admin(self, socket: WebSocket, token: str) -> None:
+    if not self.auth.check(token):
+        raise HTTPError(403, "bad token")
+    ...
+```
+
+接受之后，`HTTPError` 以 1008 关闭连接，其余异常以 1011 关闭并记日志。接口返回时连接若还
+开着，以 1000 关闭。`@error` 处理器只处理 HTTP 接口。
+
+服务器单元停止时，uvicorn 以 1012 关闭还连着的客户端，正在收发的接口因此结束。接口若长时间
+在等别的东西，`@stop` 会一直等它，所以给服务器设上 `timeout_graceful_shutdown`，见
+[Web 服务器](server.md)。
+
+服务器要有 WebSocket 实现：`canary-framework[server]` 已经带上 `wsproto`。把应用交给你自己装的
+uvicorn 时，装上 `wsproto` 并用 `--ws wsproto`——uvicorn 默认的 websockets-sansio 在拒绝握手时
+会误报一条错误日志，见 [Web 服务器](server.md)。
+
 ## 接口表 { #endpoints }
 
 `@init` 之后，`App.endpoints` 是拍平之后的全部接口，只读。每个 `Endpoint` 说明一个接口：
 
 | 属性 | 含义 |
 | --- | --- |
-| `method`、`path` | HTTP 方法与完整的路径模板（已带上逐层叠加的前缀） |
+| `method`、`path` | HTTP 方法（WebSocket 接口是 `"WEBSOCKET"`）与完整的路径模板（已带上逐层叠加的前缀） |
 | `status` | 成功时的状态码；方法返回 `None` 而这里是 200 时，实际应答 204 |
 | `call`、`name` | 绑定方法本身（可以取它的文档字符串），与它的限定名，如 `ReaderApi.show` |
-| `params` | 形参，每个 `Param` 有 `name`、`source`（`"path"` / `"query"` / `"body"` / `"request"`）、`annotation`、`default`、`required` |
+| `params` | 形参，每个 `Param` 有 `name`、`source`（`"path"` / `"query"` / `"body"` / `"request"` / `"websocket"`）、`annotation`、`default`、`required` |
 | `returns` | 返回注解；没有写时是 `Any`，`-> None` 是 `type(None)` |
 
 顺序是应用单元自己的接口在前，然后是它依赖的路由单元的，按声明顺序。由 GET 应答的 HEAD
@@ -245,6 +310,8 @@ def openapi(endpoints: tuple[Endpoint, ...], title: str, version: str = "0.1.0")
 
     paths: dict[str, Any] = {}
     for endpoint in endpoints:
+        if endpoint.method == "WEBSOCKET":
+            continue  # OpenAPI 不描述 WebSocket
         operation: dict[str, Any] = {"operationId": endpoint.name}
         if endpoint.call.__doc__:
             operation["summary"] = inspect.cleandoc(endpoint.call.__doc__).splitlines()[0]
@@ -302,12 +369,12 @@ class LibraryApi(App):
 - 路径参数没有对应的形参；
 - 看起来是请求体的形参（pydantic 模型、dataclass、`dict`）不叫 `body`；
 - `*args` / `**kwargs`，或注解无法解析、无法校验；
-- 前缀不以 `/` 开头，或以 `/` 结尾。
+- 前缀不以 `/` 开头，或以 `/` 结尾；
+- WebSocket 接口不是 `async def`，或有 `body`、`Request` 形参；HTTP 接口有 `WebSocket` 形参。
 
 ## 不做的事
 
-OpenAPI 的生成与文档页面（[接口表](#endpoints)够你自己写）、WebSocket、表单与文件上传、静态文件、
-后台任务。
+OpenAPI 的生成与文档页面（[接口表](#endpoints)够你自己写）、表单与文件上传、静态文件、后台任务。
 
 ## 测试
 
@@ -321,3 +388,12 @@ async with running(LibraryApi) as api:
 ```
 
 走真实的套接字：给 `Gateway` 的子类写 `port = 0`，见 [Web 服务器](server.md)。
+
+httpx 不支持 WebSocket，WebSocket 接口走真实的套接字测，客户端用 `websockets`：
+
+```python
+async with running(Gateway) as gateway:     # Gateway 的子类，port = 0
+    async with websockets.connect(f"ws://127.0.0.1:{gateway.port}/rooms/a") as client:
+        await client.send("hi")
+        assert await client.recv() == "guest@a: hi"
+```

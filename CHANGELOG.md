@@ -4,6 +4,40 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- `web.asgi.app`: WebSocket endpoints. `@websocket("/{room}")` marks a method of a router or
+  an application; its path and query parameters are bound and validated like an HTTP
+  endpoint's, and a parameter annotated `WebSocket` is the connection — `receive()`, `send()`,
+  `send_json()`, `close()`, `async for message in socket`, accepted on the first receive or
+  send. HTTP and WebSocket endpoints have separate tables, so one path may have both. A
+  failure before the handshake is accepted (404, 422, an `HTTPError`) is answered with the same
+  error response as over HTTP where the server supports it; after, an `HTTPError` closes with
+  1008 and anything else with 1011. The client leaving raises `WebSocketClosedError`, which
+  ends the endpoint quietly. WebSocket endpoints appear in `App.endpoints` with the method
+  `"WEBSOCKET"`; code that writes OpenAPI from that table should skip them.
+
+  WebSocket 接口。`@websocket("/{room}")` 标记路由单元或应用单元的方法，路径参数与查询参数和
+  HTTP 接口一样绑定、校验，注解为 `WebSocket` 的形参是连接本身，第一次收发时自动接受握手。
+  HTTP 与 WebSocket 各一张表，同一路径可以两者都有。握手前出错在服务器支持时应答与 HTTP 相同
+  的错误响应；之后 `HTTPError` 以 1008 关闭，其余以 1011 关闭。对端离开时抛
+  `WebSocketClosedError`，接口因此安静结束。WebSocket 接口出现在 `App.endpoints` 里，方法是
+  `"WEBSOCKET"`，照着它生成 OpenAPI 的代码要跳过它们。
+
+### Changed
+
+- The `server` extra now installs `wsproto`, and `Server` uses it for WebSocket by default
+  (`ws="wsproto"`; override with the class parameter). uvicorn brings no WebSocket
+  implementation, and without one every handshake is refused with only a warning. wsproto rather
+  than websockets-sansio, uvicorn's default when `websockets` is installed, because the latter
+  logs a spurious "returned without completing handshake" error whenever an application refuses
+  a handshake with an HTTP response.
+
+  `server` 依赖组一并装上 `wsproto`，`Server` 默认用它实现 WebSocket（`ws="wsproto"`，可用类参数
+  覆盖）。uvicorn 本身不带 WebSocket 实现，没有它时每次握手都被拒绝，只留一条警告。不用 uvicorn
+  在装了 `websockets` 时默认的 websockets-sansio，是因为应用以 HTTP 响应拒绝握手时它会误报一条
+  错误日志。
+
 ### Documentation
 
 - Why Canary: the comparison is re-measured with 1.2.0; the Canary column is unchanged. The
@@ -18,7 +52,7 @@ This project follows Keep a Changelog and Semantic Versioning.
 Four extension packages arrive beside the core — testing helpers, configuration, and the two
 sides of ASGI as units — all provisional for now. The core has two fixes; one changes what a
 subclass overriding a dependency by name does. See
-[What's New in 1.2](https://hotcocoacanary.github.io/Canary-Framework/whats-new/).
+[What's New in 1.2](https://hotcocoacanary.github.io/Canary-Framework/whats-new-1.2/).
 
 核心旁边新增四个扩展包：测试辅助、配置，以及各站 ASGI 协议一侧的应用单元与服务器单元，目前
 均为暂行 API。核心有两处修正，其中一处改变了子类同名覆盖一条依赖时的行为。

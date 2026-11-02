@@ -18,7 +18,8 @@ from pydantic_core import to_json
 
 from canary_framework.core import DeclarationError
 from canary_framework.web.asgi.app.http import HTTPError, Request, Response
-from canary_framework.web.asgi.app.routes import Route
+from canary_framework.web.asgi.app.routes import WEBSOCKET, Route
+from canary_framework.web.asgi.app.websocket import WebSocket
 
 _MISSING: Any = inspect.Parameter.empty
 _MANY = (list, set, frozenset, tuple)
@@ -31,7 +32,8 @@ class Param:
     接口的一个形参：值从哪里来、按什么类型校验。
 
     :ivar name: 形参名。
-    :ivar source: ``"path"``、``"query"``、``"body"`` 或 ``"request"``（请求对象本身）。
+    :ivar source: ``"path"``、``"query"``、``"body"``、``"request"``（请求对象本身）或
+        ``"websocket"``（连接本身）。
     :ivar annotation: 形参的注解；没有写注解时是 ``str``（``body`` 是 ``Any``）。
     :ivar default: 默认值；没有默认值时是 ``inspect.Parameter.empty``。
     """
@@ -43,7 +45,7 @@ class Param:
         self.source = source
         self.annotation = annotation
         self.default = default
-        if source == "request":
+        if source in ("request", "websocket"):
             return
         inner = _unwrap(annotation)
         self._many = typing.get_origin(inner) in _MANY or inner in _MANY
@@ -76,6 +78,10 @@ class Endpoint:
     3. 名字是 ``body`` —— JSON 请求体（注解为 ``bytes`` 时是原始字节）；
     4. 其余 —— 查询参数，有默认值即可选，注解是 ``list[...]`` 之类时取全部同名值。
 
+    WebSocket 接口（:func:`~canary_framework.web.asgi.app.websocket` 标记的）同样绑定路径参数与
+    查询参数；注解是 :class:`WebSocket` 的形参是连接本身。它必须是 ``async def``，不能有
+    ``body`` 或 ``Request`` 形参，返回值被忽略。
+
     没有注解的形参按 ``str``。校验交给 pydantic（请求体按它的 JSON 模式，直接校验原始字节）；
     失败时应答 422，``detail`` 是错误列表。
 
@@ -84,7 +90,7 @@ class Endpoint:
 
     建好之后它也是这个接口的一份只读描述，供生成文档、导出客户端之类的用途读取。
 
-    :ivar method: HTTP 方法，大写。
+    :ivar method: HTTP 方法，大写；WebSocket 接口是 ``"WEBSOCKET"``。
     :ivar path: 完整的路径模板，已带上逐层叠加的前缀，如 ``/api/readers/{reader_id}``。
     :ivar status: 成功时的状态码。返回 ``None`` 而这里是 200 时，实际应答 204。
     :ivar call: 绑定方法本身。
@@ -92,7 +98,8 @@ class Endpoint:
     :ivar params: 形参，按签名的顺序，见 :class:`Param`。
     :ivar returns: 返回注解；没有写时是 ``Any``，``-> None`` 是 ``type(None)``。
     :raises DeclarationError: 签名无法绑定——``*args`` / ``**kwargs``、路径参数没有对应形参、
-        看起来是请求体的形参不叫 ``body``、注解无法解析或无法校验。
+        看起来是请求体的形参不叫 ``body``、注解无法解析或无法校验；WebSocket 接口不是
+        ``async def``、有 ``body`` 或 ``Request`` 形参，HTTP 接口有 ``WebSocket`` 形参。
     """
 
     __slots__ = (
@@ -116,6 +123,9 @@ class Endpoint:
         self.status = route.status
         self.name = where = getattr(call, "__qualname__", repr(call))
         self._awaits = inspect.iscoroutinefunction(call)
+        socket = route.method == WEBSOCKET
+        if socket and not self._awaits:
+            raise DeclarationError(f"{where}: a WebSocket endpoint must be 'async def'")
         try:
             hints = typing.get_type_hints(call)
         except Exception as exc:
@@ -128,6 +138,8 @@ class Endpoint:
             annotation = hints.get(name, Any if name == "body" else str)
             if annotation is Request:
                 source = "request"
+            elif annotation is WebSocket:
+                source = "websocket"
             elif name in path_names:
                 source = "path"
             elif name == "body":
@@ -140,6 +152,15 @@ class Endpoint:
                         f"Name the parameter 'body', or give it a scalar type to read it "
                         f"from the query string."
                     )
+            if socket and source in ("request", "body"):
+                raise DeclarationError(
+                    f"{where}: a WebSocket endpoint has no {source}; "
+                    f"read headers and messages from its WebSocket parameter"
+                )
+            if not socket and source == "websocket":
+                raise DeclarationError(
+                    f"{where}: only a @websocket endpoint can take a WebSocket parameter"
+                )
             params.append(Param(name, source, annotation, parameter.default, where))
         unbound = [name for name in path_names if name not in {p.name for p in params}]
         if unbound:
@@ -158,23 +179,41 @@ class Endpoint:
 
         :raises HTTPError: 422，校验失败。
         """
+        arguments = await self._bind(request)
+        if self._awaits:
+            result = await self.call(**arguments)
+        else:
+            result = await asyncio.to_thread(self.call, **arguments)
+        return respond(result, self.status, self._dump)
+
+    async def serve(self, socket: WebSocket) -> None:
+        """Bind and call a WebSocket endpoint.
+
+        绑定形参，调用 WebSocket 接口，直到它返回。
+
+        :raises HTTPError: 422，校验失败。
+        """
+        await self.call(**await self._bind(socket))
+
+    async def _bind(self, connection: Request | WebSocket) -> dict[str, Any]:
         arguments: dict[str, Any] = {}
         errors: list[dict[str, Any]] = []
         for param in self.params:
             source = param.source
-            if source == "request":
-                arguments[param.name] = request
+            if source in ("request", "websocket"):
+                arguments[param.name] = connection
                 continue
             if source == "body":
-                value: Any = await request.body()
+                assert isinstance(connection, Request)  # WebSocket 接口在建表时就拒绝了 body
+                value: Any = await connection.body()
                 absent = not value
                 if param._raw and not absent:
                     arguments[param.name] = value
                     continue
             elif source == "path":
-                value, absent = request.path_params[param.name], False
+                value, absent = connection.path_params[param.name], False
             else:
-                values = request.query.get(param.name)
+                values = connection.query.get(param.name)
                 absent = values is None
                 value = values if param._many else values[-1] if values else None
             if absent:
@@ -193,11 +232,7 @@ class Endpoint:
                     errors.append({"loc": loc, "msg": item["msg"], "type": item["type"]})
         if errors:
             raise HTTPError(422, errors)
-        if self._awaits:
-            result = await self.call(**arguments)
-        else:
-            result = await asyncio.to_thread(self.call, **arguments)
-        return respond(result, self.status, self._dump)
+        return arguments
 
 
 async def invoke(call: Callable[..., Any], /, *args: Any) -> Any:

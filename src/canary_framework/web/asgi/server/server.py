@@ -55,6 +55,9 @@ class Server(Canary):
         class Gateway(Server, timeout_graceful_shutdown=10, proxy_headers=True):
             api = dep(LibraryApi)
 
+    WebSocket 默认由 wsproto 实现（``ws="wsproto"``，随 ``canary-framework[server]`` 安装），
+    要换成别的实现用类参数 ``ws=...``。
+
     ``timeout_graceful_shutdown`` 值得设：不设时 ``@stop`` 会一直等到在途请求全部结束，一个
     不结束的长连接就能让停机卡住，排在它后面的依赖也得不到回收。
 
@@ -133,7 +136,9 @@ class Server(Canary):
         sock = self._socket = _bind(self.host, self.port)
         self._declared = self.port
         self.port = sock.getsockname()[1]
-        options = {"log_config": None, "lifespan": "off", **self.__canary_server__}
+        # WebSocket 默认用 wsproto：uvicorn 的 websockets-sansio 实现在应用以 HTTP 响应拒绝握手
+        # 时，误报一条 "ASGI callable returned without completing handshake." 的错误日志。
+        options = {"log_config": None, "lifespan": "off", "ws": "wsproto", **self.__canary_server__}
         server = self._uvicorn = _Uvicorn(uvicorn.Config(app, **options))
         serving = self._serving = asyncio.create_task(server.serve(sockets=[sock]))
         ready = asyncio.create_task(server.ready.wait())

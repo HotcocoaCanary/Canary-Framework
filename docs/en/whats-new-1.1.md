@@ -4,7 +4,7 @@
 `async with` work as before; two changes break code that drove the engine directly, and both
 are listed first. Everything else is behaviour you get for free.
 
-For the current release, see [What's New in 1.2](whats-new.md).
+For the current release, see [What's New in 1.3](whats-new.md).
 
 Coming from 1.0? Read the two breaking changes. Coming from 0.9.x? Start with
 [Upgrading from 0.9.x](upgrading-from-0.9.md); the [1.0 notes](whats-new-1.0.md) cover the

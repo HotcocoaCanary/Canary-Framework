@@ -38,6 +38,7 @@ LAYERS = {
     "web.asgi.server": 9,
     "web.asgi.app.http": 9,
     "web.asgi.app.routes": 10,
+    "web.asgi.app.websocket": 10,
     "web.asgi.app.binding": 11,
     "web.asgi.app.router": 12,
     "web.asgi.app.app": 13,

@@ -166,7 +166,10 @@ class Gateway(Server, timeout_graceful_shutdown=10, proxy_headers=True):
 地址用 `host` / `port` 类属性。`app`、`host`、`port`、`uds`、`fd`、`reload`、`workers` 在这里
 另有归属，不能作为类参数，传了会在定义类时抛出 `TypeError`。`lifespan` 默认是 `"off"`，见上文。
 
-WebSocket 需要另装一个实现（`websockets` 或 `wsproto`），uvicorn 本身不带。
+uvicorn 本身不带 WebSocket 实现，`canary-framework[server]` 一并装上 `wsproto`，服务器单元默认用它
+（`ws="wsproto"`）。没有选 uvicorn 在装了 `websockets` 时默认的 websockets-sansio：应用以 HTTP
+响应拒绝握手时（见 [Web 应用 › WebSocket](app.md#websocket)），它会误报一条 "ASGI callable
+returned without completing handshake." 错误日志。要换实现，写类参数 `ws=...`。
 
 ## 进程归 Canary
 

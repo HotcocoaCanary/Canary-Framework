@@ -5,7 +5,8 @@
 deprecated for at least one minor release first.
 
 Coming from 0.9.x? Start with [Upgrading from 0.9.x](upgrading-from-0.9.md). For what came
-after, see [What's New in 1.1](whats-new-1.1.md) and [What's New in 1.2](whats-new.md).
+after, see [What's New in 1.1](whats-new-1.1.md), [What's New in 1.2](whats-new-1.2.md) and
+[What's New in 1.3](whats-new.md).
 
 ## Replacing a dependency across the graph
 
