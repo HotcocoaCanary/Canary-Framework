@@ -4,6 +4,14 @@ This project follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-11-02
+
+Application units get WebSocket endpoints, written beside HTTP endpoints and bound the same
+way. Existing code needs no changes. See
+[What's New in 1.3](https://hotcocoacanary.github.io/Canary-Framework/whats-new/).
+
+应用单元支持 WebSocket 接口，和 HTTP 接口写在一起、按同样的方式绑定。已有代码不需要改动。
+
 ### Added
 
 - `web.asgi.app`: WebSocket endpoints. `@websocket("/{room}")` marks a method of a router or
