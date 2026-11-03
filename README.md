@@ -169,8 +169,8 @@ Extensions are provisional: their API may still change in a minor release.
 ## Stability
 
 1.0 is the first stable release. The public API follows
-[Semantic Versioning](https://hotcocoacanary.github.io/Canary-Framework/versioning/): no
-breaking changes before 2.0, and removals are deprecated for at least one minor release first.
+[Semantic Versioning](https://hotcocoacanary.github.io/Canary-Framework/versioning/): removals
+are deprecated for at least one minor release first.
 
 ## Documentation
 
